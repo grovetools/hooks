@@ -33,8 +33,10 @@ build:
 	@go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 test:
-	@echo "Running tests..."
+	@echo "Running unit tests..."
 	@go test -v ./...
+	@echo "Running E2E tests..."
+	@make test-e2e
 
 clean:
 	@echo "Cleaning..."
@@ -82,6 +84,17 @@ build-all:
 	@echo "Building for Darwin ARM64..."
 	@GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME)-darwin-arm64 .
 
+# --- E2E Testing ---
+# Build the custom tend binary for grove-hooks E2E tests.
+test-e2e-build:
+	@echo "Building E2E test binary $(E2E_BINARY_NAME)..."
+	@go build $(LDFLAGS) -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e
+
+# Run E2E tests. Depends on the main 'hooks' binary and the test runner.
+test-e2e: build test-e2e-build
+	@echo "Running E2E tests for hooks..."
+	@HOOKS_BINARY=$(abspath $(BIN_DIR)/$(BINARY_NAME)) $(BIN_DIR)/$(E2E_BINARY_NAME) run
+
 help:
 	@echo "Grove Hooks Makefile"
 	@echo "==================="
@@ -97,4 +110,6 @@ help:
 	@echo "  make check       - Run all checks (fmt, vet, lint, test)"
 	@echo "  make dev         - Build with race detector"
 	@echo "  make build-all   - Cross-compile for multiple platforms"
+	@echo "  make test-e2e-build   - Build the E2E test runner binary"
+	@echo "  make test-e2e    - Run E2E tests"
 	@echo "  make help        - Show this help"
