@@ -33,10 +33,8 @@ build:
 	@go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 test:
-	@echo "Running unit tests..."
+	@echo "Running tests..."
 	@go test -v ./...
-	@echo "Running E2E tests..."
-	@make test-e2e
 
 clean:
 	@echo "Cleaning..."
@@ -56,33 +54,39 @@ vet:
 
 lint:
 	@echo "Running linter..."
-	@if which golangci-lint > /dev/null; then \
-		golangci-lint run ./...; \
+	@if command -v golangci-lint > /dev/null; then \
+		golangci-lint run; \
 	else \
-		echo "golangci-lint not installed, skipping..."; \
+		echo "golangci-lint not installed. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
 	fi
 
+# Run the CLI
 run: build
-	@echo "Running $(BINARY_NAME)..."
-	@./$(BIN_DIR)/$(BINARY_NAME)
+	@$(BIN_DIR)/$(BINARY_NAME) $(ARGS)
 
+# Run all checks
 check: fmt vet lint test
 
-# Build with race detector for development
+# Development build with race detector
 dev:
 	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) with race detector..."
 	@go build -race $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
-# Cross-compile for multiple platforms
+# Cross-compilation targets
+PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+DIST_DIR ?= dist
+
 build-all:
-	@mkdir -p $(BIN_DIR)
-	@echo "Building for Linux AMD64..."
-	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME)-linux-amd64 .
-	@echo "Building for Darwin AMD64..."
-	@GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME)-darwin-amd64 .
-	@echo "Building for Darwin ARM64..."
-	@GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME)-darwin-arm64 .
+	@echo "Building for multiple platforms into $(DIST_DIR)..."
+	@mkdir -p $(DIST_DIR)
+	@for platform in $(PLATFORMS); do \
+		os=$$(echo $$platform | cut -d'/' -f1); \
+		arch=$$(echo $$platform | cut -d'/' -f2); \
+		output_name="$(BINARY_NAME)-$${os}-$${arch}"; \
+		echo "  -> Building $${output_name} version $(VERSION)"; \
+		GOOS=$$os GOARCH=$$arch go build $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
+	done
 
 # --- E2E Testing ---
 # Build the custom tend binary for grove-hooks E2E tests.
@@ -91,25 +95,23 @@ test-e2e-build:
 	@go build $(LDFLAGS) -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e
 
 # Run E2E tests. Depends on the main 'hooks' binary and the test runner.
+# Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
 test-e2e: build test-e2e-build
-	@echo "Running E2E tests for hooks..."
+	@echo "Running E2E tests..."
 	@CANOPY_API_URL=http://test-not-running:8888 HOOKS_BINARY=$(abspath $(BIN_DIR)/$(BINARY_NAME)) $(BIN_DIR)/$(E2E_BINARY_NAME) run
 
+# Show available targets
 help:
-	@echo "Grove Hooks Makefile"
-	@echo "==================="
-	@echo ""
 	@echo "Available targets:"
 	@echo "  make build       - Build the binary"
 	@echo "  make test        - Run tests"
 	@echo "  make clean       - Clean build artifacts"
 	@echo "  make fmt         - Format code"
 	@echo "  make vet         - Run go vet"
-	@echo "  make lint        - Run linter (if available)"
-	@echo "  make run         - Build and run the binary"
-	@echo "  make check       - Run all checks (fmt, vet, lint, test)"
+	@echo "  make lint        - Run linter"
+	@echo "  make run ARGS=.. - Run the CLI with arguments"
+	@echo "  make check       - Run all checks"
 	@echo "  make dev         - Build with race detector"
-	@echo "  make build-all   - Cross-compile for multiple platforms"
+	@echo "  make build-all   - Build for multiple platforms"
 	@echo "  make test-e2e-build   - Build the E2E test runner binary"
-	@echo "  make test-e2e    - Run E2E tests"
-	@echo "  make help        - Show this help"
+	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i hooks-basic-generation\")"
