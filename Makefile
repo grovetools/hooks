@@ -93,7 +93,7 @@ test-e2e-build:
 # Run E2E tests. Depends on the main 'hooks' binary and the test runner.
 test-e2e: build test-e2e-build
 	@echo "Running E2E tests for hooks..."
-	@HOOKS_BINARY=$(abspath $(BIN_DIR)/$(BINARY_NAME)) $(BIN_DIR)/$(E2E_BINARY_NAME) run
+	@CANOPY_API_URL=http://test-not-running:8888 HOOKS_BINARY=$(abspath $(BIN_DIR)/$(BINARY_NAME)) $(BIN_DIR)/$(E2E_BINARY_NAME) run
 
 help:
 	@echo "Grove Hooks Makefile"

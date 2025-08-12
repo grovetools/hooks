@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/command"
@@ -21,7 +22,9 @@ func HooksDirectExecutionScenario() *harness.Scenario {
 					return fmt.Errorf("HOOKS_BINARY environment variable not set")
 				}
 				
-				cmd := command.New(hooksBinary, "pretooluse")
+				// Pretooluse expects JSON input
+				jsonInput := `{"session_id":"test-session","tool_name":"test","tool_input":{}}`
+				cmd := command.New(hooksBinary, "pretooluse").Stdin(strings.NewReader(jsonInput))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -29,11 +32,13 @@ func HooksDirectExecutionScenario() *harness.Scenario {
 					return err
 				}
 				
-				return assert.Contains(result.Stdout, "Running pre-tool-use hook", "Should output pre-tool-use message")
+				return assert.Contains(result.Stdout, `"approved":true`, "Should approve the tool use")
 			}),
 			harness.NewStep("Run 'hooks posttooluse' command", func(ctx *harness.Context) error {
 				hooksBinary := os.Getenv("HOOKS_BINARY")
-				cmd := command.New(hooksBinary, "posttooluse")
+				// Posttooluse expects JSON input
+				jsonInput := `{"session_id":"test-session","tool_name":"test","tool_output":"test output"}`
+				cmd := command.New(hooksBinary, "posttooluse").Stdin(strings.NewReader(jsonInput))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -41,31 +46,38 @@ func HooksDirectExecutionScenario() *harness.Scenario {
 					return err
 				}
 				
-				return assert.Contains(result.Stdout, "Running post-tool-use hook", "Should output post-tool-use message")
+				// Posttooluse doesn't output anything on success
+				return nil
 			}),
-			harness.NewStep("Run 'hooks init' command", func(ctx *harness.Context) error {
+			harness.NewStep("Run 'hooks notification' command", func(ctx *harness.Context) error {
 				hooksBinary := os.Getenv("HOOKS_BINARY")
-				cmd := command.New(hooksBinary, "init")
+				// Notification hook expects JSON input  
+				jsonInput := `{"message":"Test notification","level":"info"}`
+				cmd := command.New(hooksBinary, "notification").Stdin(strings.NewReader(jsonInput))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
-				if err := assert.Equal(0, result.ExitCode, "hooks init should exit successfully"); err != nil {
+				if err := assert.Equal(0, result.ExitCode, "hooks notification should exit successfully"); err != nil {
 					return err
 				}
 				
-				return assert.Contains(result.Stdout, "Running initialization hook", "Should output init message")
+				// Notification hook doesn't output anything on success
+				return nil
 			}),
-			harness.NewStep("Run 'hooks complete' command", func(ctx *harness.Context) error {
+			harness.NewStep("Run 'hooks stop' command", func(ctx *harness.Context) error {
 				hooksBinary := os.Getenv("HOOKS_BINARY")
-				cmd := command.New(hooksBinary, "complete")
+				// Stop hook expects JSON input
+				jsonInput := `{"session_id":"test-session","exit_reason":"completed"}`
+				cmd := command.New(hooksBinary, "stop").Stdin(strings.NewReader(jsonInput))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
-				if err := assert.Equal(0, result.ExitCode, "hooks complete should exit successfully"); err != nil {
+				if err := assert.Equal(0, result.ExitCode, "hooks stop should exit successfully"); err != nil {
 					return err
 				}
 				
-				return assert.Contains(result.Stdout, "Running completion hook", "Should output completion message")
+				// Stop hook doesn't output anything on success
+				return nil
 			}),
 		},
 	}
@@ -92,7 +104,7 @@ func HooksSymlinkExecutionScenario() *harness.Scenario {
 				}
 				
 				// Create symlinks for each hook
-				hooks := []string{"pretooluse", "posttooluse", "init", "complete"}
+				hooks := []string{"pretooluse", "posttooluse", "notification", "stop"}
 				for _, hook := range hooks {
 					symlinkPath := filepath.Join(symlinkDir, hook)
 					if err := os.Symlink(hooksBinary, symlinkPath); err != nil {
@@ -106,7 +118,8 @@ func HooksSymlinkExecutionScenario() *harness.Scenario {
 				symlinkDir := ctx.GetString("symlink_dir")
 				pretooluse := filepath.Join(symlinkDir, "pretooluse")
 				
-				cmd := command.New(pretooluse)
+				jsonInput := `{"session_id":"test-session","tool_name":"test","tool_input":{}}`
+				cmd := command.New(pretooluse).Stdin(strings.NewReader(jsonInput))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -114,13 +127,14 @@ func HooksSymlinkExecutionScenario() *harness.Scenario {
 					return err
 				}
 				
-				return assert.Contains(result.Stdout, "Running pre-tool-use hook", "Should run pre-tool-use hook via symlink")
+				return assert.Contains(result.Stdout, `"approved":true`, "Should approve tool use via symlink")
 			}),
 			harness.NewStep("Execute posttooluse via symlink", func(ctx *harness.Context) error {
 				symlinkDir := ctx.GetString("symlink_dir")
 				posttooluse := filepath.Join(symlinkDir, "posttooluse")
 				
-				cmd := command.New(posttooluse)
+				jsonInput := `{"session_id":"test-session","tool_name":"test","tool_output":"test output"}`
+				cmd := command.New(posttooluse).Stdin(strings.NewReader(jsonInput))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -128,35 +142,37 @@ func HooksSymlinkExecutionScenario() *harness.Scenario {
 					return err
 				}
 				
-				return assert.Contains(result.Stdout, "Running post-tool-use hook", "Should run post-tool-use hook via symlink")
+				return nil
 			}),
-			harness.NewStep("Execute init via symlink", func(ctx *harness.Context) error {
+			harness.NewStep("Execute notification via symlink", func(ctx *harness.Context) error {
 				symlinkDir := ctx.GetString("symlink_dir")
-				initHook := filepath.Join(symlinkDir, "init")
+				notification := filepath.Join(symlinkDir, "notification")
 				
-				cmd := command.New(initHook)
+				jsonInput := `{"message":"Test notification","level":"info"}`
+				cmd := command.New(notification).Stdin(strings.NewReader(jsonInput))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
-				if err := assert.Equal(0, result.ExitCode, "init symlink should exit successfully"); err != nil {
+				if err := assert.Equal(0, result.ExitCode, "notification symlink should exit successfully"); err != nil {
 					return err
 				}
 				
-				return assert.Contains(result.Stdout, "Running initialization hook", "Should run init hook via symlink")
+				return nil
 			}),
-			harness.NewStep("Execute complete via symlink", func(ctx *harness.Context) error {
+			harness.NewStep("Execute stop via symlink", func(ctx *harness.Context) error {
 				symlinkDir := ctx.GetString("symlink_dir")
-				complete := filepath.Join(symlinkDir, "complete")
+				stop := filepath.Join(symlinkDir, "stop")
 				
-				cmd := command.New(complete)
+				jsonInput := `{"session_id":"test-session","exit_reason":"completed"}`
+				cmd := command.New(stop).Stdin(strings.NewReader(jsonInput))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
-				if err := assert.Equal(0, result.ExitCode, "complete symlink should exit successfully"); err != nil {
+				if err := assert.Equal(0, result.ExitCode, "stop symlink should exit successfully"); err != nil {
 					return err
 				}
 				
-				return assert.Contains(result.Stdout, "Running completion hook", "Should run completion hook via symlink")
+				return nil
 			}),
 		},
 	}

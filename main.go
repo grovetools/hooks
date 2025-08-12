@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-hooks/internal/hooks"
 	"github.com/spf13/cobra"
 )
 
@@ -19,21 +20,24 @@ func main() {
 	// If called directly as 'hooks', show help
 	if execName == "hooks" {
 		// Add subcommands for manual execution
+		rootCmd.AddCommand(newNotificationCmd())
 		rootCmd.AddCommand(newPreToolUseCmd())
 		rootCmd.AddCommand(newPostToolUseCmd())
-		rootCmd.AddCommand(newInitCmd())
-		rootCmd.AddCommand(newCompleteCmd())
+		rootCmd.AddCommand(newStopCmd())
+		rootCmd.AddCommand(newSubagentStopCmd())
 	} else {
 		// Called via symlink, execute the corresponding hook
 		switch execName {
-		case "pretooluse":
+		case "notification":
+			runNotificationHook()
+		case "pretooluse", "pre-tool-use":
 			runPreToolUseHook()
-		case "posttooluse":
+		case "posttooluse", "post-tool-use":
 			runPostToolUseHook()
-		case "init":
-			runInitHook()
-		case "complete":
-			runCompleteHook()
+		case "stop", "complete":
+			runStopHook()
+		case "subagent-stop":
+			runSubagentStopHook()
 		default:
 			rootCmd.Printf("Unknown hook: %s\n", execName)
 			os.Exit(1)
@@ -66,42 +70,52 @@ func newPostToolUseCmd() *cobra.Command {
 	}
 }
 
-func newInitCmd() *cobra.Command {
+func newNotificationCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "init",
-		Short: "Run the initialization hook",
+		Use:   "notification",
+		Short: "Run the notification hook",
 		Run: func(cmd *cobra.Command, args []string) {
-			runInitHook()
+			runNotificationHook()
 		},
 	}
 }
 
-func newCompleteCmd() *cobra.Command {
+func newStopCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "complete",
-		Short: "Run the completion hook",
+		Use:   "stop",
+		Short: "Run the stop hook",
 		Run: func(cmd *cobra.Command, args []string) {
-			runCompleteHook()
+			runStopHook()
+		},
+	}
+}
+
+func newSubagentStopCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "subagent-stop",
+		Short: "Run the subagent stop hook",
+		Run: func(cmd *cobra.Command, args []string) {
+			runSubagentStopHook()
 		},
 	}
 }
 
 func runPreToolUseHook() {
-	// TODO: Implement pre-tool-use hook logic
-	os.Stdout.WriteString("Running pre-tool-use hook...\n")
+	hooks.RunPreToolUseHook()
 }
 
 func runPostToolUseHook() {
-	// TODO: Implement post-tool-use hook logic
-	os.Stdout.WriteString("Running post-tool-use hook...\n")
+	hooks.RunPostToolUseHook()
 }
 
-func runInitHook() {
-	// TODO: Implement initialization hook logic
-	os.Stdout.WriteString("Running initialization hook...\n")
+func runNotificationHook() {
+	hooks.RunNotificationHook()
 }
 
-func runCompleteHook() {
-	// TODO: Implement completion hook logic
-	os.Stdout.WriteString("Running completion hook...\n")
+func runStopHook() {
+	hooks.RunStopHook()
+}
+
+func runSubagentStopHook() {
+	hooks.RunSubagentStopHook()
 }
