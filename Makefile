@@ -1,7 +1,7 @@
 # Makefile for grove-hooks (hooks)
 
 BINARY_NAME=hooks
-E2E_BINARY_NAME=tend-hooks
+E2E_BINARY_NAME=tend
 BIN_DIR=bin
 VERSION_PKG=github.com/mattsolo1/grove-core/version
 
@@ -98,7 +98,7 @@ test-e2e-build:
 # Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
 test-e2e: build test-e2e-build
 	@echo "Running E2E tests..."
-	@CANOPY_API_URL=http://test-not-running:8888 HOOKS_BINARY=$(abspath $(BIN_DIR)/$(BINARY_NAME)) $(BIN_DIR)/$(E2E_BINARY_NAME) run
+	@CANOPY_API_URL=http://test-not-running:8888 $(BIN_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
 
 # Show available targets
 help:

@@ -17,9 +17,9 @@ func HooksDirectExecutionScenario() *harness.Scenario {
 		Name: "hooks-direct-execution",
 		Steps: []harness.Step{
 			harness.NewStep("Run 'hooks pretooluse' command", func(ctx *harness.Context) error {
-				hooksBinary := os.Getenv("HOOKS_BINARY")
-				if hooksBinary == "" {
-					return fmt.Errorf("HOOKS_BINARY environment variable not set")
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
 				}
 				
 				// Pretooluse expects JSON input
@@ -35,7 +35,10 @@ func HooksDirectExecutionScenario() *harness.Scenario {
 				return assert.Contains(result.Stdout, `"approved":true`, "Should approve the tool use")
 			}),
 			harness.NewStep("Run 'hooks posttooluse' command", func(ctx *harness.Context) error {
-				hooksBinary := os.Getenv("HOOKS_BINARY")
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
+				}
 				// Posttooluse expects JSON input
 				jsonInput := `{"session_id":"test-session","tool_name":"test","tool_output":"test output"}`
 				cmd := command.New(hooksBinary, "posttooluse").Stdin(strings.NewReader(jsonInput))
@@ -50,7 +53,10 @@ func HooksDirectExecutionScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Run 'hooks notification' command", func(ctx *harness.Context) error {
-				hooksBinary := os.Getenv("HOOKS_BINARY")
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
+				}
 				// Notification hook expects JSON input  
 				jsonInput := `{"message":"Test notification","level":"info"}`
 				cmd := command.New(hooksBinary, "notification").Stdin(strings.NewReader(jsonInput))
@@ -65,7 +71,10 @@ func HooksDirectExecutionScenario() *harness.Scenario {
 				return nil
 			}),
 			harness.NewStep("Run 'hooks stop' command", func(ctx *harness.Context) error {
-				hooksBinary := os.Getenv("HOOKS_BINARY")
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
+				}
 				// Stop hook expects JSON input
 				jsonInput := `{"session_id":"test-session","exit_reason":"completed"}`
 				cmd := command.New(hooksBinary, "stop").Stdin(strings.NewReader(jsonInput))
@@ -89,9 +98,9 @@ func HooksSymlinkExecutionScenario() *harness.Scenario {
 		Name: "hooks-symlink-execution",
 		Steps: []harness.Step{
 			harness.NewStep("Create symlinks for hooks", func(ctx *harness.Context) error {
-				hooksBinary := os.Getenv("HOOKS_BINARY")
-				if hooksBinary == "" {
-					return fmt.Errorf("HOOKS_BINARY environment variable not set")
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
 				}
 				
 				// Create symlinks in a temporary directory

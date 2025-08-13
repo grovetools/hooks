@@ -54,6 +54,4 @@ jobs:
       - name: Run E2E tests
         run: |
           make test-e2e
-        env:
-          CX_BINARY: ${{ github.workspace }}/bin/hooks
 
