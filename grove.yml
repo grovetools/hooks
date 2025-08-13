@@ -3,4 +3,3 @@ description: Claude hooks integration for Grove ecosystem
 binary:
   name: hooks
   path: ./bin/hooks
-EOF < /dev/null
