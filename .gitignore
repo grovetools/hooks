@@ -47,3 +47,5 @@ config.local.yaml
 # Hook-specific files
 logs/
 *.jsonl
+
+.grove

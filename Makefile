@@ -1,6 +1,6 @@
 # Makefile for grove-hooks (hooks)
 
-BINARY_NAME=hooks
+BINARY_NAME=grove-hooks
 E2E_BINARY_NAME=tend
 BIN_DIR=bin
 VERSION_PKG=github.com/mattsolo1/grove-core/version
