@@ -110,9 +110,43 @@ func newSessionsListCmd() *cobra.Command {
 			
 			// Output results
 			if jsonOutput {
+				// Enhance sessions with state duration info
+				type SessionWithStateDuration struct {
+					*models.Session
+					StateDuration string `json:"state_duration"`
+					StateDurationSeconds int64 `json:"state_duration_seconds"`
+				}
+				
+				enhancedSessions := make([]SessionWithStateDuration, len(sessions))
+				now := time.Now()
+				
+				for i, s := range sessions {
+					enhanced := SessionWithStateDuration{Session: s}
+					
+					// Calculate time in current state
+					if s.Status == "running" || s.Status == "idle" {
+						// For active sessions, time since last activity
+						duration := now.Sub(s.LastActivity)
+						enhanced.StateDuration = duration.Round(time.Second).String()
+						enhanced.StateDurationSeconds = int64(duration.Seconds())
+					} else if s.EndedAt != nil {
+						// For completed sessions, show how long they ran
+						duration := s.EndedAt.Sub(s.StartedAt)
+						enhanced.StateDuration = duration.Round(time.Second).String()
+						enhanced.StateDurationSeconds = int64(duration.Seconds())
+					} else {
+						// Fallback to time since started
+						duration := now.Sub(s.StartedAt)
+						enhanced.StateDuration = duration.Round(time.Second).String()
+						enhanced.StateDurationSeconds = int64(duration.Seconds())
+					}
+					
+					enhancedSessions[i] = enhanced
+				}
+				
 				encoder := json.NewEncoder(os.Stdout)
 				encoder.SetIndent("", "  ")
-				return encoder.Encode(sessions)
+				return encoder.Encode(enhancedSessions)
 			}
 			
 			// Table output
