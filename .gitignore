@@ -49,3 +49,4 @@ logs/
 *.jsonl
 
 .grove
+.grove-worktrees
