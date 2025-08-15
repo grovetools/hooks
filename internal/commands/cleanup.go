@@ -99,25 +99,36 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	now := time.Now()
 	
 	for _, session := range sessions {
-		// Only check running or idle sessions
-		if session.Status != "running" && session.Status != "idle" {
-			continue
-		}
-
-		// Check if session has been inactive for too long
-		timeSinceActivity := now.Sub(session.LastActivity)
-		if timeSinceActivity > inactivityThreshold {
-			// Mark session as completed due to inactivity
-			if err := storage.UpdateSessionStatus(session.ID, "completed"); err != nil {
-				// Log error but continue
-				fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
+		// For running/idle sessions, check if still active
+		if session.Status == "running" || session.Status == "idle" {
+			// First check if process is dead (quick check)
+			if session.PID > 0 && !isProcessAlive(session.PID) {
+				// Mark session as completed
+				if err := storage.UpdateSessionStatus(session.ID, "completed"); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
+					continue
+				}
+				cleaned++
+				
+				if os.Getenv("GROVE_DEBUG") != "" {
+					fmt.Printf("Cleaned up session %s (PID %d was dead)\n", session.ID, session.PID)
+				}
 				continue
 			}
-			cleaned++
 			
-			// Debug logging
-			if os.Getenv("GROVE_DEBUG") != "" {
-				fmt.Printf("Cleaned up inactive session %s (inactive for %v)\n", session.ID, timeSinceActivity)
+			// Then check if session has been inactive for too long
+			timeSinceActivity := now.Sub(session.LastActivity)
+			if timeSinceActivity > inactivityThreshold {
+				// Mark session as completed due to inactivity
+				if err := storage.UpdateSessionStatus(session.ID, "completed"); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
+					continue
+				}
+				cleaned++
+				
+				if os.Getenv("GROVE_DEBUG") != "" {
+					fmt.Printf("Cleaned up inactive session %s (inactive for %v)\n", session.ID, timeSinceActivity)
+				}
 			}
 		}
 	}
