@@ -19,6 +19,8 @@ import (
 )
 
 func NewBrowseCmd() *cobra.Command {
+	var hideCompleted bool
+	
 	cmd := &cobra.Command{
 		Use:     "browse",
 		Aliases: []string{"b"},
@@ -41,13 +43,33 @@ func NewBrowseCmd() *cobra.Command {
 				return fmt.Errorf("failed to get sessions: %w", err)
 			}
 
+			// Filter out completed sessions if requested
+			if hideCompleted {
+				var filtered []*models.Session
+				for _, s := range sessions {
+					if s.Status != "completed" && s.Status != "failed" && s.Status != "error" {
+						filtered = append(filtered, s)
+					}
+				}
+				sessions = filtered
+			}
+
 			if len(sessions) == 0 {
 				fmt.Println("No sessions found.")
 				return nil
 			}
 
-			// Sort sessions by started_at desc (most recent first)
+			// Sort sessions: active sessions first, then by started_at desc
 			sort.Slice(sessions, func(i, j int) bool {
+				// Active sessions (running/idle) come first
+				iActive := sessions[i].Status == "running" || sessions[i].Status == "idle"
+				jActive := sessions[j].Status == "running" || sessions[j].Status == "idle"
+				
+				if iActive != jActive {
+					return iActive // true (active) comes before false (inactive)
+				}
+				
+				// Within same status group, sort by most recent first
 				return sessions[i].StartedAt.After(sessions[j].StartedAt)
 			})
 
@@ -78,6 +100,8 @@ func NewBrowseCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&hideCompleted, "active", false, "Show only active sessions (hide completed/failed)")
+	
 	return cmd
 }
 
