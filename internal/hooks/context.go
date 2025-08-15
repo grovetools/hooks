@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-hooks/internal/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-tmux/pkg/tmux"
@@ -145,7 +146,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	now := time.Now()
 	session := &models.Session{
 		ID:               sessionID,
-		PID:              os.Getpid(),
+		PID:              process.GetClaudePID(), // Use parent/Claude PID instead of hook PID
 		Repo:             repo,
 		Branch:           gitBranch,
 		TmuxKey:          tmuxKey,

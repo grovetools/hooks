@@ -32,6 +32,9 @@ func NewBrowseCmd() *cobra.Command {
 			}
 			defer storage.(*disk.SQLiteStore).Close()
 
+			// Clean up dead sessions first
+			_, _ = CleanupDeadSessions(storage)
+
 			// Get all sessions
 			sessions, err := storage.GetAllSessions()
 			if err != nil {

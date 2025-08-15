@@ -21,6 +21,7 @@ func NewSessionsCmd() *cobra.Command {
 	cmd.AddCommand(newSessionsListCmd())
 	cmd.AddCommand(newSessionsGetCmd())
 	cmd.AddCommand(NewBrowseCmd())
+	cmd.AddCommand(NewCleanupCmd())
 	
 	return cmd
 }
@@ -30,6 +31,7 @@ func newSessionsListCmd() *cobra.Command {
 		statusFilter string
 		jsonOutput   bool
 		limit        int
+		hideCompleted bool
 	)
 	
 	cmd := &cobra.Command{
@@ -43,6 +45,9 @@ func newSessionsListCmd() *cobra.Command {
 			}
 			defer storage.(*disk.SQLiteStore).Close()
 			
+			// Clean up dead sessions first
+			_, _ = CleanupDeadSessions(storage)
+			
 			// Get all sessions
 			sessions, err := storage.GetAllSessions()
 			if err != nil {
@@ -54,6 +59,17 @@ func newSessionsListCmd() *cobra.Command {
 				var filtered []*models.Session
 				for _, s := range sessions {
 					if s.Status == statusFilter {
+						filtered = append(filtered, s)
+					}
+				}
+				sessions = filtered
+			}
+			
+			// Hide completed sessions if requested
+			if hideCompleted {
+				var filtered []*models.Session
+				for _, s := range sessions {
+					if s.Status != "completed" && s.Status != "failed" && s.Status != "error" {
 						filtered = append(filtered, s)
 					}
 				}
@@ -109,6 +125,7 @@ func newSessionsListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&statusFilter, "status", "s", "", "Filter by status (running, idle, completed, failed)")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().IntVarP(&limit, "limit", "l", 0, "Limit number of results")
+	cmd.Flags().BoolVar(&hideCompleted, "active", false, "Show only active sessions (hide completed/failed)")
 	
 	return cmd
 }
