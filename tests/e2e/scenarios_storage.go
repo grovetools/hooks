@@ -359,6 +359,71 @@ func SessionQueriesScenario() *harness.Scenario {
 	}
 }
 
+// SessionBrowseScenario tests the interactive browse command
+func SessionBrowseScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name: "session-browse",
+		Steps: []harness.Step{
+			harness.NewStep("Create test sessions for browsing", func(ctx *harness.Context) error {
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
+				}
+
+				// Create a few test sessions
+				for i := 1; i <= 3; i++ {
+					sessionID := fmt.Sprintf("browse-test-%d-%d", i, time.Now().Unix())
+					jsonInput := fmt.Sprintf(`{
+						"session_id": "%s",
+						"transcript_path": "/tmp/browse-test-%d.log",
+						"hook_event_name": "pretooluse",
+						"tool_name": "Test%d",
+						"tool_input": {"test": %d}
+					}`, sessionID, i, i, i)
+
+					cmd := command.New(hooksBinary, "pretooluse").Stdin(strings.NewReader(jsonInput))
+					result := cmd.Run()
+					if result.ExitCode != 0 {
+						return fmt.Errorf("failed to create test session %d: %s", i, result.Stderr)
+					}
+				}
+				return nil
+			}),
+			harness.NewStep("Verify browse command exists", func(ctx *harness.Context) error {
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
+				}
+
+				// Check that browse command is available
+				cmd := command.New(hooksBinary, "sessions", "browse", "--help")
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+				if err := assert.Equal(0, result.ExitCode, "browse help should succeed"); err != nil {
+					return err
+				}
+
+				// Check for expected help text
+				checks := []string{
+					"interactive terminal UI",
+					"search, and filter",
+					"Aliases:",
+					"browse, b",
+				}
+
+				for _, check := range checks {
+					if err := assert.Contains(result.Stdout, check, fmt.Sprintf("Help should contain '%s'", check)); err != nil {
+						return err
+					}
+				}
+
+				return nil
+			}),
+		},
+	}
+}
+
 // OfflineOperationScenario tests that hooks work without network/API access
 func OfflineOperationScenario() *harness.Scenario {
 	return &harness.Scenario{

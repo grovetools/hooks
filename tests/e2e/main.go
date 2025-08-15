@@ -15,6 +15,7 @@ func main() {
 		HooksSymlinkExecutionScenario(),
 		LocalStorageScenario(),
 		SessionQueriesScenario(),
+		SessionBrowseScenario(),
 		OfflineOperationScenario(),
 	}
 

@@ -20,6 +20,7 @@ func NewSessionsCmd() *cobra.Command {
 	
 	cmd.AddCommand(newSessionsListCmd())
 	cmd.AddCommand(newSessionsGetCmd())
+	cmd.AddCommand(NewBrowseCmd())
 	
 	return cmd
 }
