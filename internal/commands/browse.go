@@ -59,14 +59,26 @@ func NewBrowseCmd() *cobra.Command {
 				return nil
 			}
 
-			// Sort sessions: active sessions first, then by started_at desc
+			// Sort sessions: running first, then idle, then others by started_at desc
 			sort.Slice(sessions, func(i, j int) bool {
-				// Active sessions (running/idle) come first
-				iActive := sessions[i].Status == "running" || sessions[i].Status == "idle"
-				jActive := sessions[j].Status == "running" || sessions[j].Status == "idle"
+				// Define status priority: running=1, idle=2, others=3
+				iPriority := 3
+				if sessions[i].Status == "running" {
+					iPriority = 1
+				} else if sessions[i].Status == "idle" {
+					iPriority = 2
+				}
 				
-				if iActive != jActive {
-					return iActive // true (active) comes before false (inactive)
+				jPriority := 3
+				if sessions[j].Status == "running" {
+					jPriority = 1
+				} else if sessions[j].Status == "idle" {
+					jPriority = 2
+				}
+				
+				// Sort by priority first
+				if iPriority != jPriority {
+					return iPriority < jPriority
 				}
 				
 				// Within same status group, sort by most recent first
@@ -317,7 +329,7 @@ func (m browseModel) View() string {
 
 	// Table header
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ecdc4"))
-	b.WriteString(headerStyle.Render("STATUS     REPO               BRANCH     USER      STARTED              DURATION"))
+	b.WriteString(headerStyle.Render("STATUS     REPO               BRANCH     USER      STARTED              DURATION     IN STATE"))
 	b.WriteString("\n")
 
 	// Render visible sessions
@@ -334,6 +346,19 @@ func (m browseModel) View() string {
 			duration = time.Since(session.StartedAt).Round(time.Second).String()
 		}
 
+		// Calculate time in current state
+		inState := ""
+		if session.Status == "running" || session.Status == "idle" {
+			// For active sessions, time since last activity
+			inState = time.Since(session.LastActivity).Round(time.Second).String()
+		} else if session.EndedAt != nil {
+			// For completed sessions, show how long they ran
+			inState = session.EndedAt.Sub(session.StartedAt).Round(time.Second).String()
+		} else {
+			// Fallback to time since started
+			inState = time.Since(session.StartedAt).Round(time.Second).String()
+		}
+
 		// Status color
 		statusColor := "#808080"
 		switch session.Status {
@@ -348,13 +373,14 @@ func (m browseModel) View() string {
 		}
 
 		// Format the row
-		row := fmt.Sprintf("%-10s %-18s %-10s %-9s %-20s %s",
+		row := fmt.Sprintf("%-10s %-18s %-10s %-9s %-20s %-12s %s",
 			truncateStr(session.Status, 10),
 			truncateStr(session.Repo, 18),
 			truncateStr(session.Branch, 10),
 			truncateStr(session.User, 9),
 			session.StartedAt.Format("2006-01-02 15:04:05"),
-			truncateStr(duration, 20),
+			truncateStr(duration, 12),
+			truncateStr(inState, 15),
 		)
 
 		// Apply styling

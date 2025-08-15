@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"text/tabwriter"
 	"time"
 
@@ -76,6 +77,32 @@ func newSessionsListCmd() *cobra.Command {
 				sessions = filtered
 			}
 			
+			// Sort sessions: running first, then idle, then others by started_at desc
+			sort.Slice(sessions, func(i, j int) bool {
+				// Define status priority: running=1, idle=2, others=3
+				iPriority := 3
+				if sessions[i].Status == "running" {
+					iPriority = 1
+				} else if sessions[i].Status == "idle" {
+					iPriority = 2
+				}
+				
+				jPriority := 3
+				if sessions[j].Status == "running" {
+					jPriority = 1
+				} else if sessions[j].Status == "idle" {
+					jPriority = 2
+				}
+				
+				// Sort by priority first
+				if iPriority != jPriority {
+					return iPriority < jPriority
+				}
+				
+				// Within same status group, sort by most recent first
+				return sessions[i].StartedAt.After(sessions[j].StartedAt)
+			})
+			
 			// Apply limit
 			if limit > 0 && len(sessions) > limit {
 				sessions = sessions[:limit]
@@ -95,7 +122,7 @@ func newSessionsListCmd() *cobra.Command {
 			}
 			
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "SESSION ID\tSTATUS\tREPO\tBRANCH\tUSER\tSTARTED\tDURATION")
+			fmt.Fprintln(w, "SESSION ID\tSTATUS\tREPO\tBRANCH\tUSER\tSTARTED\tDURATION\tIN STATE")
 			
 			for _, s := range sessions {
 				duration := "running"
@@ -105,9 +132,22 @@ func newSessionsListCmd() *cobra.Command {
 					duration = "idle"
 				}
 				
+				// Calculate time in current state
+				inState := ""
+				if s.Status == "running" || s.Status == "idle" {
+					// For active sessions, time since last activity
+					inState = time.Since(s.LastActivity).Round(time.Second).String()
+				} else if s.EndedAt != nil {
+					// For completed sessions, show how long they ran
+					inState = s.EndedAt.Sub(s.StartedAt).Round(time.Second).String()
+				} else {
+					// Fallback to time since started
+					inState = time.Since(s.StartedAt).Round(time.Second).String()
+				}
+				
 				started := s.StartedAt.Format("2006-01-02 15:04:05")
 				
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					truncate(s.ID, 12),
 					s.Status,
 					s.Repo,
@@ -115,6 +155,7 @@ func newSessionsListCmd() *cobra.Command {
 					s.User,
 					started,
 					duration,
+					inState,
 				)
 			}
 			
