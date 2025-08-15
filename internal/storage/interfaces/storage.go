@@ -20,4 +20,7 @@ type SessionStorer interface {
 	
 	// Event tracking
 	LogEvent(sessionID string, event *models.Event) error
+	
+	// Archive management
+	ArchiveSessions(sessionIDs []string) error
 }

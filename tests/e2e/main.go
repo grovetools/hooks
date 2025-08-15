@@ -18,6 +18,10 @@ func main() {
 		SessionQueriesScenario(),
 		SessionBrowseScenario(),
 		OfflineOperationScenario(),
+		OneshotJobScenario(),
+		OneshotJobValidationScenario(),
+		// TODO: Fix MixedSessionTypesScenario - it's not properly isolating the test database
+		// MixedSessionTypesScenario(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {

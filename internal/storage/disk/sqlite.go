@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mattsolo1/grove-core/pkg/models"
@@ -126,8 +127,25 @@ func (s *SQLiteStore) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
 	`
 
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Add new columns for oneshot jobs, ignoring errors if they already exist
+	alterStatements := []string{
+		"ALTER TABLE sessions ADD COLUMN type TEXT DEFAULT 'claude_session'",
+		"ALTER TABLE sessions ADD COLUMN plan_name TEXT",
+		"ALTER TABLE sessions ADD COLUMN plan_directory TEXT",
+		"ALTER TABLE sessions ADD COLUMN job_title TEXT",
+		"ALTER TABLE sessions ADD COLUMN job_file_path TEXT",
+	}
+
+	// Execute each ALTER statement separately to tolerate existing columns
+	for _, stmt := range alterStatements {
+		s.db.Exec(stmt) // Ignore error if column already exists
+	}
+
+	return nil
 }
 
 // EnsureSessionExists creates or updates a session
@@ -151,23 +169,39 @@ func (s *SQLiteStore) EnsureSessionExists(session *models.Session) error {
 		sessionSummaryJSON = string(data)
 	}
 
+	// Set default type if not specified
+	sessionType := session.Type
+	if sessionType == "" {
+		sessionType = "claude_session"
+	}
+
 	query := `
 	INSERT INTO sessions (
-		id, pid, repo, branch, tmux_key, working_directory, user,
-		status, started_at, last_activity, is_test, tool_stats, session_summary
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		id, type, pid, repo, branch, tmux_key, working_directory, user,
+		status, started_at, last_activity, is_test, tool_stats, session_summary,
+		plan_name, plan_directory, job_title, job_file_path
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		status = excluded.status,
 		last_activity = excluded.last_activity,
 		tool_stats = excluded.tool_stats,
 		session_summary = excluded.session_summary,
-		updated_at = CURRENT_TIMESTAMP
+		updated_at = CURRENT_TIMESTAMP,
+		started_at = CASE
+			WHEN excluded.status = 'running' THEN excluded.started_at
+			ELSE sessions.started_at
+		END,
+		ended_at = CASE 
+			WHEN excluded.status = 'running' THEN NULL
+			ELSE sessions.ended_at
+		END
 	`
 
 	_, err := s.db.Exec(query,
-		session.ID, session.PID, session.Repo, session.Branch, session.TmuxKey,
+		session.ID, sessionType, session.PID, session.Repo, session.Branch, session.TmuxKey,
 		session.WorkingDirectory, session.User, session.Status, session.StartedAt,
 		session.LastActivity, session.IsTest, toolStatsJSON, sessionSummaryJSON,
+		session.PlanName, session.PlanDirectory, session.JobTitle, session.JobFilePath,
 	)
 
 	return err
@@ -176,9 +210,11 @@ func (s *SQLiteStore) EnsureSessionExists(session *models.Session) error {
 // GetSession retrieves a session by ID
 func (s *SQLiteStore) GetSession(sessionID string) (*models.Session, error) {
 	query := `
-	SELECT id, pid, repo, branch, tmux_key, working_directory, user,
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
 		status, started_at, ended_at, last_activity, is_test,
-		tool_stats, session_summary
+		tool_stats, session_summary,
+		COALESCE(plan_name, ''), COALESCE(plan_directory, ''), 
+		COALESCE(job_title, ''), COALESCE(job_file_path, '')
 	FROM sessions WHERE id = ?
 	`
 
@@ -187,10 +223,12 @@ func (s *SQLiteStore) GetSession(sessionID string) (*models.Session, error) {
 	var toolStatsJSON, sessionSummaryJSON string
 
 	err := s.db.QueryRow(query, sessionID).Scan(
-		&session.ID, &session.PID, &session.Repo, &session.Branch,
+		&session.ID, &session.Type, &session.PID, &session.Repo, &session.Branch,
 		&session.TmuxKey, &session.WorkingDirectory, &session.User,
 		&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
 		&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
+		&session.PlanName, &session.PlanDirectory, 
+		&session.JobTitle, &session.JobFilePath,
 	)
 
 	if err != nil {
@@ -227,9 +265,11 @@ func (s *SQLiteStore) GetSession(sessionID string) (*models.Session, error) {
 // GetAllSessions retrieves all sessions
 func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 	query := `
-	SELECT id, pid, repo, branch, tmux_key, working_directory, user,
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
 		status, started_at, ended_at, last_activity, is_test,
-		tool_stats, session_summary
+		tool_stats, session_summary,
+		COALESCE(plan_name, ''), COALESCE(plan_directory, ''), 
+		COALESCE(job_title, ''), COALESCE(job_file_path, '')
 	FROM sessions
 	WHERE is_deleted = 0
 	ORDER BY started_at DESC
@@ -248,10 +288,12 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 		var toolStatsJSON, sessionSummaryJSON string
 
 		err := rows.Scan(
-			&session.ID, &session.PID, &session.Repo, &session.Branch,
+			&session.ID, &session.Type, &session.PID, &session.Repo, &session.Branch,
 			&session.TmuxKey, &session.WorkingDirectory, &session.User,
 			&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
 			&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
+			&session.PlanName, &session.PlanDirectory, 
+			&session.JobTitle, &session.JobFilePath,
 		)
 		if err != nil {
 			return nil, err
@@ -487,6 +529,30 @@ func (s *SQLiteStore) LogEvent(sessionID string, event *models.Event) error {
 	`
 
 	_, err = s.db.Exec(query, sessionID, event.Type, string(event.Type), string(dataJSON))
+	return err
+}
+
+// ArchiveSessions archives multiple sessions by setting is_deleted flag
+func (s *SQLiteStore) ArchiveSessions(sessionIDs []string) error {
+	if len(sessionIDs) == 0 {
+		return nil
+	}
+
+	// Build placeholders for the query
+	placeholders := make([]string, len(sessionIDs))
+	args := make([]interface{}, len(sessionIDs))
+	for i, id := range sessionIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		UPDATE sessions 
+		SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP 
+		WHERE id IN (%s)
+	`, strings.Join(placeholders, ","))
+
+	_, err := s.db.Exec(query, args...)
 	return err
 }
 

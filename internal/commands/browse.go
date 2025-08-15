@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
+	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/spf13/cobra"
 )
 
@@ -86,7 +87,7 @@ func NewBrowseCmd() *cobra.Command {
 			})
 
 			// Create the interactive model
-			m := newBrowseModel(sessions)
+			m := newBrowseModel(sessions, storage)
 
 			// Run the interactive program
 			p := tea.NewProgram(m, tea.WithAltScreen())
@@ -98,13 +99,32 @@ func NewBrowseCmd() *cobra.Command {
 			// Check if a session was selected
 			if bm, ok := finalModel.(browseModel); ok && bm.selectedSession != nil {
 				// Output the selected session details
-				fmt.Printf("\nSelected Session: %s\n", bm.selectedSession.ID)
-				fmt.Printf("Status: %s\n", bm.selectedSession.Status)
-				fmt.Printf("Repository: %s\n", bm.selectedSession.Repo)
-				fmt.Printf("Branch: %s\n", bm.selectedSession.Branch)
-				fmt.Printf("Started: %s\n", bm.selectedSession.StartedAt.Format(time.RFC3339))
-				if bm.selectedSession.EndedAt != nil {
-					fmt.Printf("Duration: %s\n", bm.selectedSession.EndedAt.Sub(bm.selectedSession.StartedAt).Round(time.Second))
+				s := bm.selectedSession
+				fmt.Printf("\nSelected Session: %s\n", s.ID)
+				sessionType := s.Type
+				if sessionType == "" {
+					sessionType = "claude_session"
+				}
+				fmt.Printf("Type: %s\n", sessionType)
+				fmt.Printf("Status: %s\n", s.Status)
+				
+				if s.Type == "oneshot_job" {
+					// Oneshot job specific fields
+					if s.PlanName != "" {
+						fmt.Printf("Plan: %s\n", s.PlanName)
+					}
+					if s.JobTitle != "" {
+						fmt.Printf("Job Title: %s\n", s.JobTitle)
+					}
+				} else {
+					// Claude session specific fields
+					fmt.Printf("Repository: %s\n", s.Repo)
+					fmt.Printf("Branch: %s\n", s.Branch)
+				}
+				
+				fmt.Printf("Started: %s\n", s.StartedAt.Format(time.RFC3339))
+				if s.EndedAt != nil {
+					fmt.Printf("Duration: %s\n", s.EndedAt.Sub(s.StartedAt).Round(time.Second))
 				}
 			}
 
@@ -128,9 +148,11 @@ type browseModel struct {
 	height          int
 	statusFilter    string // "", "running", "idle", "completed", "failed"
 	showDetails     bool
+	selectedIDs     map[string]bool // Track multiple selections
+	storage         interfaces.SessionStorer
 }
 
-func newBrowseModel(sessions []*models.Session) browseModel {
+func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer) browseModel {
 	// Create text input for filtering
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter by repo, branch, user, or session ID..."
@@ -145,6 +167,8 @@ func newBrowseModel(sessions []*models.Session) browseModel {
 		cursor:       0,
 		statusFilter: "",
 		showDetails:  false,
+		selectedIDs:  make(map[string]bool),
+		storage:      storage,
 	}
 }
 
@@ -181,7 +205,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 
-		case tea.KeyEnter, tea.KeySpace:
+		case tea.KeyEnter:
 			if m.cursor < len(m.filtered) {
 				if m.showDetails {
 					// If showing details, enter exits
@@ -235,6 +259,52 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				os.WriteFile(filename, data, 0644)
 			}
 
+		case tea.KeySpace:
+			// Toggle selection on current session when not in details view
+			if m.cursor < len(m.filtered) && !m.showDetails {
+				session := m.filtered[m.cursor]
+				if m.selectedIDs[session.ID] {
+					delete(m.selectedIDs, session.ID)
+				} else {
+					m.selectedIDs[session.ID] = true
+				}
+				// Don't open details view when using space for selection
+				return m, nil
+			}
+
+		case tea.KeyCtrlA:
+			// Archive selected sessions
+			if len(m.selectedIDs) > 0 && !m.showDetails {
+				// Get list of selected IDs
+				sessionIDs := make([]string, 0, len(m.selectedIDs))
+				for id := range m.selectedIDs {
+					sessionIDs = append(sessionIDs, id)
+				}
+				
+				// Archive them
+				if err := m.storage.ArchiveSessions(sessionIDs); err == nil {
+					// Remove archived sessions from the lists
+					newSessions := []*models.Session{}
+					for _, s := range m.sessions {
+						if !m.selectedIDs[s.ID] {
+							newSessions = append(newSessions, s)
+						}
+					}
+					m.sessions = newSessions
+					
+					// Clear selections
+					m.selectedIDs = make(map[string]bool)
+					
+					// Update filtered list
+					m.updateFiltered()
+					
+					// Adjust cursor if needed
+					if m.cursor >= len(m.filtered) && m.cursor > 0 {
+						m.cursor = len(m.filtered) - 1
+					}
+				}
+			}
+
 		default:
 			if !m.showDetails {
 				// Update filter input
@@ -266,8 +336,10 @@ func (m *browseModel) updateFiltered() {
 
 		// Apply text filter if present
 		if filter != "" {
-			searchText := strings.ToLower(fmt.Sprintf("%s %s %s %s %s",
-				s.ID, s.Repo, s.Branch, s.User, s.WorkingDirectory))
+			// Include job-specific fields in search
+			searchText := strings.ToLower(fmt.Sprintf("%s %s %s %s %s %s %s %s",
+				s.ID, s.Repo, s.Branch, s.User, s.WorkingDirectory,
+				s.PlanName, s.JobTitle, s.JobFilePath))
 			if !strings.Contains(searchText, filter) {
 				continue
 			}
@@ -329,7 +401,7 @@ func (m browseModel) View() string {
 
 	// Table header
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ecdc4"))
-	b.WriteString(headerStyle.Render("STATUS     REPO               BRANCH     USER      STARTED              DURATION     IN STATE"))
+	b.WriteString(headerStyle.Render("TYPE  STATUS     CONTEXT                          USER      STARTED              DURATION     IN STATE"))
 	b.WriteString("\n")
 
 	// Render visible sessions
@@ -372,11 +444,34 @@ func (m browseModel) View() string {
 			statusColor = "#ff4444"
 		}
 
+		// Format context based on session type
+		context := ""
+		sessionType := "claude"
+		if session.Type == "oneshot_job" {
+			sessionType = "job"
+			if session.PlanName != "" {
+				context = session.PlanName
+			} else if session.JobTitle != "" {
+				context = session.JobTitle
+			} else {
+				context = "oneshot"
+			}
+		} else {
+			// Claude session
+			if session.Repo != "" && session.Branch != "" {
+				context = fmt.Sprintf("%s/%s", session.Repo, session.Branch)
+			} else if session.Repo != "" {
+				context = session.Repo
+			} else {
+				context = "n/a"
+			}
+		}
+
 		// Format the row
-		row := fmt.Sprintf("%-10s %-18s %-10s %-9s %-20s %-12s %s",
+		row := fmt.Sprintf("%-5s %-10s %-32s %-9s %-20s %-12s %s",
+			truncateStr(sessionType, 5),
 			truncateStr(session.Status, 10),
-			truncateStr(session.Repo, 18),
-			truncateStr(session.Branch, 10),
+			truncateStr(context, 32),
 			truncateStr(session.User, 9),
 			session.StartedAt.Format("2006-01-02 15:04:05"),
 			truncateStr(duration, 12),
@@ -384,25 +479,29 @@ func (m browseModel) View() string {
 		)
 
 		// Apply styling
-		if i == m.cursor {
-			// Highlight selected row
-			indicator := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#00ff00")).
-				Bold(true).
-				Render("▶ ")
-
-			rowStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(statusColor)).
-				Bold(true)
-
-			b.WriteString(indicator + rowStyle.Render(row))
+		var prefix string
+		isSelected := m.selectedIDs[session.ID]
+		isCursor := i == m.cursor
+		
+		// Build prefix based on selection and cursor state
+		if isSelected && isCursor {
+			prefix = "[*]▶ "
+		} else if isSelected {
+			prefix = "[*]  "
+		} else if isCursor {
+			prefix = "  ▶ "
 		} else {
-			// Normal row
-			rowStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(statusColor))
-
-			b.WriteString("  " + rowStyle.Render(row))
+			prefix = "     "
 		}
+		
+		rowStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(statusColor))
+		
+		if isCursor {
+			rowStyle = rowStyle.Bold(true)
+		}
+		
+		b.WriteString(prefix + rowStyle.Render(row))
 		b.WriteString("\n")
 	}
 
@@ -421,7 +520,12 @@ func (m browseModel) View() string {
 
 	// Help text
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-	b.WriteString("\n" + helpStyle.Render("↑/↓: navigate • enter: details • tab: filter status • ctrl+y: copy ID • ctrl+o: open dir • esc: quit"))
+	helpText := "↑/↓: navigate • enter: details • tab: filter • space: select • ctrl+a: archive"
+	if len(m.selectedIDs) > 0 {
+		helpText = fmt.Sprintf("%s (%d selected)", helpText, len(m.selectedIDs))
+	}
+	b.WriteString("\n" + helpStyle.Render(helpText))
+	b.WriteString("\n" + helpStyle.Render("ctrl+y: copy ID • ctrl+o: open dir • ctrl+j: export • esc: quit"))
 
 	return b.String()
 }
@@ -451,9 +555,33 @@ func (m browseModel) viewDetails() string {
 
 	// Basic info
 	addField("Session ID", s.ID)
+	sessionType := s.Type
+	if sessionType == "" {
+		sessionType = "claude_session"
+	}
+	addField("Type", sessionType)
 	addField("Status", s.Status, getStatusColor(s.Status))
-	addField("Repository", s.Repo)
-	addField("Branch", s.Branch)
+	
+	if s.Type == "oneshot_job" {
+		// Oneshot job specific fields
+		if s.PlanName != "" {
+			addField("Plan", s.PlanName)
+		}
+		if s.PlanDirectory != "" {
+			addField("Plan Directory", s.PlanDirectory)
+		}
+		if s.JobTitle != "" {
+			addField("Job Title", s.JobTitle)
+		}
+		if s.JobFilePath != "" {
+			addField("Job File", s.JobFilePath)
+		}
+	} else {
+		// Claude session specific fields
+		addField("Repository", s.Repo)
+		addField("Branch", s.Branch)
+	}
+	
 	addField("User", s.User)
 	addField("PID", fmt.Sprintf("%d", s.PID))
 	addField("Working Directory", s.WorkingDirectory)

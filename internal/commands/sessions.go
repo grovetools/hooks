@@ -156,7 +156,7 @@ func newSessionsListCmd() *cobra.Command {
 			}
 			
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "SESSION ID\tSTATUS\tREPO\tBRANCH\tUSER\tSTARTED\tDURATION\tIN STATE")
+			fmt.Fprintln(w, "SESSION ID\tTYPE\tSTATUS\tCONTEXT\tUSER\tSTARTED\tDURATION\tIN STATE")
 			
 			for _, s := range sessions {
 				duration := "running"
@@ -181,11 +181,50 @@ func newSessionsListCmd() *cobra.Command {
 				
 				started := s.StartedAt.Format("2006-01-02 15:04:05")
 				
+				// Format context based on session type
+				context := ""
+				sessionType := s.Type
+				if sessionType == "" {
+					sessionType = "claude"
+				}
+				if s.Type == "oneshot_job" {
+					sessionType = "job"
+					// For jobs, show repo/branch like Claude sessions
+					if s.Repo != "" && s.Branch != "" {
+						context = fmt.Sprintf("%s/%s", s.Repo, s.Branch)
+						// Optionally append title if it fits
+						if s.JobTitle != "" && len(context)+len(s.JobTitle)+3 <= 30 {
+							context = fmt.Sprintf("%s (%s)", context, s.JobTitle)
+						}
+					} else if s.Repo != "" {
+						context = s.Repo
+						if s.JobTitle != "" && len(context)+len(s.JobTitle)+3 <= 30 {
+							context = fmt.Sprintf("%s (%s)", context, s.JobTitle)
+						}
+					} else if s.JobTitle != "" {
+						// Fallback to title if no repo info
+						context = s.JobTitle
+					} else if s.PlanName != "" {
+						context = s.PlanName
+					} else {
+						context = "oneshot"
+					}
+				} else {
+					// Claude session
+					if s.Repo != "" && s.Branch != "" {
+						context = fmt.Sprintf("%s/%s", s.Repo, s.Branch)
+					} else if s.Repo != "" {
+						context = s.Repo
+					} else {
+						context = "n/a"
+					}
+				}
+				
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					truncate(s.ID, 12),
+					sessionType,
 					s.Status,
-					s.Repo,
-					s.Branch,
+					truncate(context, 30),
 					s.User,
 					started,
 					duration,
@@ -237,9 +276,33 @@ func newSessionsGetCmd() *cobra.Command {
 			
 			// Detailed text output
 			fmt.Printf("Session ID: %s\n", session.ID)
+			sessionType := session.Type
+			if sessionType == "" {
+				sessionType = "claude_session"
+			}
+			fmt.Printf("Type: %s\n", sessionType)
 			fmt.Printf("Status: %s\n", session.Status)
-			fmt.Printf("Repository: %s\n", session.Repo)
-			fmt.Printf("Branch: %s\n", session.Branch)
+			
+			if session.Type == "oneshot_job" {
+				// Oneshot job specific fields
+				if session.PlanName != "" {
+					fmt.Printf("Plan: %s\n", session.PlanName)
+				}
+				if session.PlanDirectory != "" {
+					fmt.Printf("Plan Directory: %s\n", session.PlanDirectory)
+				}
+				if session.JobTitle != "" {
+					fmt.Printf("Job Title: %s\n", session.JobTitle)
+				}
+				if session.JobFilePath != "" {
+					fmt.Printf("Job File: %s\n", session.JobFilePath)
+				}
+			} else {
+				// Claude session specific fields
+				fmt.Printf("Repository: %s\n", session.Repo)
+				fmt.Printf("Branch: %s\n", session.Branch)
+			}
+			
 			fmt.Printf("User: %s\n", session.User)
 			fmt.Printf("Working Directory: %s\n", session.WorkingDirectory)
 			fmt.Printf("PID: %d\n", session.PID)

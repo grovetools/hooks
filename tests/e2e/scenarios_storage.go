@@ -342,7 +342,7 @@ func SessionQueriesScenario() *harness.Scenario {
 				}
 
 				// Check for table headers (check for presence of key header words)
-				requiredHeaders := []string{"SESSION ID", "STATUS", "REPO", "BRANCH", "USER", "STARTED", "DURATION"}
+				requiredHeaders := []string{"SESSION ID", "TYPE", "STATUS", "CONTEXT", "USER", "STARTED", "DURATION", "IN STATE"}
 				for _, header := range requiredHeaders {
 					if err := assert.Contains(result.Stdout, header, fmt.Sprintf("Should contain header '%s'", header)); err != nil {
 						return err
