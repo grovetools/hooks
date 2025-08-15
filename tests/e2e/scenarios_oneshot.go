@@ -13,6 +13,16 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
 
+// TestExtendedSession represents a session with oneshot fields for testing
+type TestExtendedSession struct {
+	models.Session
+	Type          string `json:"type"`
+	PlanName      string `json:"plan_name"`
+	PlanDirectory string `json:"plan_directory"`
+	JobTitle      string `json:"job_title"`
+	JobFilePath   string `json:"job_file_path"`
+}
+
 // OneshotJobScenario tests the oneshot job tracking functionality
 func OneshotJobScenario() *harness.Scenario {
 	return &harness.Scenario{
@@ -65,7 +75,7 @@ func OneshotJobScenario() *harness.Scenario {
 					return err
 				}
 
-				var session models.Session
+				var session TestExtendedSession
 				if err := json.Unmarshal([]byte(result.Stdout), &session); err != nil {
 					return fmt.Errorf("failed to parse session JSON: %w", err)
 				}

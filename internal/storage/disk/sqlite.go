@@ -14,6 +14,42 @@ import (
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 )
 
+// ExtendedSession wraps the grove-core Session with oneshot-specific fields
+type ExtendedSession struct {
+	models.Session
+	Type          string `json:"type" db:"type"`
+	PlanName      string `json:"plan_name" db:"plan_name"`
+	PlanDirectory string `json:"plan_directory" db:"plan_directory"`
+	JobTitle      string `json:"job_title" db:"job_title"`
+	JobFilePath   string `json:"job_file_path" db:"job_file_path"`
+}
+
+// MarshalJSON implements custom JSON marshaling to include extended fields
+func (e *ExtendedSession) MarshalJSON() ([]byte, error) {
+	// Create a map with all fields
+	data := make(map[string]interface{})
+	
+	// Marshal the embedded Session to get its fields
+	sessionData, err := json.Marshal(e.Session)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Unmarshal into the map
+	if err := json.Unmarshal(sessionData, &data); err != nil {
+		return nil, err
+	}
+	
+	// Add extended fields
+	data["type"] = e.Type
+	data["plan_name"] = e.PlanName
+	data["plan_directory"] = e.PlanDirectory
+	data["job_title"] = e.JobTitle
+	data["job_file_path"] = e.JobFilePath
+	
+	return json.Marshal(data)
+}
+
 // SQLiteStore implements SessionStorer using SQLite
 type SQLiteStore struct {
 	db *sql.DB
@@ -138,6 +174,7 @@ func (s *SQLiteStore) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN plan_directory TEXT",
 		"ALTER TABLE sessions ADD COLUMN job_title TEXT",
 		"ALTER TABLE sessions ADD COLUMN job_file_path TEXT",
+		"ALTER TABLE sessions ADD COLUMN last_error TEXT",
 	}
 
 	// Execute each ALTER statement separately to tolerate existing columns
@@ -149,11 +186,33 @@ func (s *SQLiteStore) migrate() error {
 }
 
 // EnsureSessionExists creates or updates a session
-func (s *SQLiteStore) EnsureSessionExists(session *models.Session) error {
+func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
+	// Extract the base session
+	var baseSession *models.Session
+	var sessionType string = "claude_session"
+	var planName, planDirectory, jobTitle, jobFilePath string
+	
+	switch v := session.(type) {
+	case *models.Session:
+		baseSession = v
+	case *ExtendedSession:
+		baseSession = &v.Session
+		sessionType = v.Type
+		if sessionType == "" {
+			sessionType = "claude_session"
+		}
+		planName = v.PlanName
+		planDirectory = v.PlanDirectory
+		jobTitle = v.JobTitle
+		jobFilePath = v.JobFilePath
+	default:
+		return fmt.Errorf("unsupported session type: %T", session)
+	}
+	
 	// Marshal complex fields
 	toolStatsJSON := "{}"
-	if session.ToolStats != nil {
-		data, err := json.Marshal(session.ToolStats)
+	if baseSession.ToolStats != nil {
+		data, err := json.Marshal(baseSession.ToolStats)
 		if err != nil {
 			return fmt.Errorf("failed to marshal tool stats: %w", err)
 		}
@@ -161,18 +220,12 @@ func (s *SQLiteStore) EnsureSessionExists(session *models.Session) error {
 	}
 
 	sessionSummaryJSON := "{}"
-	if session.SessionSummary != nil {
-		data, err := json.Marshal(session.SessionSummary)
+	if baseSession.SessionSummary != nil {
+		data, err := json.Marshal(baseSession.SessionSummary)
 		if err != nil {
 			return fmt.Errorf("failed to marshal session summary: %w", err)
 		}
 		sessionSummaryJSON = string(data)
-	}
-
-	// Set default type if not specified
-	sessionType := session.Type
-	if sessionType == "" {
-		sessionType = "claude_session"
 	}
 
 	query := `
@@ -194,21 +247,25 @@ func (s *SQLiteStore) EnsureSessionExists(session *models.Session) error {
 		ended_at = CASE 
 			WHEN excluded.status = 'running' THEN NULL
 			ELSE sessions.ended_at
+		END,
+		last_error = CASE
+			WHEN excluded.status = 'running' THEN NULL
+			ELSE sessions.last_error
 		END
 	`
 
 	_, err := s.db.Exec(query,
-		session.ID, sessionType, session.PID, session.Repo, session.Branch, session.TmuxKey,
-		session.WorkingDirectory, session.User, session.Status, session.StartedAt,
-		session.LastActivity, session.IsTest, toolStatsJSON, sessionSummaryJSON,
-		session.PlanName, session.PlanDirectory, session.JobTitle, session.JobFilePath,
+		baseSession.ID, sessionType, baseSession.PID, baseSession.Repo, baseSession.Branch, baseSession.TmuxKey,
+		baseSession.WorkingDirectory, baseSession.User, baseSession.Status, baseSession.StartedAt,
+		baseSession.LastActivity, baseSession.IsTest, toolStatsJSON, sessionSummaryJSON,
+		planName, planDirectory, jobTitle, jobFilePath,
 	)
 
 	return err
 }
 
 // GetSession retrieves a session by ID
-func (s *SQLiteStore) GetSession(sessionID string) (*models.Session, error) {
+func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 	query := `
 	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
 		status, started_at, ended_at, last_activity, is_test,
@@ -218,7 +275,7 @@ func (s *SQLiteStore) GetSession(sessionID string) (*models.Session, error) {
 	FROM sessions WHERE id = ?
 	`
 
-	var session models.Session
+	var session ExtendedSession
 	var endedAt sql.NullTime
 	var toolStatsJSON, sessionSummaryJSON string
 
@@ -259,6 +316,7 @@ func (s *SQLiteStore) GetSession(sessionID string) (*models.Session, error) {
 		session.SessionSummary = &summary
 	}
 
+	// Return the extended session
 	return &session, nil
 }
 
@@ -339,6 +397,18 @@ func (s *SQLiteStore) UpdateSessionStatus(sessionID, status string) error {
 	}
 
 	_, err := s.db.Exec(query, status, sessionID)
+	return err
+}
+
+// UpdateSessionStatusWithError updates the status of a session with an optional error message
+func (s *SQLiteStore) UpdateSessionStatusWithError(sessionID, status string, errorMsg string) error {
+	query := `UPDATE sessions SET status = ?, last_error = ?, last_activity = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+	
+	if status == "completed" || status == "failed" || status == "error" {
+		query = `UPDATE sessions SET status = ?, last_error = ?, ended_at = CURRENT_TIMESTAMP, last_activity = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+	}
+
+	_, err := s.db.Exec(query, status, errorMsg, sessionID)
 	return err
 }
 

@@ -5,8 +5,8 @@ import "github.com/mattsolo1/grove-core/pkg/models"
 // SessionStorer defines the interface for session state persistence.
 type SessionStorer interface {
 	// Session management
-	EnsureSessionExists(session *models.Session) error
-	GetSession(sessionID string) (*models.Session, error)
+	EnsureSessionExists(session interface{}) error
+	GetSession(sessionID string) (interface{}, error)
 	GetAllSessions() ([]*models.Session, error)
 	UpdateSessionStatus(sessionID, status string) error
 	

@@ -159,16 +159,23 @@ func newSessionsListCmd() *cobra.Command {
 			fmt.Fprintln(w, "SESSION ID\tTYPE\tSTATUS\tCONTEXT\tUSER\tSTARTED\tDURATION\tIN STATE")
 			
 			for _, s := range sessions {
+				// Derive status for oneshot jobs based on ended_at
+				displayStatus := s.Status
+				if s.Type == "oneshot_job" && s.EndedAt == nil {
+					// For oneshot jobs, if ended_at is NULL, show as running
+					displayStatus = "running"
+				}
+				
 				duration := "running"
 				if s.EndedAt != nil {
 					duration = s.EndedAt.Sub(s.StartedAt).Round(time.Second).String()
-				} else if s.Status == "idle" {
+				} else if displayStatus == "idle" {
 					duration = "idle"
 				}
 				
 				// Calculate time in current state
 				inState := ""
-				if s.Status == "running" || s.Status == "idle" {
+				if displayStatus == "running" || displayStatus == "idle" {
 					// For active sessions, time since last activity
 					inState = time.Since(s.LastActivity).Round(time.Second).String()
 				} else if s.EndedAt != nil {
@@ -201,11 +208,15 @@ func newSessionsListCmd() *cobra.Command {
 						if s.JobTitle != "" && len(context)+len(s.JobTitle)+3 <= 30 {
 							context = fmt.Sprintf("%s (%s)", context, s.JobTitle)
 						}
-					} else if s.JobTitle != "" {
-						// Fallback to title if no repo info
-						context = s.JobTitle
 					} else if s.PlanName != "" {
+						// Show plan name when no repo info
 						context = s.PlanName
+						if s.JobTitle != "" && len(context)+len(s.JobTitle)+3 <= 30 {
+							context = fmt.Sprintf("%s (%s)", context, s.JobTitle)
+						}
+					} else if s.JobTitle != "" {
+						// Fallback to title alone
+						context = s.JobTitle
 					} else {
 						context = "oneshot"
 					}
@@ -223,7 +234,7 @@ func newSessionsListCmd() *cobra.Command {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					truncate(s.ID, 12),
 					sessionType,
-					s.Status,
+					displayStatus,
 					truncate(context, 30),
 					s.User,
 					started,
@@ -262,7 +273,7 @@ func newSessionsGetCmd() *cobra.Command {
 			defer storage.(*disk.SQLiteStore).Close()
 			
 			// Get session
-			session, err := storage.GetSession(sessionID)
+			sessionData, err := storage.GetSession(sessionID)
 			if err != nil {
 				return fmt.Errorf("failed to get session: %w", err)
 			}
@@ -271,59 +282,75 @@ func newSessionsGetCmd() *cobra.Command {
 			if jsonOutput {
 				encoder := json.NewEncoder(os.Stdout)
 				encoder.SetIndent("", "  ")
-				return encoder.Encode(session)
+				return encoder.Encode(sessionData)
+			}
+			
+			// Handle both regular and extended sessions
+			var baseSession *models.Session
+			var sessionType string = "claude_session"
+			var planName, planDirectory, jobTitle, jobFilePath string
+			
+			if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
+				baseSession = &extSession.Session
+				if extSession.Type != "" {
+					sessionType = extSession.Type
+				}
+				planName = extSession.PlanName
+				planDirectory = extSession.PlanDirectory
+				jobTitle = extSession.JobTitle
+				jobFilePath = extSession.JobFilePath
+			} else if session, ok := sessionData.(*models.Session); ok {
+				baseSession = session
+			} else {
+				return fmt.Errorf("unexpected session type: %T", sessionData)
 			}
 			
 			// Detailed text output
-			fmt.Printf("Session ID: %s\n", session.ID)
-			sessionType := session.Type
-			if sessionType == "" {
-				sessionType = "claude_session"
-			}
+			fmt.Printf("Session ID: %s\n", baseSession.ID)
 			fmt.Printf("Type: %s\n", sessionType)
-			fmt.Printf("Status: %s\n", session.Status)
+			fmt.Printf("Status: %s\n", baseSession.Status)
 			
-			if session.Type == "oneshot_job" {
+			if sessionType == "oneshot_job" {
 				// Oneshot job specific fields
-				if session.PlanName != "" {
-					fmt.Printf("Plan: %s\n", session.PlanName)
+				if planName != "" {
+					fmt.Printf("Plan: %s\n", planName)
 				}
-				if session.PlanDirectory != "" {
-					fmt.Printf("Plan Directory: %s\n", session.PlanDirectory)
+				if planDirectory != "" {
+					fmt.Printf("Plan Directory: %s\n", planDirectory)
 				}
-				if session.JobTitle != "" {
-					fmt.Printf("Job Title: %s\n", session.JobTitle)
+				if jobTitle != "" {
+					fmt.Printf("Job Title: %s\n", jobTitle)
 				}
-				if session.JobFilePath != "" {
-					fmt.Printf("Job File: %s\n", session.JobFilePath)
+				if jobFilePath != "" {
+					fmt.Printf("Job File: %s\n", jobFilePath)
 				}
 			} else {
 				// Claude session specific fields
-				fmt.Printf("Repository: %s\n", session.Repo)
-				fmt.Printf("Branch: %s\n", session.Branch)
+				fmt.Printf("Repository: %s\n", baseSession.Repo)
+				fmt.Printf("Branch: %s\n", baseSession.Branch)
 			}
 			
-			fmt.Printf("User: %s\n", session.User)
-			fmt.Printf("Working Directory: %s\n", session.WorkingDirectory)
-			fmt.Printf("PID: %d\n", session.PID)
-			fmt.Printf("Started: %s\n", session.StartedAt.Format(time.RFC3339))
+			fmt.Printf("User: %s\n", baseSession.User)
+			fmt.Printf("Working Directory: %s\n", baseSession.WorkingDirectory)
+			fmt.Printf("PID: %d\n", baseSession.PID)
+			fmt.Printf("Started: %s\n", baseSession.StartedAt.Format(time.RFC3339))
 			
-			if session.EndedAt != nil {
-				fmt.Printf("Ended: %s\n", session.EndedAt.Format(time.RFC3339))
-				fmt.Printf("Duration: %s\n", session.EndedAt.Sub(session.StartedAt).Round(time.Second))
+			if baseSession.EndedAt != nil {
+				fmt.Printf("Ended: %s\n", baseSession.EndedAt.Format(time.RFC3339))
+				fmt.Printf("Duration: %s\n", baseSession.EndedAt.Sub(baseSession.StartedAt).Round(time.Second))
 			}
 			
-			if session.TmuxKey != "" {
-				fmt.Printf("Tmux Key: %s\n", session.TmuxKey)
+			if baseSession.TmuxKey != "" {
+				fmt.Printf("Tmux Key: %s\n", baseSession.TmuxKey)
 			}
 			
-			if session.ToolStats != nil {
+			if baseSession.ToolStats != nil {
 				fmt.Printf("\nTool Statistics:\n")
-				fmt.Printf("  Total Calls: %d\n", session.ToolStats.TotalCalls)
-				fmt.Printf("  Bash Commands: %d\n", session.ToolStats.BashCommands)
-				fmt.Printf("  File Modifications: %d\n", session.ToolStats.FileModifications)
-				fmt.Printf("  File Reads: %d\n", session.ToolStats.FileReads)
-				fmt.Printf("  Search Operations: %d\n", session.ToolStats.SearchOperations)
+				fmt.Printf("  Total Calls: %d\n", baseSession.ToolStats.TotalCalls)
+				fmt.Printf("  Bash Commands: %d\n", baseSession.ToolStats.BashCommands)
+				fmt.Printf("  File Modifications: %d\n", baseSession.ToolStats.FileModifications)
+				fmt.Printf("  File Reads: %d\n", baseSession.ToolStats.FileReads)
+				fmt.Printf("  Search Operations: %d\n", baseSession.ToolStats.SearchOperations)
 			}
 			
 			return nil

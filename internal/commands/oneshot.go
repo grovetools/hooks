@@ -85,21 +85,23 @@ func newOneshotStartCmd() *cobra.Command {
 			// which isn't relevant for the hooks' session tracking.
 			status := "running"
 			
-			session := &models.Session{
-				ID:               data.JobID,
+			session := &disk.ExtendedSession{
+				Session: models.Session{
+					ID:               data.JobID,
+					PID:              os.Getpid(),
+					Repo:             data.Repository,
+					Branch:           data.Branch,
+					Status:           status,
+					StartedAt:        now,
+					LastActivity:     now,
+					User:             user,
+					WorkingDirectory: workingDir,
+				},
 				Type:             "oneshot_job",
-				PID:              os.Getpid(),
-				Repo:             data.Repository,
-				Branch:           data.Branch,
 				PlanName:         data.PlanName,
 				PlanDirectory:    data.PlanDirectory,
 				JobTitle:         data.JobTitle,
 				JobFilePath:      data.JobFilePath,
-				Status:           status,
-				StartedAt:        now,
-				LastActivity:     now,
-				User:             user,
-				WorkingDirectory: workingDir,
 			}
 
 			if err := storage.EnsureSessionExists(session); err != nil {
@@ -138,8 +140,8 @@ func newOneshotStopCmd() *cobra.Command {
 			}
 			defer storage.(*disk.SQLiteStore).Close()
 
-			// Update the session status
-			if err := storage.UpdateSessionStatus(data.JobID, data.Status); err != nil {
+			// Update the session status with error if present
+			if err := storage.(*disk.SQLiteStore).UpdateSessionStatusWithError(data.JobID, data.Status, data.Error); err != nil {
 				log.Printf("Failed to update job status: %v", err)
 				os.Exit(1)
 			}

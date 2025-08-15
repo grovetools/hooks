@@ -91,10 +91,18 @@ func (hc *HookContext) LogEvent(eventType models.EventType, data map[string]any)
 // EnsureSessionExists creates a session if it doesn't exist
 func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath string) error {
 	// Try to get existing session
-	existingSession, err := hc.Storage.GetSession(sessionID)
-	if err == nil && existingSession != nil {
+	existingSessionData, err := hc.Storage.GetSession(sessionID)
+	if err == nil && existingSessionData != nil {
+		// Check the status based on the type
+		var status string
+		if extSession, ok := existingSessionData.(*disk.ExtendedSession); ok {
+			status = extSession.Status
+		} else if session, ok := existingSessionData.(*models.Session); ok {
+			status = session.Status
+		}
+		
 		// Session exists - update status if idle
-		if existingSession.Status == "idle" {
+		if status == "idle" {
 			return hc.Storage.UpdateSessionStatus(sessionID, "running")
 		}
 		return nil
@@ -179,7 +187,19 @@ func (hc *HookContext) LoadConfig() (map[string]interface{}, error) {
 
 // GetSession retrieves a session from local storage
 func (hc *HookContext) GetSession(sessionID string) (*models.Session, error) {
-	return hc.Storage.GetSession(sessionID)
+	sessionData, err := hc.Storage.GetSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Handle both regular and extended sessions
+	if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
+		return &extSession.Session, nil
+	} else if session, ok := sessionData.(*models.Session); ok {
+		return session, nil
+	}
+	
+	return nil, fmt.Errorf("unexpected session type: %T", sessionData)
 }
 
 // expandPath expands ~ to home directory
