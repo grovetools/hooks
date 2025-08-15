@@ -8,8 +8,8 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/mattsolo1/grove-core v0.2.11
-	github.com/mattsolo1/grove-notifications v0.0.4
-	github.com/mattsolo1/grove-tend v0.2.7
+	github.com/mattsolo1/grove-notifications v0.0.5
+	github.com/mattsolo1/grove-tend v0.2.8
 	github.com/mattsolo1/grove-tmux v0.0.4
 	github.com/spf13/cobra v1.9.1
 	gopkg.in/yaml.v3 v3.0.1
