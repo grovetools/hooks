@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
@@ -11,10 +12,12 @@ import (
 )
 
 func NewCleanupCmd() *cobra.Command {
+	var inactivityMinutes int
+	
 	cmd := &cobra.Command{
 		Use:   "cleanup",
-		Short: "Clean up sessions with dead processes",
-		Long:  `Check all running and idle sessions and mark those with dead processes as completed.`,
+		Short: "Clean up inactive sessions",
+		Long:  `Check all running and idle sessions and mark those that have been inactive for too long as completed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Create storage
 			storage, err := disk.NewSQLiteStore()
@@ -23,8 +26,8 @@ func NewCleanupCmd() *cobra.Command {
 			}
 			defer storage.(*disk.SQLiteStore).Close()
 
-			// Run cleanup
-			cleaned, err := CleanupDeadSessions(storage)
+			// Run cleanup with custom threshold
+			cleaned, err := CleanupDeadSessionsWithThreshold(storage, time.Duration(inactivityMinutes)*time.Minute)
 			if err != nil {
 				return fmt.Errorf("cleanup failed: %w", err)
 			}
@@ -41,6 +44,7 @@ func NewCleanupCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolP("verbose", "v", false, "Show verbose output")
+	cmd.Flags().IntVar(&inactivityMinutes, "inactive-minutes", 30, "Minutes of inactivity before marking session as completed")
 	
 	return cmd
 }
@@ -55,6 +59,11 @@ func isProcessAlive(pid int) bool {
 	// Try to send signal 0 to the process
 	// This doesn't actually send a signal but checks if we can
 	err := syscall.Kill(pid, 0)
+	
+	// Debug logging
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Printf("Checking PID %d: err=%v\n", pid, err)
+	}
 	
 	// If no error, process exists
 	if err == nil {
@@ -72,8 +81,14 @@ func isProcessAlive(pid int) bool {
 }
 
 // CleanupDeadSessions checks all running/idle sessions and marks dead ones as completed
-// Returns the number of sessions cleaned up
+// Uses default 30 minute inactivity threshold
 func CleanupDeadSessions(storage interfaces.SessionStorer) (int, error) {
+	return CleanupDeadSessionsWithThreshold(storage, 30*time.Minute)
+}
+
+// CleanupDeadSessionsWithThreshold checks all running/idle sessions and marks inactive ones as completed
+// Returns the number of sessions cleaned up
+func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivityThreshold time.Duration) (int, error) {
 	// Get all sessions
 	sessions, err := storage.GetAllSessions()
 	if err != nil {
@@ -81,15 +96,18 @@ func CleanupDeadSessions(storage interfaces.SessionStorer) (int, error) {
 	}
 
 	cleaned := 0
+	now := time.Now()
+	
 	for _, session := range sessions {
 		// Only check running or idle sessions
 		if session.Status != "running" && session.Status != "idle" {
 			continue
 		}
 
-		// Check if process is still alive
-		if !isProcessAlive(session.PID) {
-			// Mark session as completed
+		// Check if session has been inactive for too long
+		timeSinceActivity := now.Sub(session.LastActivity)
+		if timeSinceActivity > inactivityThreshold {
+			// Mark session as completed due to inactivity
 			if err := storage.UpdateSessionStatus(session.ID, "completed"); err != nil {
 				// Log error but continue
 				fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
@@ -99,7 +117,7 @@ func CleanupDeadSessions(storage interfaces.SessionStorer) (int, error) {
 			
 			// Debug logging
 			if os.Getenv("GROVE_DEBUG") != "" {
-				fmt.Printf("Cleaned up session %s (PID %d was dead)\n", session.ID, session.PID)
+				fmt.Printf("Cleaned up inactive session %s (inactive for %v)\n", session.ID, timeSinceActivity)
 			}
 		}
 	}
