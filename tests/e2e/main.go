@@ -13,6 +13,7 @@ func main() {
 	scenarios := []*harness.Scenario{
 		HooksDirectExecutionScenario(),
 		HooksSymlinkExecutionScenario(),
+		InstallCommandScenario(),
 		LocalStorageScenario(),
 		SessionQueriesScenario(),
 		SessionBrowseScenario(),

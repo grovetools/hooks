@@ -27,6 +27,7 @@ func main() {
 		rootCmd.AddCommand(newStopCmd())
 		rootCmd.AddCommand(newSubagentStopCmd())
 		rootCmd.AddCommand(newSessionsCmd())
+		rootCmd.AddCommand(newInstallCmd())
 	} else {
 		// Called via symlink, execute the corresponding hook
 		switch execName {
@@ -124,4 +125,8 @@ func runSubagentStopHook() {
 
 func newSessionsCmd() *cobra.Command {
 	return commands.NewSessionsCmd()
+}
+
+func newInstallCmd() *cobra.Command {
+	return commands.NewInstallCmd()
 }

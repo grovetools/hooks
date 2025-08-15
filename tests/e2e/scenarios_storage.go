@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,12 +16,7 @@ func LocalStorageScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name: "local-storage",
 		Steps: []harness.Step{
-			harness.NewStep("Clean up any existing test database", func(ctx *harness.Context) error {
-				// Remove any existing test database
-				dbPath := filepath.Join(os.Getenv("HOME"), ".local", "share", "grove-hooks", "state.db")
-				os.Remove(dbPath)
-				return nil
-			}),
+			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Create a new session via pretooluse hook", func(ctx *harness.Context) error {
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
@@ -220,6 +213,7 @@ func LocalStorageScenario() *harness.Scenario {
 
 				return assert.Equal("completed", session["status"], "Session should be completed")
 			}),
+			harness.NewStep("Clean up test database", CleanupTestDatabase),
 		},
 	}
 }
@@ -229,6 +223,7 @@ func SessionQueriesScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name: "session-queries",
 		Steps: []harness.Step{
+			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Create multiple test sessions", func(ctx *harness.Context) error {
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
@@ -355,6 +350,7 @@ func SessionQueriesScenario() *harness.Scenario {
 				}
 				return nil
 			}),
+			harness.NewStep("Clean up test database", CleanupTestDatabase),
 		},
 	}
 }
@@ -364,6 +360,7 @@ func SessionBrowseScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name: "session-browse",
 		Steps: []harness.Step{
+			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Create test sessions for browsing", func(ctx *harness.Context) error {
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
@@ -420,6 +417,7 @@ func SessionBrowseScenario() *harness.Scenario {
 
 				return nil
 			}),
+			harness.NewStep("Clean up test database", CleanupTestDatabase),
 		},
 	}
 }
@@ -429,6 +427,7 @@ func OfflineOperationScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name: "offline-operation",
 		Steps: []harness.Step{
+			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Ensure no API is running", func(ctx *harness.Context) error {
 				// The test is already configured with a non-existent API URL
 				// via CANOPY_API_URL=http://test-not-running:8888
@@ -503,6 +502,7 @@ func OfflineOperationScenario() *harness.Scenario {
 
 				return assert.Contains(result.Stdout, "Status: completed", "Session should be completed")
 			}),
+			harness.NewStep("Clean up test database", CleanupTestDatabase),
 		},
 	}
 }

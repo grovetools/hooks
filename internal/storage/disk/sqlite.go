@@ -20,14 +20,29 @@ type SQLiteStore struct {
 
 // NewSQLiteStore creates a new SQLite-based storage instance
 func NewSQLiteStore() (interfaces.SessionStorer, error) {
-	// Create data directory
-	dataDir := filepath.Join(os.Getenv("HOME"), ".local", "share", "grove-hooks")
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	// Check for custom database path (useful for testing)
+	dbPath := os.Getenv("GROVE_HOOKS_DB_PATH")
+	if dbPath == "" {
+		// Use default path
+		dataDir := filepath.Join(os.Getenv("HOME"), ".local", "share", "grove-hooks")
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create data directory: %w", err)
+		}
+		dbPath = filepath.Join(dataDir, "state.db")
+	}
+	
+	return NewSQLiteStoreWithPath(dbPath)
+}
+
+// NewSQLiteStoreWithPath creates a new SQLite-based storage instance with a custom path
+func NewSQLiteStoreWithPath(dbPath string) (interfaces.SessionStorer, error) {
+	// Create directory if needed
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
 	// Open database
-	dbPath := filepath.Join(dataDir, "state.db")
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)

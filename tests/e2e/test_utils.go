@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/mattsolo1/grove-tend/pkg/harness"
 	"github.com/mattsolo1/grove-tend/pkg/project"
 )
 
@@ -22,4 +24,33 @@ func FindProjectBinary() (string, error) {
 	}
 
 	return binaryPath, nil
+}
+
+// SetupTestDatabase creates a temporary test database and returns a cleanup function
+func SetupTestDatabase(ctx *harness.Context) error {
+	// Create a temporary test database
+	tempDir, err := os.MkdirTemp("", "grove-hooks-test-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	ctx.Set("test_temp_dir", tempDir)
+	
+	// Set environment variable for test database
+	testDbPath := filepath.Join(tempDir, "test.db")
+	os.Setenv("GROVE_HOOKS_DB_PATH", testDbPath)
+	ctx.Set("test_db_path", testDbPath)
+	
+	return nil
+}
+
+// CleanupTestDatabase removes the test database
+func CleanupTestDatabase(ctx *harness.Context) error {
+	// Clean up test database
+	tempDir := ctx.GetString("test_temp_dir")
+	if tempDir != "" {
+		os.RemoveAll(tempDir)
+	}
+	// Unset the environment variable
+	os.Unsetenv("GROVE_HOOKS_DB_PATH")
+	return nil
 }
