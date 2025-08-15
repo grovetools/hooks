@@ -13,6 +13,9 @@ func main() {
 	scenarios := []*harness.Scenario{
 		HooksDirectExecutionScenario(),
 		HooksSymlinkExecutionScenario(),
+		LocalStorageScenario(),
+		SessionQueriesScenario(),
+		OfflineOperationScenario(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {

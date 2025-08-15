@@ -5,86 +5,20 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/mattsolo1/grove-hooks/internal/api"
 	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-notifications"
+	"github.com/mattsolo1/grove-hooks/internal/api"
+	"gopkg.in/yaml.v3"
 )
-
-// Common types used by hooks
-
-type NotificationInput struct {
-	SessionID              string `json:"session_id"`
-	TranscriptPath         string `json:"transcript_path"`
-	HookEventName          string `json:"hook_event_name"`
-	Type                   string `json:"type"`
-	Message                string `json:"message"`
-	Level                  string `json:"level"` // info, warning, error
-	SystemNotificationSent bool   `json:"system_notification_sent"`
-	CurrentUUID            string `json:"current_uuid,omitempty"`
-	ParentUUID             string `json:"parent_uuid,omitempty"`
-}
-
-type PreToolUseInput struct {
-	SessionID      string         `json:"session_id"`
-	TranscriptPath string         `json:"transcript_path"`
-	HookEventName  string         `json:"hook_event_name"`
-	ToolName       string         `json:"tool_name"`
-	ToolInput      map[string]any `json:"tool_input"`
-	CurrentUUID    string         `json:"current_uuid,omitempty"`
-	ParentUUID     string         `json:"parent_uuid,omitempty"`
-}
-
-type PostToolUseInput struct {
-	SessionID      string  `json:"session_id"`
-	TranscriptPath string  `json:"transcript_path"`
-	HookEventName  string  `json:"hook_event_name"`
-	ToolName       string  `json:"tool_name"`
-	ToolInput      any     `json:"tool_input"`
-	ToolResponse   any     `json:"tool_response"`
-	ToolOutput     any     `json:"tool_output"` // Legacy field
-	ToolDurationMs int64   `json:"tool_duration_ms"`
-	ToolError      *string `json:"tool_error"`
-	ToolUseID      string  `json:"tool_use_id,omitempty"`
-	CurrentUUID    string  `json:"current_uuid,omitempty"`
-	ParentUUID     string  `json:"parent_uuid,omitempty"`
-}
-
-type StopInput struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	HookEventName  string `json:"hook_event_name"`
-	ExitReason     string `json:"exit_reason"`
-	DurationMs     int64  `json:"duration_ms"`
-	CurrentUUID    string `json:"current_uuid,omitempty"`
-	ParentUUID     string `json:"parent_uuid,omitempty"`
-}
-
-type SubagentStopInput struct {
-	SessionID      string  `json:"session_id"`
-	TranscriptPath string  `json:"transcript_path"`
-	HookEventName  string  `json:"hook_event_name"`
-	SubagentID     string  `json:"subagent_id"`
-	SubagentTask   string  `json:"subagent_task"`
-	DurationMs     int64   `json:"duration_ms"`
-	Status         string  `json:"status"`
-	Result         any     `json:"result"`
-	Error          *string `json:"error"`
-	CurrentUUID    string  `json:"current_uuid,omitempty"`
-	ParentUUID     string  `json:"parent_uuid,omitempty"`
-}
-
-type PreToolUseResponse struct {
-	Approved bool   `json:"approved"`
-	Message  string `json:"message,omitempty"`
-}
 
 // Hook implementations
 
 func RunNotificationHook() {
-	ctx, err := api.NewHookContext()
+	ctx, err := NewHookContext()
 	if err != nil {
 		log.Printf("Error initializing hook context: %v", err)
 		os.Exit(1)
@@ -114,15 +48,22 @@ func RunNotificationHook() {
 		}
 	}
 
-	// Update API
-	if err := ctx.APIClient.LogNotification(data.SessionID, data.Type, data.Level,
-		data.Message, data.SystemNotificationSent); err != nil {
-		log.Printf("Failed to update API: %v", err)
+	// Log notification to storage
+	notification := &models.ClaudeNotification{
+		Type:                   data.Type,
+		Message:                data.Message,
+		Level:                  data.Level,
+		SystemNotificationSent: data.SystemNotificationSent,
+		Timestamp:              time.Now(),
+	}
+
+	if err := ctx.Storage.LogNotification(data.SessionID, notification); err != nil {
+		log.Printf("Failed to log notification: %v", err)
 	}
 }
 
 func RunPreToolUseHook() {
-	ctx, err := api.NewHookContext()
+	ctx, err := NewHookContext()
 	if err != nil {
 		log.Printf("Error initializing hook context: %v", err)
 		os.Exit(1)
@@ -135,7 +76,7 @@ func RunPreToolUseHook() {
 	}
 
 	// Ensure session exists
-	if err := ctx.APIClient.EnsureSessionExists(data.SessionID, data.TranscriptPath); err != nil {
+	if err := ctx.EnsureSessionExists(data.SessionID, data.TranscriptPath); err != nil {
 		log.Printf("Failed to ensure session exists: %v", err)
 	}
 
@@ -161,14 +102,28 @@ func RunPreToolUseHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
-	// Store tool ID for post-tool correlation
+	// Create tool execution record if approved
 	var toolID string
 	if response.Approved {
-		toolID, err = ctx.APIClient.LogToolUsage(data.SessionID, data.ToolName,
-			data.ToolInput, response.Approved, response.Message)
-		if err != nil {
+		// Generate a simple tool ID
+		toolID = fmt.Sprintf("%s_%d", data.SessionID, time.Now().UnixNano())
+		
+		// Use the tool input as parameters
+		args := data.ToolInput
+
+		tool := &models.ToolExecution{
+			ID:            toolID,
+			SessionID:     data.SessionID,
+			ToolName:      data.ToolName,
+			Parameters:    args,
+			Approved:      response.Approved,
+			BlockedReason: response.Message,
+			StartedAt:     time.Now(),
+		}
+
+		if err := ctx.Storage.LogToolUsage(data.SessionID, tool); err != nil {
 			log.Printf("Failed to log tool usage: %v", err)
-		} else if toolID != "" {
+		} else {
 			storeToolID(data.SessionID, toolID)
 		}
 	}
@@ -179,7 +134,7 @@ func RunPreToolUseHook() {
 }
 
 func RunPostToolUseHook() {
-	ctx, err := api.NewHookContext()
+	ctx, err := NewHookContext()
 	if err != nil {
 		log.Printf("Error initializing hook context: %v", err)
 		os.Exit(1)
@@ -219,8 +174,27 @@ func RunPostToolUseHook() {
 			errorMsg = *data.ToolError
 		}
 
-		if err := ctx.APIClient.UpdateToolExecution(data.SessionID, toolID,
-			data.ToolDurationMs, success, resultSummary, errorMsg); err != nil {
+		completedAt := time.Now()
+		durationMs := data.ToolDurationMs
+		update := &models.ToolExecution{
+			Success:     &success,
+			DurationMs:  &durationMs,
+			Error:       errorMsg,
+			CompletedAt: &completedAt,
+		}
+
+		// Convert result summary to ToolResultSummary
+		if resultMap, ok := resultSummary["modified_files"].([]string); ok {
+			summary := &models.ToolResultSummary{
+				ModifiedFiles: resultMap,
+			}
+			if files, ok := resultSummary["files_read"].([]string); ok {
+				summary.FilesRead = files
+			}
+			update.ResultSummary = summary
+		}
+
+		if err := ctx.Storage.UpdateToolExecution(data.SessionID, toolID, update); err != nil {
 			log.Printf("Failed to update tool execution: %v", err)
 		}
 
@@ -229,7 +203,7 @@ func RunPostToolUseHook() {
 }
 
 func RunStopHook() {
-	ctx, err := api.NewHookContext()
+	ctx, err := NewHookContext()
 	if err != nil {
 		log.Printf("Error initializing hook context: %v", err)
 		os.Exit(1)
@@ -242,13 +216,13 @@ func RunStopHook() {
 	}
 
 	// Get session details to obtain working directory
-	session, err := ctx.APIClient.GetSession(data.SessionID)
+	session, err := ctx.GetSession(data.SessionID)
 	if err != nil {
 		log.Printf("Failed to get session details: %v", err)
 	} else if session != nil && session.WorkingDirectory != "" {
 		// Execute repository-specific hook commands
 		log.Printf("Checking for .canopy.yaml in working directory: %s", session.WorkingDirectory)
-		if err := ctx.ExecuteRepoHookCommands(session.WorkingDirectory); err != nil {
+		if err := ExecuteRepoHookCommands(ctx, session.WorkingDirectory); err != nil {
 			// Check if this is a blocking error from exit code 2
 			if blockingErr, ok := err.(*api.HookBlockingError); ok {
 				log.Printf("Hook command returned blocking error: %s", blockingErr.Message)
@@ -274,13 +248,11 @@ func RunStopHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
-	// Update API based on exit reason
+	// Update session status based on exit reason
 	// Mark as completed for actual completion or errors
 	// Otherwise, set to idle (for normal end-of-turn stops)
 	if data.ExitReason == "completed" || data.ExitReason == "error" || data.ExitReason == "interrupted" || data.ExitReason == "killed" {
-		durationSeconds := int(data.DurationMs / 1000)
-		if err := ctx.APIClient.CompleteSession(data.SessionID, durationSeconds,
-			data.ExitReason, summary); err != nil {
+		if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "completed"); err != nil {
 			log.Printf("Failed to complete session: %v", err)
 		}
 
@@ -288,7 +260,7 @@ func RunStopHook() {
 		sendNtfyNotification(ctx, data, "completed")
 	} else {
 		// Normal end-of-turn stop (empty exit_reason or other) - set to idle
-		if err := ctx.APIClient.UpdateSession(data.SessionID, "idle"); err != nil {
+		if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "idle"); err != nil {
 			log.Printf("Failed to update session status to idle: %v", err)
 		}
 
@@ -298,7 +270,7 @@ func RunStopHook() {
 }
 
 func RunSubagentStopHook() {
-	ctx, err := api.NewHookContext()
+	ctx, err := NewHookContext()
 	if err != nil {
 		log.Printf("Error initializing hook context: %v", err)
 		os.Exit(1)
@@ -339,161 +311,148 @@ func RunSubagentStopHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
-	// Update API
-	durationSeconds := int(data.DurationMs / 1000)
-	if err := ctx.APIClient.LogSubagent(data.SessionID, data.SubagentID,
-		data.SubagentTask, taskType, durationSeconds, data.Status, result); err != nil {
-		log.Printf("Failed to log subagent: %v", err)
-	}
+	// For now, we'll just log this as an event
+	// In the future, we might want to add a separate subagent tracking table
 }
 
-// Helper functions
-
-func shouldSendSystemNotification(data NotificationInput) bool {
-	// Send for errors and warnings
-	return data.Level == "error" || data.Level == "warning"
-}
-
-func sendSystemNotification(data NotificationInput) bool {
-	err := notifications.SendSystem("Claude Code", data.Message, data.Level)
-	return err == nil
-}
-
-
-func validateTool(toolName string, toolInput map[string]any, workingDir string) PreToolUseResponse {
-	// Tool validation logic here
-	// For now, approve all tools
-	return PreToolUseResponse{
-		Approved: true,
-	}
-}
-
-func storeToolID(sessionID, toolID string) {
-	tmpDir := os.TempDir()
-	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("claude-tool-%s.json", sessionID))
-	data, _ := json.Marshal(map[string]string{"tool_id": toolID})
-	os.WriteFile(tmpFile, data, 0644)
-}
-
-func getStoredToolID(sessionID string) string {
-	tmpDir := os.TempDir()
-	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("claude-tool-%s.json", sessionID))
-	data, err := os.ReadFile(tmpFile)
+// ExecuteRepoHookCommands executes on_stop commands from .canopy.yaml
+func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
+	config, err := LoadRepoHookConfig(workingDir)
 	if err != nil {
-		return ""
+		return fmt.Errorf("failed to load repo hook config: %w", err)
 	}
-	var stored map[string]string
-	json.Unmarshal(data, &stored)
-	return stored["tool_id"]
-}
 
-func cleanupToolID(sessionID string) {
-	tmpDir := os.TempDir()
-	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("claude-tool-%s.json", sessionID))
-	os.Remove(tmpFile)
-}
+	if config == nil || len(config.Hooks.OnStop) == 0 {
+		// No commands to execute
+		return nil
+	}
 
-func buildResultSummary(data PostToolUseInput) map[string]any {
-	// Build result summary from tool response
-	summary := make(map[string]any)
-	summary["tool_name"] = data.ToolName
-	summary["duration_ms"] = data.ToolDurationMs
+	log.Printf("Found %d on_stop commands in .canopy.yaml", len(config.Hooks.OnStop))
 
-	// Extract tool-specific information
-	if inputMap, ok := data.ToolInput.(map[string]any); ok {
-		switch data.ToolName {
-		case "Bash":
-			if command, ok := inputMap["command"].(string); ok {
-				summary["command"] = command
+	for i, hookCmd := range config.Hooks.OnStop {
+		log.Printf("Executing hook command %d: %s", i+1, hookCmd.Name)
+
+		// Check run_if condition
+		if hookCmd.RunIf == "changes" {
+			hasChanges, err := hasGitChanges(workingDir)
+			if err != nil {
+				log.Printf("Failed to check git changes for command '%s': %v", hookCmd.Name, err)
+				continue
 			}
-		case "Edit", "Write", "MultiEdit":
-			if filePath, ok := inputMap["file_path"].(string); ok {
-				summary["modified_files"] = []string{filePath}
+			if !hasChanges {
+				log.Printf("Skipping command '%s' - no git changes detected", hookCmd.Name)
+				continue
 			}
-		case "Read":
-			if filePath, ok := inputMap["file_path"].(string); ok {
-				summary["files_read"] = []string{filePath}
+		}
+
+		// Execute the command
+		if err := ExecuteHookCommand(workingDir, hookCmd); err != nil {
+			log.Printf("Hook command '%s' failed: %v", hookCmd.Name, err)
+
+			// Check if this is a blocking error (exit code 2)
+			if blockingErr, ok := err.(*api.HookBlockingError); ok {
+				log.Printf("Hook command '%s' returned blocking error, stopping session", hookCmd.Name)
+
+				// Log event for blocking command
+				eventData := map[string]any{
+					"hook_command": hookCmd.Name,
+					"command":      hookCmd.Command,
+					"success":      false,
+					"error":        blockingErr.Message,
+					"blocking":     true,
+				}
+				if logErr := hc.LogEvent(models.EventStop, eventData); logErr != nil {
+					log.Printf("Failed to log hook command blocking failure: %v", logErr)
+				}
+
+				// Return the blocking error to prevent session stop
+				return blockingErr
+			}
+
+			// Log event for non-blocking failed command
+			eventData := map[string]any{
+				"hook_command": hookCmd.Name,
+				"command":      hookCmd.Command,
+				"success":      false,
+				"error":        err.Error(),
+				"blocking":     false,
+			}
+			if logErr := hc.LogEvent(models.EventStop, eventData); logErr != nil {
+				log.Printf("Failed to log hook command failure: %v", logErr)
+			}
+
+			// Continue with other commands for non-blocking errors
+		} else {
+			log.Printf("Hook command '%s' completed successfully", hookCmd.Name)
+
+			// Log event for successful command
+			eventData := map[string]any{
+				"hook_command": hookCmd.Name,
+				"command":      hookCmd.Command,
+				"success":      true,
+				"blocking":     false,
+			}
+			if logErr := hc.LogEvent(models.EventStop, eventData); logErr != nil {
+				log.Printf("Failed to log hook command success: %v", logErr)
 			}
 		}
 	}
 
-	return summary
+	return nil
 }
 
-func sendNtfyNotification(ctx *api.HookContext, data StopInput, status string) {
-	// Get notification settings from config
-	config, err := ctx.LoadConfig()
+// LoadRepoHookConfig loads .canopy.yaml from the specified directory
+func LoadRepoHookConfig(workingDir string) (*models.RepoHookConfig, error) {
+	configPath := filepath.Join(workingDir, ".canopy.yaml")
+
+	// Check if file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return nil, nil // No config file found, not an error
+	}
+
+	// Read and parse the file
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		log.Printf("Failed to load config for ntfy: %v", err)
-		return
+		return nil, fmt.Errorf("failed to read .canopy.yaml: %w", err)
 	}
 
-	// Check if ntfy is enabled in the config
-	ntfyConfig, ok := config["notifications"].(map[string]interface{})
-	if !ok {
-		return
+	var config models.RepoHookConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse .canopy.yaml: %w", err)
 	}
 
-	ntfy, ok := ntfyConfig["ntfy"].(map[string]interface{})
-	if !ok {
-		return
+	return &config, nil
+}
+
+// hasGitChanges checks if there are any git changes in the working directory
+func hasGitChanges(workingDir string) (bool, error) {
+	// Check for staged changes
+	cmd := exec.Command("git", "diff", "--cached", "--quiet")
+	cmd.Dir = workingDir
+	if err := cmd.Run(); err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok && exitError.ExitCode() == 1 {
+			return true, nil // Changes detected
+		}
+		return false, fmt.Errorf("git diff --cached failed: %w", err)
 	}
 
-	enabled, _ := ntfy["enabled"].(bool)
-	if !enabled {
-		return
+	// Check for unstaged changes
+	cmd = exec.Command("git", "diff", "--quiet")
+	cmd.Dir = workingDir
+	if err := cmd.Run(); err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok && exitError.ExitCode() == 1 {
+			return true, nil // Changes detected
+		}
+		return false, fmt.Errorf("git diff failed: %w", err)
 	}
 
-	topic, _ := ntfy["topic"].(string)
-	if topic == "" {
-		return
-	}
-
-	// Get session info
-	session, err := ctx.APIClient.GetSession(data.SessionID)
+	// Check for untracked files
+	cmd = exec.Command("git", "ls-files", "--others", "--exclude-standard")
+	cmd.Dir = workingDir
+	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("Failed to get session for ntfy: %v", err)
-		return
+		return false, fmt.Errorf("git ls-files failed: %w", err)
 	}
 
-	// Create ntfy notifier
-	ntfyURL := "https://ntfy.sh"
-	if url, ok := ntfy["url"].(string); ok && url != "" {
-		ntfyURL = url
-	}
-
-	// Prepare notification message
-	message := fmt.Sprintf("Claude finished: %s", session.Repo)
-	if session.Branch != "" {
-		message = fmt.Sprintf("Claude finished: %s (%s)", session.Repo, session.Branch)
-	}
-
-	// Send notification
-	if err := notifications.SendNtfy(ntfyURL, topic, "Claude Session Completed", message, "default", []string{"claude", status}); err != nil {
-		log.Printf("Failed to send ntfy notification: %v", err)
-	} else {
-		log.Printf("Sent ntfy notification: %s", message)
-	}
-}
-
-func determineTaskType(task string) string {
-	task = strings.ToLower(task)
-	if strings.Contains(task, "search") || strings.Contains(task, "find") {
-		return "search"
-	} else if strings.Contains(task, "implement") || strings.Contains(task, "create") {
-		return "implementation"
-	} else if strings.Contains(task, "debug") || strings.Contains(task, "fix") {
-		return "debugging"
-	}
-	return "analysis"
-}
-
-func generateSessionSummary(data StopInput) map[string]any {
-	// Generate session summary
-	summary := map[string]any{
-		"session_id":  data.SessionID,
-		"exit_reason": data.ExitReason,
-		"duration_ms": data.DurationMs,
-	}
-	return summary
+	return len(strings.TrimSpace(string(output))) > 0, nil
 }

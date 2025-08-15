@@ -68,6 +68,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
+github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
+github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
 github.com/mattsolo1/grove-core v0.2.10 h1:9lQyqHiarE3SbdWJE47kWLbQifEnw9gHs6SiaV2XU4M=
 github.com/mattsolo1/grove-core v0.2.10/go.mod h1:jCZmYXEo3os2MXGH79K7c5xDtuM+/GooNyD96twXMgM=
 github.com/mattsolo1/grove-notifications v0.0.4 h1:+h/96Q5s9NsrfDalBGT+hiG4VJ3Ypcd11ckrBmnHUIM=

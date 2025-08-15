@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-hooks/internal/commands"
 	"github.com/mattsolo1/grove-hooks/internal/hooks"
 	"github.com/spf13/cobra"
 )
@@ -17,14 +18,15 @@ func main() {
 	// Check if called via symlink to determine which hook to run
 	execName := filepath.Base(os.Args[0])
 	
-	// If called directly as 'hooks', show help
-	if execName == "hooks" {
+	// If called directly as 'hooks' or 'grove-hooks', show help
+	if execName == "hooks" || execName == "grove-hooks" {
 		// Add subcommands for manual execution
 		rootCmd.AddCommand(newNotificationCmd())
 		rootCmd.AddCommand(newPreToolUseCmd())
 		rootCmd.AddCommand(newPostToolUseCmd())
 		rootCmd.AddCommand(newStopCmd())
 		rootCmd.AddCommand(newSubagentStopCmd())
+		rootCmd.AddCommand(newSessionsCmd())
 	} else {
 		// Called via symlink, execute the corresponding hook
 		switch execName {
@@ -118,4 +120,8 @@ func runStopHook() {
 
 func runSubagentStopHook() {
 	hooks.RunSubagentStopHook()
+}
+
+func newSessionsCmd() *cobra.Command {
+	return commands.NewSessionsCmd()
 }
