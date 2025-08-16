@@ -150,6 +150,7 @@ type browseModel struct {
 	showDetails     bool
 	selectedIDs     map[string]bool // Track multiple selections
 	storage         interfaces.SessionStorer
+	lastRefresh     time.Time
 }
 
 func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer) browseModel {
@@ -169,17 +170,96 @@ func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer
 		showDetails:  false,
 		selectedIDs:  make(map[string]bool),
 		storage:      storage,
+		lastRefresh:  time.Now(),
 	}
 }
 
+// tickMsg is sent on a regular interval for refreshing data
+type tickMsg time.Time
+
 func (m browseModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(
+		textinput.Blink,
+		tea.Tick(time.Second, func(t time.Time) tea.Msg {
+			return tickMsg(t)
+		}),
+	)
 }
 
 func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tickMsg:
+		// Refresh sessions data every second
+		if !m.showDetails {
+			// Clean up dead sessions
+			_, _ = CleanupDeadSessions(m.storage)
+			
+			// Get updated sessions
+			sessions, err := m.storage.GetAllSessions()
+			if err == nil {
+				// Sort sessions: running first, then idle, then others by started_at desc
+				sort.Slice(sessions, func(i, j int) bool {
+					// Define status priority: running=1, idle=2, others=3
+					iPriority := 3
+					if sessions[i].Status == "running" {
+						iPriority = 1
+					} else if sessions[i].Status == "idle" {
+						iPriority = 2
+					}
+					
+					jPriority := 3
+					if sessions[j].Status == "running" {
+						jPriority = 1
+					} else if sessions[j].Status == "idle" {
+						jPriority = 2
+					}
+					
+					// Sort by priority first
+					if iPriority != jPriority {
+						return iPriority < jPriority
+					}
+					
+					// Within same status group, sort by most recent first
+					return sessions[i].StartedAt.After(sessions[j].StartedAt)
+				})
+				
+				// Remember the currently selected session ID
+				var selectedID string
+				if m.cursor < len(m.filtered) {
+					selectedID = m.filtered[m.cursor].ID
+				}
+				
+				// Update sessions
+				m.sessions = sessions
+				m.updateFiltered()
+				
+				// Try to maintain cursor position on the same session
+				if selectedID != "" {
+					for i, s := range m.filtered {
+						if s.ID == selectedID {
+							m.cursor = i
+							break
+						}
+					}
+				}
+				
+				// Ensure cursor is within bounds
+				if m.cursor >= len(m.filtered) && len(m.filtered) > 0 {
+					m.cursor = len(m.filtered) - 1
+				}
+				
+				// Update last refresh time
+				m.lastRefresh = time.Now()
+			}
+		}
+		
+		// Continue ticking
+		return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+			return tickMsg(t)
+		})
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -360,14 +440,21 @@ func (m browseModel) View() string {
 	b.WriteString(m.filterInput.View())
 	b.WriteString("\n")
 
-	// Status filter indicator
+	// Status filter indicator and refresh status
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
+	refreshIndicator := "●"
+	refreshStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00"))
+	
+	filterText := "Filter: all"
 	if m.statusFilter != "" {
-		filterText := fmt.Sprintf("Filter: %s", m.statusFilter)
-		b.WriteString(statusStyle.Render(filterText))
-	} else {
-		b.WriteString(statusStyle.Render("Filter: all"))
+		filterText = fmt.Sprintf("Filter: %s", m.statusFilter)
 	}
+	
+	// Show filter and refresh indicator on same line
+	b.WriteString(statusStyle.Render(filterText))
+	b.WriteString("  ")
+	b.WriteString(refreshStyle.Render(refreshIndicator))
+	b.WriteString(statusStyle.Render(" Auto-refresh: 1s"))
 	b.WriteString("\n\n")
 
 	// Calculate visible items
