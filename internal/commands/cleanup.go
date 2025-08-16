@@ -99,6 +99,11 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	now := time.Now()
 	
 	for _, session := range sessions {
+		// Skip oneshot jobs - they are managed by grove-flow
+		if session.Type == "oneshot_job" {
+			continue
+		}
+		
 		// For running/idle sessions, check if still active
 		if session.Status == "running" || session.Status == "idle" {
 			// First check if process is dead (quick check)
