@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -21,7 +22,7 @@ import (
 
 func NewBrowseCmd() *cobra.Command {
 	var hideCompleted bool
-	
+
 	cmd := &cobra.Command{
 		Use:     "browse",
 		Aliases: []string{"b"},
@@ -69,19 +70,19 @@ func NewBrowseCmd() *cobra.Command {
 				} else if sessions[i].Status == "idle" {
 					iPriority = 2
 				}
-				
+
 				jPriority := 3
 				if sessions[j].Status == "running" {
 					jPriority = 1
 				} else if sessions[j].Status == "idle" {
 					jPriority = 2
 				}
-				
+
 				// Sort by priority first
 				if iPriority != jPriority {
 					return iPriority < jPriority
 				}
-				
+
 				// Within same status group, sort by most recent first
 				return sessions[i].StartedAt.After(sessions[j].StartedAt)
 			})
@@ -107,7 +108,7 @@ func NewBrowseCmd() *cobra.Command {
 				}
 				fmt.Printf("Type: %s\n", sessionType)
 				fmt.Printf("Status: %s\n", s.Status)
-				
+
 				if s.Type == "oneshot_job" {
 					// Oneshot job specific fields
 					if s.PlanName != "" {
@@ -121,7 +122,7 @@ func NewBrowseCmd() *cobra.Command {
 					fmt.Printf("Repository: %s\n", s.Repo)
 					fmt.Printf("Branch: %s\n", s.Branch)
 				}
-				
+
 				fmt.Printf("Started: %s\n", s.StartedAt.Format(time.RFC3339))
 				if s.EndedAt != nil {
 					fmt.Printf("Duration: %s\n", s.EndedAt.Sub(s.StartedAt).Round(time.Second))
@@ -133,7 +134,7 @@ func NewBrowseCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&hideCompleted, "active", false, "Show only active sessions (hide completed/failed)")
-	
+
 	return cmd
 }
 
@@ -195,7 +196,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.showDetails {
 			// Clean up dead sessions
 			_, _ = CleanupDeadSessions(m.storage)
-			
+
 			// Get updated sessions
 			sessions, err := m.storage.GetAllSessions()
 			if err == nil {
@@ -208,33 +209,33 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else if sessions[i].Status == "idle" {
 						iPriority = 2
 					}
-					
+
 					jPriority := 3
 					if sessions[j].Status == "running" {
 						jPriority = 1
 					} else if sessions[j].Status == "idle" {
 						jPriority = 2
 					}
-					
+
 					// Sort by priority first
 					if iPriority != jPriority {
 						return iPriority < jPriority
 					}
-					
+
 					// Within same status group, sort by most recent first
 					return sessions[i].StartedAt.After(sessions[j].StartedAt)
 				})
-				
+
 				// Remember the currently selected session ID
 				var selectedID string
 				if m.cursor < len(m.filtered) {
 					selectedID = m.filtered[m.cursor].ID
 				}
-				
+
 				// Update sessions
 				m.sessions = sessions
 				m.updateFiltered()
-				
+
 				// Try to maintain cursor position on the same session
 				if selectedID != "" {
 					for i, s := range m.filtered {
@@ -244,17 +245,17 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-				
+
 				// Ensure cursor is within bounds
 				if m.cursor >= len(m.filtered) && len(m.filtered) > 0 {
 					m.cursor = len(m.filtered) - 1
 				}
-				
+
 				// Update last refresh time
 				m.lastRefresh = time.Now()
 			}
 		}
-		
+
 		// Continue ticking
 		return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
 			return tickMsg(t)
@@ -360,7 +361,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				for id := range m.selectedIDs {
 					sessionIDs = append(sessionIDs, id)
 				}
-				
+
 				// Archive them
 				if err := m.storage.ArchiveSessions(sessionIDs); err == nil {
 					// Remove archived sessions from the lists
@@ -371,13 +372,13 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					m.sessions = newSessions
-					
+
 					// Clear selections
 					m.selectedIDs = make(map[string]bool)
-					
+
 					// Update filtered list
 					m.updateFiltered()
-					
+
 					// Adjust cursor if needed
 					if m.cursor >= len(m.filtered) && m.cursor > 0 {
 						m.cursor = len(m.filtered) - 1
@@ -444,12 +445,12 @@ func (m browseModel) View() string {
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
 	refreshIndicator := "●"
 	refreshStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00"))
-	
+
 	filterText := "Filter: all"
 	if m.statusFilter != "" {
 		filterText = fmt.Sprintf("Filter: %s", m.statusFilter)
 	}
-	
+
 	// Show filter and refresh indicator on same line
 	b.WriteString(statusStyle.Render(filterText))
 	b.WriteString("  ")
@@ -486,24 +487,21 @@ func (m browseModel) View() string {
 		}
 	}
 
-	// Table header
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ecdc4"))
-	b.WriteString(headerStyle.Render("TYPE  STATUS     CONTEXT                          USER      STARTED              DURATION     IN STATE"))
-	b.WriteString("\n")
+	// Create table using lipgloss table
+	// Define columns without USER and DURATION columns
+	columns := []table.Column{
+		{Title: "TYPE", Width: 8},
+		{Title: "STATUS", Width: 11},
+		{Title: "CONTEXT", Width: 35},
+		{Title: "TITLE", Width: 35},
+		{Title: "STARTED", Width: 20},
+		{Title: "IN STATE", Width: 15},
+	}
 
-	// Render visible sessions
+	// Build rows for visible range
+	var rows []table.Row
 	for i := start; i < end && i < len(m.filtered); i++ {
 		session := m.filtered[i]
-
-		// Calculate duration
-		duration := "running"
-		if session.EndedAt != nil {
-			duration = session.EndedAt.Sub(session.StartedAt).Round(time.Second).String()
-		} else if session.Status == "idle" {
-			duration = time.Since(session.StartedAt).Round(time.Second).String() + " (idle)"
-		} else if session.Status == "running" {
-			duration = time.Since(session.StartedAt).Round(time.Second).String()
-		}
 
 		// Calculate time in current state
 		inState := ""
@@ -518,30 +516,29 @@ func (m browseModel) View() string {
 			inState = time.Since(session.StartedAt).Round(time.Second).String()
 		}
 
-		// Status color
-		statusColor := "#808080"
-		switch session.Status {
-		case "running":
-			statusColor = "#00ff00"
-		case "idle":
-			statusColor = "#ffaa00"
-		case "completed":
-			statusColor = "#4ecdc4"
-		case "failed", "error":
-			statusColor = "#ff4444"
-		}
-
-		// Format context based on session type
+		// Format context and title based on session type
 		context := ""
+		title := ""
 		sessionType := "claude"
 		if session.Type == "oneshot_job" {
 			sessionType = "job"
-			if session.PlanName != "" {
-				context = session.PlanName
-			} else if session.JobTitle != "" {
-				context = session.JobTitle
+			// For oneshot jobs, use Repo field for context
+			if session.Repo != "" {
+				context = session.Repo
+				if session.Branch != "" {
+					context = fmt.Sprintf("%s/%s", session.Repo, session.Branch)
+				}
 			} else {
-				context = "oneshot"
+				context = "n/a"
+			}
+			
+			// Use JobTitle for the title column
+			if session.JobTitle != "" {
+				title = session.JobTitle
+			} else if session.PlanName != "" {
+				title = session.PlanName
+			} else {
+				title = "untitled"
 			}
 		} else {
 			// Claude session
@@ -552,44 +549,105 @@ func (m browseModel) View() string {
 			} else {
 				context = "n/a"
 			}
+			// Claude sessions don't have titles
+			title = "-"
 		}
 
-		// Format the row
-		row := fmt.Sprintf("%-5s %-10s %-32s %-9s %-20s %-12s %s",
-			truncateStr(sessionType, 5),
-			truncateStr(session.Status, 10),
-			truncateStr(context, 32),
-			truncateStr(session.User, 9),
+		rows = append(rows, table.Row{
+			sessionType,
+			session.Status,
+			context,
+			title,
 			session.StartedAt.Format("2006-01-02 15:04:05"),
-			truncateStr(duration, 12),
 			truncateStr(inState, 15),
-		)
+		})
+	}
 
-		// Apply styling
-		var prefix string
-		isSelected := m.selectedIDs[session.ID]
-		isCursor := i == m.cursor
-		
-		// Build prefix based on selection and cursor state
-		if isSelected && isCursor {
-			prefix = "[*]▶ "
-		} else if isSelected {
-			prefix = "[*]  "
-		} else if isCursor {
-			prefix = "  ▶ "
-		} else {
-			prefix = "     "
+	// Create the table
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(false), // We manage focus ourselves
+		table.WithHeight(len(rows)),
+	)
+
+	// Style the table
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(true).
+		Foreground(lipgloss.Color("#4ecdc4"))
+
+	// Remove selection styling since we handle it manually
+	s.Selected = s.Selected.
+		Foreground(lipgloss.NoColor{}).
+		Background(lipgloss.NoColor{}).
+		Bold(false)
+
+	t.SetStyles(s)
+
+	// Render table with custom row styling
+	tableLines := strings.Split(t.View(), "\n")
+
+	// Write header (first 3 lines: header, border, content)
+	if len(tableLines) >= 3 {
+		b.WriteString(tableLines[0] + "\n") // Header
+		b.WriteString(tableLines[1] + "\n") // Border
+
+		// Render data rows with custom styling
+		for i := 0; i < len(rows) && i+2 < len(tableLines); i++ {
+			session := m.filtered[start+i]
+
+			// Status color
+			statusColor := "#808080"
+			switch session.Status {
+			case "running":
+				statusColor = "#00ff00"
+			case "idle":
+				statusColor = "#ffaa00"
+			case "completed":
+				statusColor = "#4ecdc4"
+			case "failed", "error":
+				statusColor = "#ff4444"
+			}
+
+			// Selection and cursor prefix
+			var prefix string
+			isSelected := m.selectedIDs[session.ID]
+			isCursor := start+i == m.cursor
+
+			if isSelected && isCursor {
+				prefix = "[*]▶ "
+			} else if isSelected {
+				prefix = "[*]  "
+			} else if isCursor {
+				prefix = "   ▶ "
+			} else {
+				prefix = "     "
+			}
+
+			// Apply row styling
+			rowStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(statusColor))
+
+			if isCursor {
+				rowStyle = rowStyle.Bold(true)
+			}
+
+			// Skip the pipe character at the beginning of each table row
+			rowContent := tableLines[i+2]
+			if strings.HasPrefix(rowContent, "│") {
+				rowContent = rowContent[3:] // Skip "│ " at the beginning
+			}
+			if strings.HasSuffix(rowContent, "│") {
+				rowContent = rowContent[:len(rowContent)-3] // Skip " │" at the end
+			}
+
+			b.WriteString(prefix + rowStyle.Render(rowContent))
+			b.WriteString("\n")
 		}
-		
-		rowStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(statusColor))
-		
-		if isCursor {
-			rowStyle = rowStyle.Bold(true)
-		}
-		
-		b.WriteString(prefix + rowStyle.Render(row))
-		b.WriteString("\n")
 	}
 
 	// Show scroll indicators if needed
@@ -648,7 +706,7 @@ func (m browseModel) viewDetails() string {
 	}
 	addField("Type", sessionType)
 	addField("Status", s.Status, getStatusColor(s.Status))
-	
+
 	if s.Type == "oneshot_job" {
 		// Oneshot job specific fields
 		if s.PlanName != "" {
@@ -668,7 +726,7 @@ func (m browseModel) viewDetails() string {
 		addField("Repository", s.Repo)
 		addField("Branch", s.Branch)
 	}
-	
+
 	addField("User", s.User)
 	addField("PID", fmt.Sprintf("%d", s.PID))
 	addField("Working Directory", s.WorkingDirectory)
@@ -795,3 +853,4 @@ func openInFileManager(path string) {
 		cmd.Start()
 	}
 }
+
