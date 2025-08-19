@@ -18,23 +18,23 @@ func NewSessionsCmd() *cobra.Command {
 		Use:   "sessions",
 		Short: "Manage and query local agent sessions",
 	}
-	
+
 	cmd.AddCommand(newSessionsListCmd())
 	cmd.AddCommand(newSessionsGetCmd())
 	cmd.AddCommand(NewBrowseCmd())
 	cmd.AddCommand(NewCleanupCmd())
-	
+
 	return cmd
 }
 
 func newSessionsListCmd() *cobra.Command {
 	var (
-		statusFilter string
-		jsonOutput   bool
-		limit        int
+		statusFilter  string
+		jsonOutput    bool
+		limit         int
 		hideCompleted bool
 	)
-	
+
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all sessions",
@@ -45,16 +45,16 @@ func newSessionsListCmd() *cobra.Command {
 				return fmt.Errorf("failed to create storage: %w", err)
 			}
 			defer storage.(*disk.SQLiteStore).Close()
-			
+
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
-			
+
 			// Get all sessions
 			sessions, err := storage.GetAllSessions()
 			if err != nil {
 				return fmt.Errorf("failed to get sessions: %w", err)
 			}
-			
+
 			// Filter by status if requested
 			if statusFilter != "" {
 				var filtered []*models.Session
@@ -65,7 +65,7 @@ func newSessionsListCmd() *cobra.Command {
 				}
 				sessions = filtered
 			}
-			
+
 			// Hide completed sessions if requested
 			if hideCompleted {
 				var filtered []*models.Session
@@ -76,7 +76,7 @@ func newSessionsListCmd() *cobra.Command {
 				}
 				sessions = filtered
 			}
-			
+
 			// Sort sessions: running first, then idle, then others by started_at desc
 			sort.Slice(sessions, func(i, j int) bool {
 				// Define status priority: running=1, idle=2, others=3
@@ -86,43 +86,43 @@ func newSessionsListCmd() *cobra.Command {
 				} else if sessions[i].Status == "idle" {
 					iPriority = 2
 				}
-				
+
 				jPriority := 3
 				if sessions[j].Status == "running" {
 					jPriority = 1
 				} else if sessions[j].Status == "idle" {
 					jPriority = 2
 				}
-				
+
 				// Sort by priority first
 				if iPriority != jPriority {
 					return iPriority < jPriority
 				}
-				
+
 				// Within same status group, sort by most recent first
 				return sessions[i].StartedAt.After(sessions[j].StartedAt)
 			})
-			
+
 			// Apply limit
 			if limit > 0 && len(sessions) > limit {
 				sessions = sessions[:limit]
 			}
-			
+
 			// Output results
 			if jsonOutput {
 				// Enhance sessions with state duration info
 				type SessionWithStateDuration struct {
 					*models.Session
-					StateDuration string `json:"state_duration"`
-					StateDurationSeconds int64 `json:"state_duration_seconds"`
+					StateDuration        string `json:"state_duration"`
+					StateDurationSeconds int64  `json:"state_duration_seconds"`
 				}
-				
+
 				enhancedSessions := make([]SessionWithStateDuration, len(sessions))
 				now := time.Now()
-				
+
 				for i, s := range sessions {
 					enhanced := SessionWithStateDuration{Session: s}
-					
+
 					// Calculate time in current state
 					if s.Status == "running" || s.Status == "idle" {
 						// For active sessions, time since last activity
@@ -140,24 +140,24 @@ func newSessionsListCmd() *cobra.Command {
 						enhanced.StateDuration = duration.Round(time.Second).String()
 						enhanced.StateDurationSeconds = int64(duration.Seconds())
 					}
-					
+
 					enhancedSessions[i] = enhanced
 				}
-				
+
 				encoder := json.NewEncoder(os.Stdout)
 				encoder.SetIndent("", "  ")
 				return encoder.Encode(enhancedSessions)
 			}
-			
+
 			// Table output
 			if len(sessions) == 0 {
 				fmt.Println("No sessions found")
 				return nil
 			}
-			
+
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "SESSION ID\tTYPE\tSTATUS\tCONTEXT\tUSER\tSTARTED\tDURATION\tIN STATE")
-			
+
 			for _, s := range sessions {
 				// Derive status for oneshot jobs based on ended_at
 				displayStatus := s.Status
@@ -165,14 +165,14 @@ func newSessionsListCmd() *cobra.Command {
 					// For oneshot jobs, if ended_at is NULL, show as running
 					displayStatus = "running"
 				}
-				
+
 				duration := "running"
 				if s.EndedAt != nil {
 					duration = s.EndedAt.Sub(s.StartedAt).Round(time.Second).String()
 				} else if displayStatus == "idle" {
 					duration = "idle"
 				}
-				
+
 				// Calculate time in current state
 				inState := ""
 				if displayStatus == "running" || displayStatus == "idle" {
@@ -185,9 +185,9 @@ func newSessionsListCmd() *cobra.Command {
 					// Fallback to time since started
 					inState = time.Since(s.StartedAt).Round(time.Second).String()
 				}
-				
+
 				started := s.StartedAt.Format("2006-01-02 15:04:05")
-				
+
 				// Format context based on session type
 				context := ""
 				sessionType := s.Type
@@ -230,7 +230,7 @@ func newSessionsListCmd() *cobra.Command {
 						context = "n/a"
 					}
 				}
-				
+
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					truncate(s.ID, 12),
 					sessionType,
@@ -242,54 +242,54 @@ func newSessionsListCmd() *cobra.Command {
 					inState,
 				)
 			}
-			
+
 			return w.Flush()
 		},
 	}
-	
+
 	cmd.Flags().StringVarP(&statusFilter, "status", "s", "", "Filter by status (running, idle, completed, failed)")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().IntVarP(&limit, "limit", "l", 0, "Limit number of results")
 	cmd.Flags().BoolVar(&hideCompleted, "active", false, "Show only active sessions (hide completed/failed)")
-	
+
 	return cmd
 }
 
 func newSessionsGetCmd() *cobra.Command {
 	var jsonOutput bool
-	
+
 	cmd := &cobra.Command{
 		Use:   "get <session-id>",
 		Short: "Get details of a specific session",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
-			
+
 			// Create storage
 			storage, err := disk.NewSQLiteStore()
 			if err != nil {
 				return fmt.Errorf("failed to create storage: %w", err)
 			}
 			defer storage.(*disk.SQLiteStore).Close()
-			
+
 			// Get session
 			sessionData, err := storage.GetSession(sessionID)
 			if err != nil {
 				return fmt.Errorf("failed to get session: %w", err)
 			}
-			
+
 			// Output results
 			if jsonOutput {
 				encoder := json.NewEncoder(os.Stdout)
 				encoder.SetIndent("", "  ")
 				return encoder.Encode(sessionData)
 			}
-			
+
 			// Handle both regular and extended sessions
 			var baseSession *models.Session
 			var sessionType string = "claude_session"
 			var planName, planDirectory, jobTitle, jobFilePath string
-			
+
 			if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
 				baseSession = &extSession.Session
 				if extSession.Type != "" {
@@ -304,12 +304,12 @@ func newSessionsGetCmd() *cobra.Command {
 			} else {
 				return fmt.Errorf("unexpected session type: %T", sessionData)
 			}
-			
+
 			// Detailed text output
 			fmt.Printf("Session ID: %s\n", baseSession.ID)
 			fmt.Printf("Type: %s\n", sessionType)
 			fmt.Printf("Status: %s\n", baseSession.Status)
-			
+
 			if sessionType == "oneshot_job" {
 				// Oneshot job specific fields
 				if planName != "" {
@@ -329,21 +329,21 @@ func newSessionsGetCmd() *cobra.Command {
 				fmt.Printf("Repository: %s\n", baseSession.Repo)
 				fmt.Printf("Branch: %s\n", baseSession.Branch)
 			}
-			
+
 			fmt.Printf("User: %s\n", baseSession.User)
 			fmt.Printf("Working Directory: %s\n", baseSession.WorkingDirectory)
 			fmt.Printf("PID: %d\n", baseSession.PID)
 			fmt.Printf("Started: %s\n", baseSession.StartedAt.Format(time.RFC3339))
-			
+
 			if baseSession.EndedAt != nil {
 				fmt.Printf("Ended: %s\n", baseSession.EndedAt.Format(time.RFC3339))
 				fmt.Printf("Duration: %s\n", baseSession.EndedAt.Sub(baseSession.StartedAt).Round(time.Second))
 			}
-			
+
 			if baseSession.TmuxKey != "" {
 				fmt.Printf("Tmux Key: %s\n", baseSession.TmuxKey)
 			}
-			
+
 			if baseSession.ToolStats != nil {
 				fmt.Printf("\nTool Statistics:\n")
 				fmt.Printf("  Total Calls: %d\n", baseSession.ToolStats.TotalCalls)
@@ -352,13 +352,13 @@ func newSessionsGetCmd() *cobra.Command {
 				fmt.Printf("  File Reads: %d\n", baseSession.ToolStats.FileReads)
 				fmt.Printf("  Search Operations: %d\n", baseSession.ToolStats.SearchOperations)
 			}
-			
+
 			return nil
 		},
 	}
-	
+
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
-	
+
 	return cmd
 }
 

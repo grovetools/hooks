@@ -79,12 +79,12 @@ func newOneshotStartCmd() *cobra.Command {
 			workingDir, _ := os.Getwd()
 
 			now := time.Now()
-			
+
 			// Always set status to running on start.
 			// The status from grove-flow might be an internal state like "pending_user"
 			// which isn't relevant for the hooks' session tracking.
 			status := "running"
-			
+
 			session := &disk.ExtendedSession{
 				Session: models.Session{
 					ID:               data.JobID,
@@ -97,11 +97,11 @@ func newOneshotStartCmd() *cobra.Command {
 					User:             user,
 					WorkingDirectory: workingDir,
 				},
-				Type:             "oneshot_job",
-				PlanName:         data.PlanName,
-				PlanDirectory:    data.PlanDirectory,
-				JobTitle:         data.JobTitle,
-				JobFilePath:      data.JobFilePath,
+				Type:          "oneshot_job",
+				PlanName:      data.PlanName,
+				PlanDirectory: data.PlanDirectory,
+				JobTitle:      data.JobTitle,
+				JobFilePath:   data.JobFilePath,
 			}
 
 			if err := storage.EnsureSessionExists(session); err != nil {
@@ -131,7 +131,7 @@ func newOneshotStopCmd() *cobra.Command {
 				log.Printf("Error parsing JSON: %v", err)
 				os.Exit(1)
 			}
-			
+
 			// Create storage directly instead of using hook context
 			storage, err := disk.NewSQLiteStore()
 			if err != nil {

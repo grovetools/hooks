@@ -28,25 +28,25 @@ type ExtendedSession struct {
 func (e *ExtendedSession) MarshalJSON() ([]byte, error) {
 	// Create a map with all fields
 	data := make(map[string]interface{})
-	
+
 	// Marshal the embedded Session to get its fields
 	sessionData, err := json.Marshal(e.Session)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Unmarshal into the map
 	if err := json.Unmarshal(sessionData, &data); err != nil {
 		return nil, err
 	}
-	
+
 	// Add extended fields
 	data["type"] = e.Type
 	data["plan_name"] = e.PlanName
 	data["plan_directory"] = e.PlanDirectory
 	data["job_title"] = e.JobTitle
 	data["job_file_path"] = e.JobFilePath
-	
+
 	return json.Marshal(data)
 }
 
@@ -67,7 +67,7 @@ func NewSQLiteStore() (interfaces.SessionStorer, error) {
 		}
 		dbPath = filepath.Join(dataDir, "state.db")
 	}
-	
+
 	return NewSQLiteStoreWithPath(dbPath)
 }
 
@@ -191,7 +191,7 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 	var baseSession *models.Session
 	var sessionType string = "claude_session"
 	var planName, planDirectory, jobTitle, jobFilePath string
-	
+
 	switch v := session.(type) {
 	case *models.Session:
 		baseSession = v
@@ -208,7 +208,7 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 	default:
 		return fmt.Errorf("unsupported session type: %T", session)
 	}
-	
+
 	// Marshal complex fields
 	toolStatsJSON := "{}"
 	if baseSession.ToolStats != nil {
@@ -284,7 +284,7 @@ func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 		&session.TmuxKey, &session.WorkingDirectory, &session.User,
 		&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
 		&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
-		&session.PlanName, &session.PlanDirectory, 
+		&session.PlanName, &session.PlanDirectory,
 		&session.JobTitle, &session.JobFilePath,
 	)
 
@@ -350,7 +350,7 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 			&session.TmuxKey, &session.WorkingDirectory, &session.User,
 			&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
 			&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
-			&session.PlanName, &session.PlanDirectory, 
+			&session.PlanName, &session.PlanDirectory,
 			&session.JobTitle, &session.JobFilePath,
 		)
 		if err != nil {
@@ -391,7 +391,7 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 // UpdateSessionStatus updates the status of a session
 func (s *SQLiteStore) UpdateSessionStatus(sessionID, status string) error {
 	query := `UPDATE sessions SET status = ?, last_activity = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-	
+
 	if status == "completed" || status == "failed" || status == "error" {
 		query = `UPDATE sessions SET status = ?, ended_at = CURRENT_TIMESTAMP, last_activity = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 	}
@@ -403,7 +403,7 @@ func (s *SQLiteStore) UpdateSessionStatus(sessionID, status string) error {
 // UpdateSessionStatusWithError updates the status of a session with an optional error message
 func (s *SQLiteStore) UpdateSessionStatusWithError(sessionID, status string, errorMsg string) error {
 	query := `UPDATE sessions SET status = ?, last_error = ?, last_activity = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-	
+
 	if status == "completed" || status == "failed" || status == "error" {
 		query = `UPDATE sessions SET status = ?, last_error = ?, ended_at = CURRENT_TIMESTAMP, last_activity = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 	}

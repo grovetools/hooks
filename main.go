@@ -1,12 +1,12 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-hooks/internal/commands"
 	"github.com/mattsolo1/grove-hooks/internal/hooks"
 	"github.com/spf13/cobra"
+	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -14,10 +14,10 @@ func main() {
 		"hooks",
 		"Claude hooks integration for Grove ecosystem",
 	)
-	
+
 	// Check if called via symlink to determine which hook to run
 	execName := filepath.Base(os.Args[0])
-	
+
 	// If called directly as 'hooks' or 'grove-hooks', show help
 	if execName == "hooks" || execName == "grove-hooks" {
 		// Add subcommands for manual execution
@@ -48,7 +48,7 @@ func main() {
 		}
 		return
 	}
-	
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

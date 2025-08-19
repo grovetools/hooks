@@ -24,8 +24,8 @@ type BaseHookInput struct {
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	HookEventName  string `json:"hook_event_name"`
 	// Current transcript position (if available)
-	CurrentUUID    string `json:"current_uuid,omitempty"`
-	ParentUUID     string `json:"parent_uuid,omitempty"`
+	CurrentUUID string `json:"current_uuid,omitempty"`
+	ParentUUID  string `json:"parent_uuid,omitempty"`
 }
 
 // HookContext provides common functionality for all hooks
@@ -100,7 +100,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		} else if session, ok := existingSessionData.(*models.Session); ok {
 			status = session.Status
 		}
-		
+
 		// Session exists - update status if idle
 		if status == "idle" {
 			return hc.Storage.UpdateSessionStatus(sessionID, "running")
@@ -191,14 +191,14 @@ func (hc *HookContext) GetSession(sessionID string) (*models.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Handle both regular and extended sessions
 	if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
 		return &extSession.Session, nil
 	} else if session, ok := sessionData.(*models.Session); ok {
 		return session, nil
 	}
-	
+
 	return nil, fmt.Errorf("unexpected session type: %T", sessionData)
 }
 

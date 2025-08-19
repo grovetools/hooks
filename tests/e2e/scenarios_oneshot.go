@@ -299,7 +299,7 @@ func OneshotJobScenario() *harness.Scenario {
 				for _, session := range sessions {
 					if sessionType, ok := session["type"].(string); ok && sessionType == "oneshot_job" {
 						foundOneshotJob = true
-						
+
 						// Verify job-specific fields exist
 						if _, ok := session["plan_name"]; !ok {
 							return fmt.Errorf("oneshot job should have plan_name field")

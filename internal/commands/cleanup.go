@@ -13,7 +13,7 @@ import (
 
 func NewCleanupCmd() *cobra.Command {
 	var inactivityMinutes int
-	
+
 	cmd := &cobra.Command{
 		Use:   "cleanup",
 		Short: "Clean up inactive sessions",
@@ -45,7 +45,7 @@ func NewCleanupCmd() *cobra.Command {
 
 	cmd.Flags().BoolP("verbose", "v", false, "Show verbose output")
 	cmd.Flags().IntVar(&inactivityMinutes, "inactive-minutes", 30, "Minutes of inactivity before marking session as completed")
-	
+
 	return cmd
 }
 
@@ -59,23 +59,23 @@ func isProcessAlive(pid int) bool {
 	// Try to send signal 0 to the process
 	// This doesn't actually send a signal but checks if we can
 	err := syscall.Kill(pid, 0)
-	
+
 	// Debug logging
 	if os.Getenv("GROVE_DEBUG") != "" {
 		fmt.Printf("Checking PID %d: err=%v\n", pid, err)
 	}
-	
+
 	// If no error, process exists
 	if err == nil {
 		return true
 	}
-	
+
 	// If error is ESRCH (no such process), process doesn't exist
 	if err == syscall.ESRCH {
 		return false
 	}
-	
-	// For other errors (like EPERM - permission denied), 
+
+	// For other errors (like EPERM - permission denied),
 	// assume process exists but we can't access it
 	return true
 }
@@ -97,13 +97,13 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 
 	cleaned := 0
 	now := time.Now()
-	
+
 	for _, session := range sessions {
 		// Skip oneshot jobs - they are managed by grove-flow
 		if session.Type == "oneshot_job" {
 			continue
 		}
-		
+
 		// For running/idle sessions, check if still active
 		if session.Status == "running" || session.Status == "idle" {
 			// First check if process is dead (quick check)
@@ -114,13 +114,13 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 					continue
 				}
 				cleaned++
-				
+
 				if os.Getenv("GROVE_DEBUG") != "" {
 					fmt.Printf("Cleaned up session %s (PID %d was dead)\n", session.ID, session.PID)
 				}
 				continue
 			}
-			
+
 			// Then check if session has been inactive for too long
 			timeSinceActivity := now.Sub(session.LastActivity)
 			if timeSinceActivity > inactivityThreshold {
@@ -130,7 +130,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 					continue
 				}
 				cleaned++
-				
+
 				if os.Getenv("GROVE_DEBUG") != "" {
 					fmt.Printf("Cleaned up inactive session %s (inactive for %v)\n", session.ID, timeSinceActivity)
 				}

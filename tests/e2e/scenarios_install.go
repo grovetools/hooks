@@ -24,17 +24,17 @@ func InstallCommandScenario() *harness.Scenario {
 
 				// Create a fresh directory for testing
 				testDir := ctx.NewDir("install-test-fresh")
-				
+
 				// Ensure the directory exists
 				if err := os.MkdirAll(testDir, 0755); err != nil {
 					return fmt.Errorf("failed to create test directory: %w", err)
 				}
-				
+
 				// Run install command
 				cmd := command.New(hooksBinary, "install", "-d", testDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if err := assert.Equal(0, result.ExitCode, "install command should exit successfully"); err != nil {
 					return err
 				}
@@ -103,14 +103,14 @@ func InstallCommandScenario() *harness.Scenario {
 				// Create existing settings with custom content
 				existingSettings := map[string]interface{}{
 					"enabledMcpjsonServers": []string{"custom-server"},
-					"customSetting": "should-be-preserved",
+					"customSetting":         "should-be-preserved",
 					"hooks": map[string]interface{}{
 						"CustomHook": []interface{}{
 							map[string]interface{}{
 								"matcher": ".*",
 								"hooks": []interface{}{
 									map[string]interface{}{
-										"type": "command",
+										"type":    "command",
 										"command": "custom-command",
 									},
 								},
@@ -133,7 +133,7 @@ func InstallCommandScenario() *harness.Scenario {
 				cmd := command.New(hooksBinary, "install", "-d", testDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if err := assert.Equal(0, result.ExitCode, "install command should exit successfully"); err != nil {
 					return err
 				}
@@ -194,11 +194,11 @@ func InstallCommandScenario() *harness.Scenario {
 
 				// Try to install in a non-existent directory
 				nonExistentDir := filepath.Join(ctx.NewDir("temp"), "non-existent-dir")
-				
+
 				cmd := command.New(hooksBinary, "install", "-d", nonExistentDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				// Should fail with non-zero exit code
 				if err := assert.NotEqual(0, result.ExitCode, "install should fail for non-existent directory"); err != nil {
 					return err
@@ -214,7 +214,7 @@ func InstallCommandScenario() *harness.Scenario {
 			harness.NewStep("Verify hook commands in installed settings", func(ctx *harness.Context) error {
 				testDir := ctx.GetString("test_dir")
 				settingsPath := filepath.Join(testDir, ".claude", "settings.local.json")
-				
+
 				data, err := os.ReadFile(settingsPath)
 				if err != nil {
 					return fmt.Errorf("failed to read settings: %w", err)
@@ -227,7 +227,7 @@ func InstallCommandScenario() *harness.Scenario {
 				}
 
 				hooks := settings["hooks"].(map[string]interface{})
-				
+
 				// Check PreToolUse configuration
 				preToolUse := hooks["PreToolUse"].([]interface{})
 				if len(preToolUse) != 1 {

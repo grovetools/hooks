@@ -107,7 +107,7 @@ func RunPreToolUseHook() {
 	if response.Approved {
 		// Generate a simple tool ID
 		toolID = fmt.Sprintf("%s_%d", data.SessionID, time.Now().UnixNano())
-		
+
 		// Use the tool input as parameters
 		args := data.ToolInput
 

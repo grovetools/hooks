@@ -24,7 +24,7 @@ func GetClaudePID() int {
 			return pid
 		}
 	}
-	
+
 	// For now, use parent PID as a simple approach
 	// In the future, we could use more sophisticated process tree walking
 	ppid := os.Getppid()

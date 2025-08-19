@@ -83,12 +83,12 @@ func runInstall(targetDir string) error {
 				backupPath := settingsPath + ".backup"
 				fmt.Printf("Warning: Failed to parse existing settings (%v)\n", err)
 				fmt.Printf("Backing up to %s and creating new configuration\n", backupPath)
-				
+
 				// Backup the corrupted file
 				if err := os.WriteFile(backupPath, data, 0644); err != nil {
 					return fmt.Errorf("failed to backup corrupted settings: %w", err)
 				}
-				
+
 				settings = make(ClaudeSettings)
 			} else {
 				fmt.Printf("Updating existing settings at %s\n", settingsPath)
