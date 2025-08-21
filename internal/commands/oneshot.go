@@ -6,11 +6,16 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
+	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
+	"github.com/mattsolo1/grove-notifications"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // OneshotStartInput defines the JSON payload for starting a job
@@ -60,6 +65,8 @@ func newOneshotStartCmd() *cobra.Command {
 				log.Printf("Error parsing JSON: %v", err)
 				os.Exit(1)
 			}
+			
+			log.Printf("Oneshot start received - JobID: %s, Status: %s, JobTitle: %s", data.JobID, data.Status, data.JobTitle)
 
 			// Create storage directly instead of using hook context
 			storage, err := disk.NewSQLiteStore()
@@ -80,10 +87,11 @@ func newOneshotStartCmd() *cobra.Command {
 
 			now := time.Now()
 
-			// Always set status to running on start.
-			// The status from grove-flow might be an internal state like "pending_user"
-			// which isn't relevant for the hooks' session tracking.
-			status := "running"
+			// Set status from input, default to running
+			status := data.Status
+			if status == "" {
+				status = "running"
+			}
 
 			session := &disk.ExtendedSession{
 				Session: models.Session{
@@ -107,6 +115,12 @@ func newOneshotStartCmd() *cobra.Command {
 			if err := storage.EnsureSessionExists(session); err != nil {
 				log.Printf("Failed to record job start: %v", err)
 				os.Exit(1)
+			}
+
+			// Send notification if pending user input
+			if status == "pending_user" {
+				log.Printf("Job %s started with pending_user status, sending notification", data.JobID)
+				sendOneshotNtfyNotification(storage, data.JobID, status)
 			}
 
 			fmt.Printf("Started tracking oneshot job: %s\n", data.JobID)
@@ -146,6 +160,13 @@ func newOneshotStopCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
+			// Send notification on completion or failure
+			log.Printf("Job %s stop received with status: %s", data.JobID, data.Status)
+			if data.Status == "completed" || data.Status == "failed" || data.Status == "success" {
+				log.Printf("Job %s %s, sending notification", data.JobID, data.Status)
+				sendOneshotNtfyNotification(storage, data.JobID, data.Status)
+			}
+
 			// If there's an error, log it as a notification
 			if data.Error != "" && data.Status == "failed" {
 				notification := &models.ClaudeNotification{
@@ -160,5 +181,110 @@ func newOneshotStopCmd() *cobra.Command {
 
 			fmt.Printf("Updated oneshot job %s status to: %s\n", data.JobID, data.Status)
 		},
+	}
+}
+
+// expandPath expands ~ to home directory (copied from internal/hooks/context.go)
+func expandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
+
+// sendOneshotNtfyNotification sends a ntfy notification for a oneshot job status change.
+func sendOneshotNtfyNotification(storage interfaces.SessionStorer, sessionID, jobStatus string) {
+	log.Printf("sendOneshotNtfyNotification called for job %s with status %s", sessionID, jobStatus)
+	
+	// Get notification settings from config
+	configPath := expandPath("~/.config/canopy/config.yaml")
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		// Fail silently if config doesn't exist
+		return
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		log.Printf("Failed to parse config for ntfy: %v", err)
+		return
+	}
+
+	ntfyConfig, ok := config["notifications"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	ntfy, ok := ntfyConfig["ntfy"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	enabled, _ := ntfy["enabled"].(bool)
+	if !enabled {
+		return
+	}
+
+	topic, _ := ntfy["topic"].(string)
+	if topic == "" {
+		return
+	}
+
+	// Get session info
+	sessionData, err := storage.GetSession(sessionID)
+	if err != nil {
+		log.Printf("Failed to get session for ntfy notification: %v", err)
+		return
+	}
+
+	// GetSession always returns *ExtendedSession from SQLiteStore
+	extSession, ok := sessionData.(*disk.ExtendedSession)
+	if !ok {
+		log.Printf("Failed to cast session for ntfy notification: got %T", sessionData)
+		return
+	}
+	session := &extSession.Session
+
+	ntfyURL := "https://ntfy.sh"
+	if url, ok := ntfy["url"].(string); ok && url != "" {
+		ntfyURL = url
+	}
+
+	// Prepare notification message
+	var title, message string
+	
+	// Get contextName from ExtendedSession
+	contextName := extSession.JobTitle
+	if contextName == "" {
+		contextName = extSession.PlanName
+	}
+	
+	// Fallback to repo name if no job title or plan name
+	if contextName == "" {
+		contextName = session.Repo
+	}
+
+	switch jobStatus {
+	case "completed", "success":
+		title = "Job Completed"
+		message = fmt.Sprintf("Job '%s' finished successfully.", contextName)
+	case "failed":
+		title = "Job Failed"
+		message = fmt.Sprintf("Job '%s' failed.", contextName)
+	case "pending_user":
+		title = "Action Required"
+		message = fmt.Sprintf("Job '%s' is waiting for your input.", contextName)
+	default:
+		log.Printf("Unknown job status for notification: %s", jobStatus)
+		return // Don't send notification for other states
+	}
+
+	if err := notifications.SendNtfy(ntfyURL, topic, title, message, "default", []string{"job", jobStatus}); err != nil {
+		log.Printf("Failed to send ntfy notification: %v", err)
+	} else {
+		log.Printf("Sent ntfy notification for job %s: %s", sessionID, message)
 	}
 }
