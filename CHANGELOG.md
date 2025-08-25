@@ -1,3 +1,25 @@
+## v0.0.4 (2025-08-25)
+
+### Features
+
+* **oneshot:** add notifications for job status changes
+* **browse:** improve sessions browse display with lipgloss table
+* **browse:** add auto-refresh to sessions browse command
+
+### Bug Fixes
+
+* fix oneshot running state
+
+### Continuous Integration
+
+* add Git LFS disable to release workflow
+* disable linting in workflow
+
+### Chores
+
+* bump dependencies
+* update formatting
+
 ## v0.0.3 (2025-08-15)
 
 ### Chores
