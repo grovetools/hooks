@@ -1,3 +1,9 @@
+## v0.0.5 (2025-08-26)
+
+### Features
+
+* **hooks:** enhance stop hook to support oneshot job lifecycle tracking
+
 ## v0.0.4 (2025-08-25)
 
 ### Features
