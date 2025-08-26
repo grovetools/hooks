@@ -12,6 +12,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/api"
+	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"gopkg.in/yaml.v3"
 )
 
@@ -215,22 +216,38 @@ func RunStopHook() {
 		os.Exit(1)
 	}
 
-	// Get session details to obtain working directory
-	session, err := ctx.GetSession(data.SessionID)
+	// Get session details to obtain working directory and type
+	var sessionType string = "claude_session" // default
+	var workingDir string
+	
+	// Get session data from storage directly to access type information
+	sessionData, err := ctx.Storage.GetSession(data.SessionID)
 	if err != nil {
 		log.Printf("Failed to get session details: %v", err)
-	} else if session != nil && session.WorkingDirectory != "" {
-		// Execute repository-specific hook commands
-		log.Printf("Checking for .canopy.yaml in working directory: %s", session.WorkingDirectory)
-		if err := ExecuteRepoHookCommands(ctx, session.WorkingDirectory); err != nil {
-			// Check if this is a blocking error from exit code 2
-			if blockingErr, ok := err.(*api.HookBlockingError); ok {
-				log.Printf("Hook command returned blocking error: %s", blockingErr.Message)
-				// Write the error message to stderr and exit with code 2
-				fmt.Fprintf(os.Stderr, "%s\n", blockingErr.Message)
-				os.Exit(2)
+	} else if sessionData != nil {
+		// Check if it's an extended session with a type
+		if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
+			if extSession.Type != "" {
+				sessionType = extSession.Type
 			}
-			log.Printf("Failed to execute repo hook commands: %v", err)
+			workingDir = extSession.WorkingDirectory
+		} else if session, ok := sessionData.(*models.Session); ok {
+			workingDir = session.WorkingDirectory
+		}
+		
+		// Execute repository-specific hook commands if we have a working directory
+		if workingDir != "" {
+			log.Printf("Checking for .canopy.yaml in working directory: %s", workingDir)
+			if err := ExecuteRepoHookCommands(ctx, workingDir); err != nil {
+				// Check if this is a blocking error from exit code 2
+				if blockingErr, ok := err.(*api.HookBlockingError); ok {
+					log.Printf("Hook command returned blocking error: %s", blockingErr.Message)
+					// Write the error message to stderr and exit with code 2
+					fmt.Fprintf(os.Stderr, "%s\n", blockingErr.Message)
+					os.Exit(2)
+				}
+				log.Printf("Failed to execute repo hook commands: %v", err)
+			}
 		}
 	}
 
@@ -248,24 +265,35 @@ func RunStopHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
-	// Update session status based on exit reason
-	// Mark as completed for actual completion or errors
-	// Otherwise, set to idle (for normal end-of-turn stops)
-	if data.ExitReason == "completed" || data.ExitReason == "error" || data.ExitReason == "interrupted" || data.ExitReason == "killed" {
+	// Update session status based on exit reason and session type
+	// For oneshot jobs, always mark as completed when stop hook is called
+	if sessionType == "oneshot_job" {
+		log.Printf("Marking oneshot job session as completed")
 		if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "completed"); err != nil {
-			log.Printf("Failed to complete session: %v", err)
+			log.Printf("Failed to complete oneshot job session: %v", err)
 		}
-
-		// Send ntfy notification for completed sessions
+		// Send ntfy notification for completed oneshot job
 		sendNtfyNotification(ctx, data, "completed")
 	} else {
-		// Normal end-of-turn stop (empty exit_reason or other) - set to idle
-		if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "idle"); err != nil {
-			log.Printf("Failed to update session status to idle: %v", err)
-		}
+		// For regular claude sessions, use exit reason to determine status
+		// Mark as completed for actual completion or errors
+		// Otherwise, set to idle (for normal end-of-turn stops)
+		if data.ExitReason == "completed" || data.ExitReason == "error" || data.ExitReason == "interrupted" || data.ExitReason == "killed" {
+			if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "completed"); err != nil {
+				log.Printf("Failed to complete session: %v", err)
+			}
 
-		// Send ntfy notification for normal session stops too
-		sendNtfyNotification(ctx, data, "stopped")
+			// Send ntfy notification for completed sessions
+			sendNtfyNotification(ctx, data, "completed")
+		} else {
+			// Normal end-of-turn stop (empty exit_reason or other) - set to idle
+			if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "idle"); err != nil {
+				log.Printf("Failed to update session status to idle: %v", err)
+			}
+
+			// Send ntfy notification for normal session stops too
+			sendNtfyNotification(ctx, data, "stopped")
+		}
 	}
 }
 

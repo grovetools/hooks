@@ -29,6 +29,7 @@ func OneshotJobScenario() *harness.Scenario {
 		Name:        "Oneshot Job Tracking",
 		Description: "Tests the oneshot job lifecycle (start, stop, query)",
 		Steps: []harness.Step{
+			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Start a oneshot job", func(ctx *harness.Context) error {
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
@@ -363,6 +364,7 @@ func OneshotJobScenario() *harness.Scenario {
 
 				return assert.NotContains(result.Stdout, oldJobID, "old job should be cleaned up")
 			}), */
+			harness.NewStep("Clean up test database", CleanupTestDatabase),
 		},
 	}
 }
@@ -373,6 +375,7 @@ func OneshotJobValidationScenario() *harness.Scenario {
 		Name:        "Oneshot Job Validation",
 		Description: "Tests oneshot job input validation and error handling",
 		Steps: []harness.Step{
+			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Reject invalid JSON input", func(ctx *harness.Context) error {
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
@@ -432,6 +435,7 @@ func OneshotJobValidationScenario() *harness.Scenario {
 				// Should succeed (updates are idempotent)
 				return assert.Equal(0, result.ExitCode, "should handle updating non-existent job")
 			}),
+			harness.NewStep("Clean up test database", CleanupTestDatabase),
 		},
 	}
 }

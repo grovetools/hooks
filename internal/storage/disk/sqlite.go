@@ -344,9 +344,10 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 		var session models.Session
 		var endedAt sql.NullTime
 		var toolStatsJSON, sessionSummaryJSON string
+		var sessionType string
 
 		err := rows.Scan(
-			&session.ID, &session.Type, &session.PID, &session.Repo, &session.Branch,
+			&session.ID, &sessionType, &session.PID, &session.Repo, &session.Branch,
 			&session.TmuxKey, &session.WorkingDirectory, &session.User,
 			&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
 			&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
@@ -356,6 +357,8 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		session.Type = sessionType
 
 		if endedAt.Valid {
 			session.EndedAt = &endedAt.Time

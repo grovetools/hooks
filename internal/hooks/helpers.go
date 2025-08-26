@@ -13,6 +13,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/api"
+	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-notifications"
 )
 
@@ -207,4 +208,19 @@ func ExecuteHookCommand(workingDir string, hookCmd models.HookCommand) error {
 	}
 
 	return nil
+}
+
+// getWorkingDirectory extracts the working directory from a session interface
+func getWorkingDirectory(session interface{}) string {
+	// Check if it's an extended session
+	if extSession, ok := session.(*disk.ExtendedSession); ok {
+		return extSession.WorkingDirectory
+	}
+	
+	// Check if it's a regular session
+	if baseSession, ok := session.(*models.Session); ok {
+		return baseSession.WorkingDirectory
+	}
+	
+	return ""
 }
