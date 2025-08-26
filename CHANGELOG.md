@@ -1,3 +1,9 @@
+## v0.0.6 (2025-08-26)
+
+### Chores
+
+* standardize binary name to 'hooks'
+
 ## v0.0.5 (2025-08-26)
 
 ### Features
