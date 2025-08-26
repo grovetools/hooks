@@ -1,3 +1,9 @@
+## v0.0.7 (2025-08-26)
+
+### Bug Fixes
+
+* add readme, fix makefile/release with cgo
+
 ## v0.0.6 (2025-08-26)
 
 ### Chores
