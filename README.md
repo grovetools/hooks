@@ -1,0 +1,156 @@
+# Grove Hooks
+
+[![Go Build](https://github.com/mattsolo1/grove-hooks/actions/workflows/go.yml/badge.svg)](https://github.com/mattsolo1/grove-hooks/actions/workflows/go.yml)
+
+Grove Hooks is a local-first observability and state management tool for AI agent sessions within the Grove ecosystem. It integrates seamlessly with the Claude CLI via its hook system to capture detailed information about tool usage, session lifecycle, and notifications, storing everything in a local SQLite database for fast, offline-first access.
+
+It provides a rich command-line interface and an interactive terminal UI to query, browse, and manage both interactive Claude sessions and automated `grove-flow` jobs.
+
+## Key Features
+
+- **Local-First Session Tracking:** All session data is stored in a local SQLite database (`~/.local/share/grove-hooks/state.db`), requiring no network access.
+- **Claude CLI Integration:** An `install` command automatically configures the necessary hooks in your repository's `.claude/settings.local.json`.
+- **Rich CLI:** Query and manage sessions with commands to `list`, `get`, `browse`, and `cleanup`.
+- **Interactive Session Browser:** A terminal-based UI (`sessions browse`) to filter, search, and inspect sessions in real-time.
+- **Oneshot Job Support:** Tracks the lifecycle of automated jobs executed by `grove-flow`, providing unified observability for both interactive and automated tasks.
+- **Repository-Level Hooks:** Define custom `on_stop` commands in a `.canopy.yaml` file to run validation, linting, or cleanup tasks when a session ends.
+- **System Notifications:** Sends native desktop notifications for important events like errors and warnings.
+
+## Installation
+
+You can build the `grove-hooks` binary from source.
+
+```bash
+# Clone the repository
+git clone https://github.com/mattsolo1/grove-hooks.git
+cd grove-hooks
+
+# Build the binary
+go build -o grove-hooks .
+```
+
+Then, move the `grove-hooks` binary to a location in your `PATH`, such as `/usr/local/bin`.
+
+## Getting Started: Integration with Claude
+
+To integrate `grove-hooks` with your project, navigate to your repository's root directory and run the `install` command.
+
+```bash
+cd /path/to/your/project
+grove-hooks install
+```
+
+This command will:
+1.  Create a `.claude` directory if one does not exist.
+2.  Create or update the `.claude/settings.local.json` file.
+3.  Inject the necessary hook configurations, pointing them to the `grove-hooks` binary. It preserves any other existing settings in the file.
+
+After installation, the Claude CLI will automatically invoke `grove-hooks` at different stages of a session, populating the local database with observability data.
+
+## Command Reference
+
+### `grove-hooks sessions`
+
+The `sessions` command is the main entrypoint for managing and viewing session data.
+
+#### `sessions list`
+
+List all tracked sessions in a table format.
+
+```bash
+grove-hooks sessions list
+```
+
+Example Output:
+```
+SESSION ID    TYPE    STATUS      CONTEXT              USER    STARTED               DURATION    IN STATE
+test-job-1... job     completed   test-plan            matt    2023-10-27 10:30:05   1s          1s
+claude-se...  claude  running     grove-hooks/main     matt    2023-10-27 10:29:50   running     15s
+```
+
+- **CONTEXT:** Shows the repository and branch for Claude sessions, or the plan/job title for oneshot jobs.
+- **IN STATE:** Shows the time elapsed in the current status (e.g., how long it's been `running` or `idle`).
+
+**Flags:**
+- `--status <status>`: Filter by status (e.g., `running`, `idle`, `completed`, `failed`).
+- `--active`: A shorthand to show only active sessions (hides `completed`, `failed`, etc.).
+- `--limit <n>`: Limit the number of results.
+- `--json`: Output the full session data as JSON.
+
+---
+
+#### `sessions get <session-id>`
+
+View detailed information for a specific session.
+
+```bash
+grove-hooks sessions get <session-id>
+```
+
+**Flags:**
+- `--json`: Output the details as a JSON object.
+
+---
+
+#### `sessions browse`
+
+Launch an interactive terminal UI to browse, search, and manage sessions.
+
+```bash
+grove-hooks sessions browse
+```
+
+**Keybindings:**
+- **Arrow Keys (↑/↓):** Navigate the session list.
+- **Type to Filter:** Instantly filter sessions by repo, branch, user, or ID.
+- **Tab:** Cycle through status filters (`all` -> `running` -> `idle` -> `completed` -> `failed`).
+- **Enter:** View detailed information for the selected session.
+- **Space:** Select/deselect one or more sessions.
+- **Ctrl+A:** Archive all currently selected sessions (removes them from view).
+- **Ctrl+Y:** Copy the selected session ID to the clipboard.
+- **Ctrl+O:** Open the session's working directory in your file manager.
+- **Esc / Ctrl+C:** Exit the browser.
+
+---
+
+#### `sessions cleanup`
+
+Marks inactive or dead sessions as `completed`. This is run automatically by `sessions list` and `sessions browse`, but can be triggered manually.
+
+```bash
+grove-hooks sessions cleanup --inactive-minutes 60
+```
+
+---
+
+### `grove-hooks oneshot`
+
+This command is intended for programmatic use by other tools in the Grove ecosystem, primarily `grove-flow`, to track the lifecycle of non-interactive jobs.
+
+- **`oneshot start`**: Called at the beginning of a job. It reads a JSON payload from stdin to create a new session record with `type: oneshot_job`.
+- **`oneshot stop`**: Called at the end of a job. It reads a JSON payload from stdin to update the job's final status (`completed` or `failed`) and records the end time.
+
+## Advanced Features
+
+### Repository Hooks (`.canopy.yaml`)
+
+You can define repository-specific commands to be executed when a Claude session stops by creating a `.canopy.yaml` file in your project's root. This is useful for running linters, formatters, or validation scripts on files modified by the agent.
+
+**Example `.canopy.yaml`:**
+
+```yaml
+hooks:
+  on_stop:
+    - name: "Run Linter"
+      # Only run if there are uncommitted git changes
+      run_if: changes
+      # The command to execute
+      command: "npm run lint -- --fix"
+
+    - name: "Run Unit Tests"
+      run_if: changes
+      # This command will block the session from ending if it fails
+      # with a special exit code, and its stderr will be shown to the agent.
+      command: "npm test"
+```
+

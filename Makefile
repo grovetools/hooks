@@ -74,6 +74,8 @@ dev:
 	@go build -race $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 # Cross-compilation targets
+# Note: Cross-compilation with CGO requires appropriate C compilers for target platforms
+# For CI/CD, we use native runners for each platform instead
 PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
 DIST_DIR ?= dist
 

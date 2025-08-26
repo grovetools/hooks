@@ -49,17 +49,22 @@ jobs:
 
       - name: Build
         run: |
-          make build
+          export CGO_ENABLED=1
+          # Build only for the native architecture in CI
+          go build -o bin/hooks .
 
       - name: Run unit tests
         run: |
+          export CGO_ENABLED=1
           make test
 
       - name: Build E2E test framework
         run: |
+          export CGO_ENABLED=1
           make test-e2e-build
 
       - name: Run E2E tests
         run: |
+          export CGO_ENABLED=1
           make test-e2e
 

@@ -4,10 +4,20 @@ on:
     tags: ['v*']
     
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -40,23 +50,54 @@ jobs:
       - name: Create dist directory
         run: mkdir -p dist
 
-      - name: Build binaries
+      - name: Build binary
         run: |
-          make build-all VERSION=${{ github.ref_name }}
+          export CGO_ENABLED=1
+          export GOOS=${{ matrix.goos }}
+          export GOARCH=${{ matrix.goarch }}
+          mkdir -p dist
+          output_name="hooks-${{ matrix.goos }}-${{ matrix.goarch }}"
+          echo "Building ${output_name} version ${{ github.ref_name }}"
+          go build -ldflags="-X 'github.com/mattsolo1/grove-core/version.Version=${{ github.ref_name }}'" -o dist/${output_name} .
 
       - name: Run unit tests
         run: |
+          export CGO_ENABLED=1
           make test
 
       - name: Build E2E test framework
         run: |
+          export CGO_ENABLED=1
           make test-e2e-build
 
       - name: Run E2E tests
         run: |
+          export CGO_ENABLED=1
           make test-e2e
         env:
           CX_BINARY: ${{ github.workspace }}/bin/hooks
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hooks-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Generate checksums
         run: |
