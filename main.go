@@ -29,6 +29,7 @@ func main() {
 		rootCmd.AddCommand(newSessionsCmd())
 		rootCmd.AddCommand(newOneshotCmd())
 		rootCmd.AddCommand(newInstallCmd())
+		rootCmd.AddCommand(commands.NewVersionCmd())
 	} else {
 		// Called via symlink, execute the corresponding hook
 		switch execName {
