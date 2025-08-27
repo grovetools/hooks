@@ -1,6 +1,8 @@
 # Grove Hooks
 
-<img src="https://github.com/user-attachments/assets/eda77869-0e99-467c-a20d-4d5b8262aecf" width="70%" /> 
+<img src="https://github.com/user-attachments/assets/eda77869-0e99-467c-a20d-4d5b8262aecf" width="80%" /> 
+
+---
 
 [![CI](https://github.com/mattsolo1/grove-hooks/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-hooks/actions/workflows/ci.yml)
 
