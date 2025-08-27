@@ -2,34 +2,28 @@
 
 [![Go Build](https://github.com/mattsolo1/grove-hooks/actions/workflows/go.yml/badge.svg)](https://github.com/mattsolo1/grove-hooks/actions/workflows/go.yml)
 
-Grove Hooks is a local-first observability and state management tool for AI agent sessions within the Grove ecosystem. It integrates seamlessly with the Claude CLI via its hook system to capture detailed information about tool usage, session lifecycle, and notifications, storing everything in a local SQLite database for fast, offline-first access.
+Grove Hooks is a local-first observability and state management tool for AI agent sessions and API requests within the Grove ecosystem. Its hook system captures information about tool usage, session lifecycle, and notifications, storing everything in a local SQLite database for fast, offline-first access.
 
-It provides a rich command-line interface and an interactive terminal UI to query, browse, and manage both interactive Claude sessions and automated `grove-flow` jobs.
+It provides a command-line interface and an interactive terminal UI to query, browse, and manage both interactive Claude sessions and `grove-flow` jobs.
 
 ## Key Features
 
 - **Local-First Session Tracking:** All session data is stored in a local SQLite database (`~/.local/share/grove-hooks/state.db`), requiring no network access.
-- **Claude CLI Integration:** An `install` command automatically configures the necessary hooks in your repository's `.claude/settings.local.json`.
-- **Rich CLI:** Query and manage sessions with commands to `list`, `get`, `browse`, and `cleanup`.
+- **Claude Code Integration:** An `install` command automatically configures the necessary hooks in your repository's `.claude/settings.local.json`.
+- **CLI interface:** Query and manage sessions with commands to `list`, `get`, `browse`, and `cleanup`.
 - **Interactive Session Browser:** A terminal-based UI (`sessions browse`) to filter, search, and inspect sessions in real-time.
-- **Oneshot Job Support:** Tracks the lifecycle of automated jobs executed by `grove-flow`, providing unified observability for both interactive and automated tasks.
-- **Repository-Level Hooks:** Define custom `on_stop` commands in a `.canopy.yaml` file to run validation, linting, or cleanup tasks when a session ends.
+- **Oneshot Job Support:** Tracks the lifecycle of API requests executed by `grove-flow`, providing unified observability for both interactive and automated tasks.
 - **System Notifications:** Sends native desktop notifications for important events like errors and warnings.
+
+## Dependencies
+
+Claude Code (optional)
+
+`grove-flow` (optional)
 
 ## Installation
 
-You can build the `grove-hooks` binary from source.
-
-```bash
-# Clone the repository
-git clone https://github.com/mattsolo1/grove-hooks.git
-cd grove-hooks
-
-# Build the binary
-go build -o grove-hooks .
-```
-
-Then, move the `grove-hooks` binary to a location in your `PATH`, such as `/usr/local/bin`.
+Todo
 
 ## Getting Started: Integration with Claude
 
@@ -119,38 +113,5 @@ Marks inactive or dead sessions as `completed`. This is run automatically by `se
 
 ```bash
 grove-hooks sessions cleanup --inactive-minutes 60
-```
-
----
-
-### `grove-hooks oneshot`
-
-This command is intended for programmatic use by other tools in the Grove ecosystem, primarily `grove-flow`, to track the lifecycle of non-interactive jobs.
-
-- **`oneshot start`**: Called at the beginning of a job. It reads a JSON payload from stdin to create a new session record with `type: oneshot_job`.
-- **`oneshot stop`**: Called at the end of a job. It reads a JSON payload from stdin to update the job's final status (`completed` or `failed`) and records the end time.
-
-## Advanced Features
-
-### Repository Hooks (`.canopy.yaml`)
-
-You can define repository-specific commands to be executed when a Claude session stops by creating a `.canopy.yaml` file in your project's root. This is useful for running linters, formatters, or validation scripts on files modified by the agent.
-
-**Example `.canopy.yaml`:**
-
-```yaml
-hooks:
-  on_stop:
-    - name: "Run Linter"
-      # Only run if there are uncommitted git changes
-      run_if: changes
-      # The command to execute
-      command: "npm run lint -- --fix"
-
-    - name: "Run Unit Tests"
-      run_if: changes
-      # This command will block the session from ending if it fails
-      # with a special exit code, and its stderr will be shown to the agent.
-      command: "npm test"
 ```
 
