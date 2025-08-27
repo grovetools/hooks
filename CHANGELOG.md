@@ -1,3 +1,9 @@
+## v0.0.8 (2025-08-27)
+
+### Chores
+
+* update readme
+
 ## v0.0.7 (2025-08-26)
 
 ### Bug Fixes
