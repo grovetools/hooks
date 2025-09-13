@@ -1,3 +1,21 @@
+## v0.0.8 (2025-09-13)
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+* update readme
+
+### Bug Fixes
+
+* update grove.yml to use correct binary name
+* add version cmd
+
+### Documentation
+
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.9
+* **changelog:** update CHANGELOG.md for v0.0.8
+
 ## v0.0.8 (2025-09-12)
 
 ### Chores
