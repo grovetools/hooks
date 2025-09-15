@@ -228,7 +228,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Remember the currently selected session ID
 				var selectedID string
-				if m.cursor < len(m.filtered) {
+				if m.cursor >= 0 && m.cursor < len(m.filtered) {
 					selectedID = m.filtered[m.cursor].ID
 				}
 
@@ -247,7 +247,9 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Ensure cursor is within bounds
-				if m.cursor >= len(m.filtered) && len(m.filtered) > 0 {
+				if len(m.filtered) == 0 {
+					m.cursor = 0
+				} else if m.cursor >= len(m.filtered) {
 					m.cursor = len(m.filtered) - 1
 				}
 
@@ -354,6 +356,31 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case tea.KeyCtrlA:
+			// Select/Deselect all filtered items
+			if len(m.filtered) > 0 && !m.showDetails {
+				// Check if all filtered items are already selected
+				allSelected := true
+				for _, s := range m.filtered {
+					if !m.selectedIDs[s.ID] {
+						allSelected = false
+						break
+					}
+				}
+
+				if allSelected {
+					// If all are selected, deselect all filtered items
+					for _, s := range m.filtered {
+						delete(m.selectedIDs, s.ID)
+					}
+				} else {
+					// Otherwise, select all filtered items
+					for _, s := range m.filtered {
+						m.selectedIDs[s.ID] = true
+					}
+				}
+			}
+
+		case tea.KeyCtrlX:
 			// Archive selected sessions
 			if len(m.selectedIDs) > 0 && !m.showDetails {
 				// Get list of selected IDs
@@ -380,7 +407,9 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateFiltered()
 
 					// Adjust cursor if needed
-					if m.cursor >= len(m.filtered) && m.cursor > 0 {
+					if len(m.filtered) == 0 {
+						m.cursor = 0
+					} else if m.cursor >= len(m.filtered) {
 						m.cursor = len(m.filtered) - 1
 					}
 				}
@@ -665,10 +694,20 @@ func (m browseModel) View() string {
 
 	// Help text
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-	helpText := "↑/↓: navigate • enter: details • tab: filter • space: select • ctrl+a: archive"
-	if len(m.selectedIDs) > 0 {
-		helpText = fmt.Sprintf("%s (%d selected)", helpText, len(m.selectedIDs))
+
+	// Build first line of help text
+	helpLine1Parts := []string{
+		"↑/↓: navigate",
+		"enter: details",
+		"tab: filter",
+		"space: select",
+		"ctrl+a: select all",
 	}
+	if len(m.selectedIDs) > 0 {
+		helpLine1Parts = append(helpLine1Parts, fmt.Sprintf("ctrl+x: archive (%d)", len(m.selectedIDs)))
+	}
+	helpText := strings.Join(helpLine1Parts, " • ")
+
 	b.WriteString("\n" + helpStyle.Render(helpText))
 	b.WriteString("\n" + helpStyle.Render("ctrl+y: copy ID • ctrl+o: open dir • ctrl+j: export • esc: quit"))
 

@@ -104,7 +104,8 @@ grove-hooks sessions browse
 - **Tab:** Cycle through status filters (`all` -> `running` -> `idle` -> `completed` -> `failed`).
 - **Enter:** View detailed information for the selected session.
 - **Space:** Select/deselect one or more sessions.
-- **Ctrl+A:** Archive all currently selected sessions (removes them from view).
+- **Ctrl+A:** Select/deselect all currently visible sessions.
+- **Ctrl+X:** Archive all currently selected sessions (removes them from view).
 - **Ctrl+Y:** Copy the selected session ID to the clipboard.
 - **Ctrl+O:** Open the session's working directory in your file manager.
 - **Esc / Ctrl+C:** Exit the browser.
