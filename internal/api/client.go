@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-hooks/internal/git"
 	"github.com/mattsolo1/grove-tmux/pkg/tmux"
 	"gopkg.in/yaml.v3"
 )
@@ -380,29 +381,17 @@ func (c *APIClient) EnsureSessionExists(sessionID string, transcriptPath string)
 		workingDir = "."
 	}
 
-	// Get git info
-	repo := "unknown"
-	branch := "unknown"
-
-	// Try to get git info from the working directory
-	cmd := exec.Command("git", "-C", workingDir, "rev-parse", "--show-toplevel")
-	if out, err := cmd.Output(); err == nil {
-		repoPath := strings.TrimSpace(string(out))
-		repo = filepath.Base(repoPath)
-	} else {
-		// If git fails, use the directory name as repo name
-		repo = filepath.Base(workingDir)
-		if repo == "" || repo == "." || repo == "/" {
-			repo = "no-repo"
-		}
-	}
-
-	cmd = exec.Command("git", "-C", workingDir, "rev-parse", "--abbrev-ref", "HEAD")
-	if out, err := cmd.Output(); err == nil {
-		branch = strings.TrimSpace(string(out))
-	} else {
-		// Default branch name when not in git
+	// Get git info using the centralized utility
+	gitInfo := git.GetInfo(workingDir)
+	repo := gitInfo.Repository
+	branch := gitInfo.Branch
+	
+	// Handle non-git directories
+	if branch == "unknown" {
 		branch = "no-branch"
+	}
+	if repo == "" || repo == "." || repo == "/" {
+		repo = "no-repo"
 	}
 
 	// Get current user

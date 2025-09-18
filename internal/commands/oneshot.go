@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-hooks/internal/git"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-notifications"
@@ -85,6 +86,24 @@ func newOneshotStartCmd() *cobra.Command {
 			// Get working directory
 			workingDir, _ := os.Getwd()
 
+			// Initialize repository and branch from input
+			repository := data.Repository
+			branch := data.Branch
+
+			// Try to detect Git repository information
+			gitInfo := git.GetInfo(workingDir)
+			
+			// If we successfully detected a Git repository, override the provided values
+			if gitInfo.Branch != "unknown" {
+				// Log when we're overriding the context
+				if repository != gitInfo.Repository || branch != gitInfo.Branch {
+					log.Printf("Detected git repository. Using '%s/%s' for context instead of provided '%s/%s'.", 
+						gitInfo.Repository, gitInfo.Branch, repository, branch)
+				}
+				repository = gitInfo.Repository
+				branch = gitInfo.Branch
+			}
+
 			now := time.Now()
 
 			// Set status from input, default to running
@@ -97,8 +116,8 @@ func newOneshotStartCmd() *cobra.Command {
 				Session: models.Session{
 					ID:               data.JobID,
 					PID:              os.Getpid(),
-					Repo:             data.Repository,
-					Branch:           data.Branch,
+					Repo:             repository,
+					Branch:           branch,
 					Status:           status,
 					StartedAt:        now,
 					LastActivity:     now,

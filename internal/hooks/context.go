@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-hooks/internal/git"
 	"github.com/mattsolo1/grove-hooks/internal/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
@@ -117,21 +117,10 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		workingDir = "."
 	}
 
-	// Get git info
-	repo := filepath.Base(workingDir)
-	gitBranch := "unknown"
-
-	// Try to get git info from the working directory
-	cmd := exec.Command("git", "-C", workingDir, "rev-parse", "--show-toplevel")
-	if out, err := cmd.Output(); err == nil {
-		repoPath := strings.TrimSpace(string(out))
-		repo = filepath.Base(repoPath)
-	}
-
-	cmd = exec.Command("git", "-C", workingDir, "rev-parse", "--abbrev-ref", "HEAD")
-	if out, err := cmd.Output(); err == nil {
-		gitBranch = strings.TrimSpace(string(out))
-	}
+	// Get git info using the centralized utility
+	gitInfo := git.GetInfo(workingDir)
+	repo := gitInfo.Repository
+	gitBranch := gitInfo.Branch
 
 	// Get user info
 	username := os.Getenv("USER")
