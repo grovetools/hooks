@@ -1,3 +1,81 @@
+## v0.0.8 (2025-09-17)
+
+### Bug Fixes
+
+* update grove.yml to use correct binary name
+* add version cmd
+
+### Documentation
+
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.9
+* **changelog:** update CHANGELOG.md for v0.0.8
+
+### Features
+
+* add select all functionality to session browse
+
+### Chores
+
+* bump dependencies
+* update Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+* update readme
+
+## v0.0.8 (2025-09-17)
+
+### Features
+
+* add select all functionality to session browse
+
+### Documentation
+
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.9
+* **changelog:** update CHANGELOG.md for v0.0.8
+
+### Chores
+
+* bump dependencies
+* update Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+* update readme
+
+### Bug Fixes
+
+* update grove.yml to use correct binary name
+* add version cmd
+
+## v0.0.8 (2025-09-17)
+
+### Features
+
+* add select all functionality to session browse
+
+### Bug Fixes
+
+* update grove.yml to use correct binary name
+* add version cmd
+
+### Documentation
+
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.8
+* **changelog:** update CHANGELOG.md for v0.0.9
+* **changelog:** update CHANGELOG.md for v0.0.8
+
+### Chores
+
+* bump dependencies
+* update Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+* update readme
+
 ## v0.0.8 (2025-09-13)
 
 ### Chores
