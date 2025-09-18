@@ -20,6 +20,7 @@ func main() {
 		OfflineOperationScenario(),
 		OneshotJobScenario(),
 		OneshotJobValidationScenario(),
+		FlowOneshotTrackingScenario(),
 		// TODO: Fix MixedSessionTypesScenario - it's not properly isolating the test database
 		// MixedSessionTypesScenario(),
 	}
