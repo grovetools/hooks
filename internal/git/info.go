@@ -17,27 +17,18 @@ func GetInfo(workingDir string) *Info {
 		Branch:     "unknown",
 	}
 
-	// Check if we're in a git repository
+	// Check if we're in a git repository. If not, return the working directory's base name.
 	cmd := exec.Command("git", "-C", workingDir, "rev-parse", "--is-inside-work-tree")
 	if output, err := cmd.Output(); err != nil || strings.TrimSpace(string(output)) != "true" {
 		return info
 	}
 
-	// Get the repository name - handle worktrees properly
-	// First try to get the git common directory (works for worktrees)
-	cmd = exec.Command("git", "-C", workingDir, "rev-parse", "--git-common-dir")
+	// Get the repository root directory path. This is the most reliable method for both
+	// standard repositories and worktrees.
+	cmd = exec.Command("git", "-C", workingDir, "rev-parse", "--show-toplevel")
 	if output, err := cmd.Output(); err == nil {
-		gitDir := strings.TrimSpace(string(output))
-		// The repository name is the parent directory of .git
-		repoPath := filepath.Dir(gitDir)
-		info.Repository = filepath.Base(repoPath)
-	} else {
-		// Fallback to show-toplevel for regular repos
-		cmd = exec.Command("git", "-C", workingDir, "rev-parse", "--show-toplevel")
-		if output, err := cmd.Output(); err == nil {
-			topLevel := strings.TrimSpace(string(output))
-			info.Repository = filepath.Base(topLevel)
-		}
+		topLevel := strings.TrimSpace(string(output))
+		info.Repository = filepath.Base(topLevel)
 	}
 
 	// Get the current branch name

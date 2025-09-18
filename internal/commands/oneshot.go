@@ -86,22 +86,23 @@ func newOneshotStartCmd() *cobra.Command {
 			// Get working directory
 			workingDir, _ := os.Getwd()
 
-			// Initialize repository and branch from input
+			// Use repository and branch from the input payload directly.
+			// grove-flow has the correct context for the job being run and is the source of truth.
 			repository := data.Repository
 			branch := data.Branch
 
-			// Try to detect Git repository information
-			gitInfo := git.GetInfo(workingDir)
-			
-			// If we successfully detected a Git repository, override the provided values
-			if gitInfo.Branch != "unknown" {
-				// Log when we're overriding the context
-				if repository != gitInfo.Repository || branch != gitInfo.Branch {
-					log.Printf("Detected git repository. Using '%s/%s' for context instead of provided '%s/%s'.", 
-						gitInfo.Repository, gitInfo.Branch, repository, branch)
+			// Try to detect Git repository information only if not provided in the payload.
+			if repository == "" || branch == "" {
+				gitInfo := git.GetInfo(workingDir)
+				if gitInfo.Branch != "unknown" {
+					if repository == "" {
+						repository = gitInfo.Repository
+					}
+					if branch == "" {
+						branch = gitInfo.Branch
+					}
+					log.Printf("Detected git context for job %s: %s/%s", data.JobID, repository, branch)
 				}
-				repository = gitInfo.Repository
-				branch = gitInfo.Branch
 			}
 
 			now := time.Now()
