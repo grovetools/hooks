@@ -57,7 +57,7 @@ func runInstall(targetDir string) error {
 
 	// Create .claude directory if it doesn't exist
 	claudeDir := filepath.Join(absDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create .claude directory: %w", err)
 	}
 
@@ -85,7 +85,7 @@ func runInstall(targetDir string) error {
 				fmt.Printf("Backing up to %s and creating new configuration\n", backupPath)
 
 				// Backup the corrupted file
-				if err := os.WriteFile(backupPath, data, 0644); err != nil {
+				if err := os.WriteFile(backupPath, data, 0o644); err != nil {
 					return fmt.Errorf("failed to backup corrupted settings: %w", err)
 				}
 
@@ -115,7 +115,7 @@ func runInstall(targetDir string) error {
 		},
 		"PostToolUse": {
 			{
-				Matcher: "(Edit|Write|MultiEdit|Bash|Read)",
+				Matcher: ".*",
 				Hooks: []Hook{
 					{
 						Type:    "command",
@@ -169,7 +169,7 @@ func runInstall(targetDir string) error {
 	}
 
 	// Write settings file
-	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
+	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write settings: %w", err)
 	}
 
