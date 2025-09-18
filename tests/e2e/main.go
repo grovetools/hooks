@@ -22,6 +22,7 @@ func main() {
 		OneshotJobValidationScenario(),
 		FlowOneshotTrackingScenario(),
 		FlowWorktreeScenario(),
+		FlowRealLLMScenario(),
 		// TODO: Fix MixedSessionTypesScenario - it's not properly isolating the test database
 		// MixedSessionTypesScenario(),
 	}
