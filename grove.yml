@@ -3,3 +3,6 @@ description: Claude hooks integration for Grove ecosystem
 binary:
   name: grove-hooks
   path: ./bin/grove-hooks
+
+context:
+  default_rules_path: .cx-rules

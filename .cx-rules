@@ -1,0 +1,13 @@
+# Default context rules for grove-hooks
+# Include Go source files
+*.go
+*.md
+*.yml
+*.yaml
+*.json
+*.mod
+Makefile
+
+# Exclude vendor dependencies
+!vendor/**
+!*.sum
