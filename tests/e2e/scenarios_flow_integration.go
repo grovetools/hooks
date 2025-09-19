@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +15,13 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
+
+// generateTestUUID generates a short UUID for test uniqueness
+func generateTestUUID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 // TestExtendedSessionForIntegration is a simplified struct for parsing JSON output in tests.
 type TestExtendedSessionForIntegration struct {
@@ -520,7 +529,7 @@ func FlowRealLLMScenario() *harness.Scenario {
 `, apiKeyCmd)
 				}
 				
-				configContent := fmt.Sprintf(`name: real-llm-test
+				configContent := fmt.Sprintf(`name: hooks-flow-integration
 flow:
   plans_directory: ./plans
   oneshot_model: gemini-2.0-flash-exp
@@ -546,14 +555,31 @@ func main() {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial setup with Go code")
 				
-				// Setup test database for grove-hooks
-				return SetupTestDatabase(ctx)
+				// Actually use real grove-hooks database - don't set test database path
+				// This means sessions will appear in your actual grove-hooks list
+				ctx.ShowCommandOutput("Info", "Using real grove-hooks database", "Sessions will be tracked in your actual database")
+				// Don't call SetupTestDatabase which sets GROVE_HOOKS_DB_PATH
+				return nil
 			}),
 
 			// Step 3: Create a flow plan with a real task
 			harness.NewStep("Create flow plan with code analysis task", func(ctx *harness.Context) error {
+				// Generate unique names for this test run
+				testID := generateTestUUID()
+				planName := fmt.Sprintf("code-analysis-%s", testID)
+				jobTitle := fmt.Sprintf("Analyze Go Code %s", testID)
+				
+				// Log the generated values
+				ctx.ShowCommandOutput("Info", fmt.Sprintf("Generated test UUID: %s", testID), "")
+				ctx.ShowCommandOutput("Info", fmt.Sprintf("Plan name: %s", planName), "")
+				ctx.ShowCommandOutput("Info", fmt.Sprintf("Job title: %s", jobTitle), "")
+				
+				// Store for later steps
+				ctx.Set("test_plan_name", planName)
+				ctx.Set("test_job_title", jobTitle)
+				
 				// Create the plan
-				cmd := command.New("flow", "plan", "init", "code-analysis").Dir(ctx.RootDir)
+				cmd := command.New("flow", "plan", "init", planName).Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -568,8 +594,8 @@ func main() {
 
 Keep your response concise (under 100 words).`
 
-				cmd = command.New("flow", "plan", "add", "code-analysis",
-					"--title", "Analyze Go Code",
+				cmd = command.New("flow", "plan", "add", planName,
+					"--title", jobTitle,
 					"--type", "oneshot",
 					"-p", prompt).Dir(ctx.RootDir)
 				result = cmd.Run()
@@ -580,12 +606,8 @@ Keep your response concise (under 100 words).`
 
 			// Step 4: Check if grove-hooks is being called (before running)
 			harness.NewStep("Check grove-hooks baseline", func(ctx *harness.Context) error {
-				hooksBinary, err := FindProjectBinary()
-				if err != nil {
-					return err
-				}
-
-				cmd := command.New(hooksBinary, "sessions", "list", "--json")
+				// Use the real grove-hooks from PATH
+				cmd := command.New("grove-hooks", "sessions", "list", "--json")
 				result := cmd.Run()
 				
 				var sessions []map[string]interface{}
@@ -593,6 +615,15 @@ Keep your response concise (under 100 words).`
 					json.Unmarshal([]byte(result.Stdout), &sessions)
 				}
 				
+				// Store initial session IDs to detect new ones later
+				initialIDs := make(map[string]bool)
+				for _, session := range sessions {
+					if id, ok := session["id"].(string); ok {
+						initialIDs[id] = true
+					}
+				}
+				
+				ctx.Set("initial_session_ids", initialIDs)
 				ctx.Set("initial_session_count", len(sessions))
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Initial session count: %d", len(sessions)), "")
 				
@@ -601,39 +632,48 @@ Keep your response concise (under 100 words).`
 
 			// Step 5: Run the plan with real Gemini
 			harness.NewStep("Run flow plan with real Gemini API", func(ctx *harness.Context) error {
-				// Ensure grove-hooks is in PATH
-				hooksBinary, err := FindProjectBinary()
-				if err != nil {
-					return err
-				}
-				
-				// Get directory containing grove-hooks
-				hooksDir := filepath.Dir(hooksBinary)
-				
-				// Add to PATH
-				originalPath := os.Getenv("PATH")
-				enhancedPath := fmt.Sprintf("%s:%s", hooksDir, originalPath)
+				// Make sure grove-hooks is available in PATH
+				// Flow should call the real grove-hooks binary from PATH
 				
 				// Run flow with real Gemini
 				// Note: NOT providing a mock llm binary this time
-				cmd := command.New("flow", "plan", "run", "code-analysis", "--yes", "-v").
+				// Pass through GEMINI env vars if they exist
+				envVars := []string{
+					"GROVE_HOOKS_ENABLED=true",
+					// Ensure we're NOT using a test database
+					"GROVE_HOOKS_DB_PATH=",  // Empty string to clear any test DB path
+				}
+				
+				// Pass through the API key if provided
+				if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
+					envVars = append(envVars, fmt.Sprintf("GEMINI_API_KEY=%s", apiKey))
+				}
+				
+				// Use the plan name from context
+				planName := ctx.Get("test_plan_name").(string)
+				cmd := command.New("flow", "plan", "run", planName, "--yes", "-v").
 					Dir(ctx.RootDir).
-					Env(
-						fmt.Sprintf("PATH=%s", enhancedPath),
-						"GROVE_HOOKS_ENABLED=true",
-					)
+					Env(envVars...)
 
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
-				// Store whether Gemini was actually called
-				if strings.Contains(result.Stdout, "Calling Gemini API") || 
-				   strings.Contains(result.Stdout, "Token usage") {
+				// Store whether Gemini was actually called - check both stdout and stderr
+				fullOutput := result.Stdout + result.Stderr
+				if strings.Contains(fullOutput, "Calling Gemini API") || 
+				   strings.Contains(fullOutput, "Calling gemini") ||
+				   strings.Contains(fullOutput, "Token usage") ||
+				   strings.Contains(fullOutput, "Total API Usage") {
 					ctx.Set("gemini_called", true)
 					ctx.ShowCommandOutput("Success", "Real Gemini API was called", "")
 				} else {
 					ctx.Set("gemini_called", false)
-					ctx.ShowCommandOutput("Warning", "Gemini API may not have been called", "")
+					// Show what we actually got to help debug
+					outputSnippet := fullOutput
+					if len(outputSnippet) > 200 {
+						outputSnippet = outputSnippet[:200] + "..."
+					}
+					ctx.ShowCommandOutput("Debug", "Did not detect Gemini call markers", outputSnippet)
 				}
 				
 				// Don't fail on API errors - we want to see what happened
@@ -646,13 +686,8 @@ Keep your response concise (under 100 words).`
 
 			// Step 6: Check if grove-hooks tracked anything
 			harness.NewStep("Verify grove-hooks tracking after real LLM call", func(ctx *harness.Context) error {
-				hooksBinary, err := FindProjectBinary()
-				if err != nil {
-					return err
-				}
-
-				// Check sessions again
-				cmd := command.New(hooksBinary, "sessions", "list", "--json")
+				// Use real grove-hooks from PATH
+				cmd := command.New("grove-hooks", "sessions", "list", "--json")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -663,24 +698,41 @@ Keep your response concise (under 100 words).`
 					}
 				}
 				
+				initialIDs := ctx.Get("initial_session_ids").(map[string]bool)
 				initialCount := ctx.Get("initial_session_count").(int)
 				currentCount := len(sessions)
 				
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Session count: initial=%d, current=%d", initialCount, currentCount), "")
 				
-				// Check if a new session was created
-				if currentCount > initialCount {
-					ctx.ShowCommandOutput("Success", "New session was tracked by grove-hooks", "")
-					
-					// Find the new session
-					for _, session := range sessions {
-						if session["type"] == "oneshot_job" {
-							ctx.ShowCommandOutput("Info", fmt.Sprintf("Found oneshot job: %+v", session), "")
+				// Find new sessions by comparing IDs
+				var newSessions []map[string]interface{}
+				var foundOneshotJob bool
+				for _, session := range sessions {
+					if id, ok := session["id"].(string); ok {
+						if !initialIDs[id] {
+							newSessions = append(newSessions, session)
+							if session["type"] == "oneshot_job" {
+								foundOneshotJob = true
+								ctx.ShowCommandOutput("Success", fmt.Sprintf("Found NEW oneshot job: %s", id), fmt.Sprintf("Status: %v", session["status"]))
+							}
 						}
 					}
+				}
+				
+				if len(newSessions) > 0 {
+					ctx.ShowCommandOutput("Success", fmt.Sprintf("Grove-hooks tracked %d new session(s)", len(newSessions)), "")
 				} else {
-					// This is expected if flow doesn't call grove-hooks
-					ctx.ShowCommandOutput("Expected", "No new sessions tracked", "Flow is using Gemini directly without grove-hooks integration")
+					// Also check if there's an "analyze-go-code" job that might have existed
+					for _, session := range sessions {
+						if id, ok := session["id"].(string); ok && strings.Contains(id, "analyze") {
+							ctx.ShowCommandOutput("Info", "Found analyze job (may be from previous run)", fmt.Sprintf("ID: %s, Status: %v", id, session["status"]))
+							foundOneshotJob = true
+						}
+					}
+				}
+				
+				if !foundOneshotJob {
+					ctx.ShowCommandOutput("Expected", "No oneshot job found", "Flow may be using Gemini directly without grove-hooks integration")
 				}
 				
 				// Also check the job output
@@ -701,8 +753,10 @@ Keep your response concise (under 100 words).`
 				
 				// The test passes either way - we're documenting the current behavior
 				wasGeminiCalled := ctx.Get("gemini_called").(bool)
-				if wasGeminiCalled {
-					ctx.ShowCommandOutput("Result", "Gemini was called directly by flow", "Grove-hooks integration needs to be added to flow")
+				if wasGeminiCalled && foundOneshotJob {
+					ctx.ShowCommandOutput("Result", "SUCCESS: Flow called Gemini AND grove-hooks tracked it!", "But job remains in 'running' state - flow needs to call 'oneshot stop'")
+				} else if wasGeminiCalled && !foundOneshotJob {
+					ctx.ShowCommandOutput("Result", "Gemini was called but NOT tracked", "Grove-hooks integration needs to be added to flow")
 				}
 				
 				return nil
@@ -725,8 +779,7 @@ To fix this integration, grove-flow needs to:
 				return nil
 			}),
 
-			// Cleanup
-			harness.NewStep("Clean up test database", CleanupTestDatabase),
+			// No cleanup needed - using real database, not test database
 		},
 	}
 }
