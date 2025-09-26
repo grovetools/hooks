@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/mattsolo1/grove-core/logging"
 )
 
 type ClaudeSettings map[string]interface{}
@@ -44,6 +45,9 @@ This command will:
 }
 
 func runInstall(targetDir string) error {
+	// Initialize logger
+	log := logging.NewLogger("grove-hooks")
+	
 	// Resolve target directory
 	absDir, err := filepath.Abs(targetDir)
 	if err != nil {
@@ -76,13 +80,13 @@ func runInstall(targetDir string) error {
 		// Handle empty or invalid JSON files
 		if len(data) == 0 || string(data) == "{}" {
 			settings = make(ClaudeSettings)
-			fmt.Printf("Found empty settings file, creating new configuration at %s\n", settingsPath)
+			log.Infof("Found empty settings file, creating new configuration at %s", settingsPath)
 		} else {
 			if err := json.Unmarshal(data, &settings); err != nil {
 				// If parsing fails, offer to backup and create new
 				backupPath := settingsPath + ".backup"
-				fmt.Printf("Warning: Failed to parse existing settings (%v)\n", err)
-				fmt.Printf("Backing up to %s and creating new configuration\n", backupPath)
+				log.Warnf("Failed to parse existing settings (%v)", err)
+				log.Infof("Backing up to %s and creating new configuration", backupPath)
 
 				// Backup the corrupted file
 				if err := os.WriteFile(backupPath, data, 0o644); err != nil {
@@ -91,13 +95,13 @@ func runInstall(targetDir string) error {
 
 				settings = make(ClaudeSettings)
 			} else {
-				fmt.Printf("Updating existing settings at %s\n", settingsPath)
+				log.Infof("Updating existing settings at %s", settingsPath)
 			}
 		}
 	} else {
 		// File doesn't exist, create new settings
 		settings = make(ClaudeSettings)
-		fmt.Printf("Creating new settings at %s\n", settingsPath)
+		log.Infof("Creating new settings at %s", settingsPath)
 	}
 
 	// Define default hooks configuration
@@ -173,14 +177,14 @@ func runInstall(targetDir string) error {
 		return fmt.Errorf("failed to write settings: %w", err)
 	}
 
-	fmt.Println("✓ Grove hooks configuration installed successfully!")
-	fmt.Printf("✓ Settings file: %s\n", settingsPath)
-	fmt.Println("\nThe following hooks have been configured:")
-	fmt.Println("  - PreToolUse: Runs before any tool use")
-	fmt.Println("  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, or Read tools")
-	fmt.Println("  - Notification: Runs on notifications")
-	fmt.Println("  - Stop: Runs when conversation stops")
-	fmt.Println("  - SubagentStop: Runs when subagent stops")
+	log.Info("✓ Grove hooks configuration installed successfully!")
+	log.Infof("✓ Settings file: %s", settingsPath)
+	log.Info("\nThe following hooks have been configured:")
+	log.Info("  - PreToolUse: Runs before any tool use")
+	log.Info("  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, or Read tools")
+	log.Info("  - Notification: Runs on notifications")
+	log.Info("  - Stop: Runs when conversation stops")
+	log.Info("  - SubagentStop: Runs when subagent stops")
 
 	return nil
 }
