@@ -45,8 +45,9 @@ This command will:
 }
 
 func runInstall(targetDir string) error {
-	// Initialize logger
+	// Initialize loggers
 	log := logging.NewLogger("grove-hooks")
+	prettyLog := logging.NewPrettyLogger()
 	
 	// Resolve target directory
 	absDir, err := filepath.Abs(targetDir)
@@ -81,12 +82,15 @@ func runInstall(targetDir string) error {
 		if len(data) == 0 || string(data) == "{}" {
 			settings = make(ClaudeSettings)
 			log.Infof("Found empty settings file, creating new configuration at %s", settingsPath)
+			prettyLog.InfoPretty(fmt.Sprintf("Found empty settings file, creating new configuration at %s", settingsPath))
 		} else {
 			if err := json.Unmarshal(data, &settings); err != nil {
 				// If parsing fails, offer to backup and create new
 				backupPath := settingsPath + ".backup"
 				log.Warnf("Failed to parse existing settings (%v)", err)
+				prettyLog.WarnPretty(fmt.Sprintf("Failed to parse existing settings (%v)", err))
 				log.Infof("Backing up to %s and creating new configuration", backupPath)
+				prettyLog.InfoPretty(fmt.Sprintf("Backing up to %s and creating new configuration", backupPath))
 
 				// Backup the corrupted file
 				if err := os.WriteFile(backupPath, data, 0o644); err != nil {
@@ -96,12 +100,14 @@ func runInstall(targetDir string) error {
 				settings = make(ClaudeSettings)
 			} else {
 				log.Infof("Updating existing settings at %s", settingsPath)
+				prettyLog.InfoPretty(fmt.Sprintf("Updating existing settings at %s", settingsPath))
 			}
 		}
 	} else {
 		// File doesn't exist, create new settings
 		settings = make(ClaudeSettings)
 		log.Infof("Creating new settings at %s", settingsPath)
+		prettyLog.InfoPretty(fmt.Sprintf("Creating new settings at %s", settingsPath))
 	}
 
 	// Define default hooks configuration
@@ -177,14 +183,17 @@ func runInstall(targetDir string) error {
 		return fmt.Errorf("failed to write settings: %w", err)
 	}
 
-	log.Info("✓ Grove hooks configuration installed successfully!")
-	log.Infof("✓ Settings file: %s", settingsPath)
-	log.Info("\nThe following hooks have been configured:")
-	log.Info("  - PreToolUse: Runs before any tool use")
-	log.Info("  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, or Read tools")
-	log.Info("  - Notification: Runs on notifications")
-	log.Info("  - Stop: Runs when conversation stops")
-	log.Info("  - SubagentStop: Runs when subagent stops")
+	log.Info("Grove hooks configuration installed successfully")
+	prettyLog.Success("Grove hooks configuration installed successfully!")
+	log.Infof("Settings file: %s", settingsPath)
+	prettyLog.Success(fmt.Sprintf("Settings file: %s", settingsPath))
+	prettyLog.Blank()
+	prettyLog.InfoPretty("The following hooks have been configured:")
+	prettyLog.InfoPretty("  - PreToolUse: Runs before any tool use")
+	prettyLog.InfoPretty("  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, or Read tools")
+	prettyLog.InfoPretty("  - Notification: Runs on notifications")
+	prettyLog.InfoPretty("  - Stop: Runs when conversation stops")
+	prettyLog.InfoPretty("  - SubagentStop: Runs when subagent stops")
 
 	return nil
 }
