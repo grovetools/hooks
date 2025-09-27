@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mattsolo1/grove-docgen/main/schema/docgen.config.schema.json
+category: Developer Tools
+description: Local-first observability and state management for AI agent sessions and API requests within the Grove ecosystem.
+enabled: true
+sections:
+  - name: introduction
+    order: 1
+    output: introduction.md
+    prompt: prompts/introduction.md
+    title: Introduction
+  - name: installation
+    order: 2
+    output: installation.md
+    prompt: prompts/installation.md
+    title: Installation
+  - name: getting-started
+    order: 3
+    output: getting-started.md
+    prompt: prompts/getting-started.md
+    title: Getting Started
+  - name: core-concepts
+    order: 4
+    output: core-concepts.md
+    prompt: prompts/core-concepts.md
+    title: Core Concepts
+  - name: command-reference
+    order: 5
+    output: command-reference.md
+    prompt: prompts/command-reference.md
+    title: Command Reference
+  - name: usage-patterns
+    order: 6
+    output: usage-patterns.md
+    prompt: prompts/usage-patterns.md
+    title: Usage Patterns & Integrations
+  - name: configuration
+    order: 7
+    output: configuration.md
+    prompt: prompts/configuration.md
+    title: Configuration
+  - name: architecture
+    order: 8
+    output: architecture.md
+    prompt: prompts/architecture.md
+    title: Architecture
+settings:
+  model: gemini-2.5-pro
+  output_dir: docs
+  regeneration_mode: reference
+  rules_file: docs.rules
+  structured_output_file: pkg/docs/docs.json
+  system_prompt: default
+title: Grove Hooks
