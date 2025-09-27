@@ -3,11 +3,11 @@ category: Developer Tools
 description: Local-first observability and state management for AI agent sessions and API requests within the Grove ecosystem.
 enabled: true
 sections:
-  - name: introduction
+  - name: overview
     order: 1
-    output: 01-introduction.md
-    prompt: prompts/introduction.md
-    title: Introduction
+    output: 01-overview.md
+    prompt: prompts/overview.md
+    title: Overview
   - name: installation
     order: 2
     output: 02-installation.md
