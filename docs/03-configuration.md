@@ -83,47 +83,6 @@ Grove Hooks responds to specific, named lifecycle events triggered by the host a
 -   **`Stop`**: Triggers when a session ends for any reason (e.g., completion, interruption, or error). This hook is responsible for finalizing the session's status in the local database.
 -   **`SubagentStop`**: Triggers when a sub-agent completes its delegated task.
 
-## Custom Repository-Level Hooks (`.canopy.yaml`)
-
-For more advanced workflows, you can define custom shell commands to be executed during the `Stop` hook by creating a `.canopy.yaml` file in your repository's root directory. This is useful for running cleanup scripts, linters, or pre-commit checks before a session is considered complete.
-
-The configuration lives under the `hooks.on_stop` key and is a list of commands to execute.
-
-### Configuration Structure
-
--   `name`: A descriptive name for the hook command.
--   `command`: The shell command to execute.
--   `run_if`: (Optional) A condition for running the command. Currently, the only supported value is `changes`, which executes the command only if there are uncommitted Git changes in the repository.
-
-### Blocking Behavior
-
-A key feature of `on_stop` hooks is their ability to block the session from completing. If a hook command exits with a status code of **`2`**, `grove-hooks` will interpret this as a blocking failure. The standard error from the command will be passed back to Claude, effectively pausing the session and prompting the user for action. This is useful for enforcing code quality or running critical checks.
-
-### Example `.canopy.yaml`
-
-```yaml
-# ./.canopy.yaml
-hooks:
-  on_stop:
-    - name: "Run Linter on Changes"
-      command: "make lint"
-      run_if: "changes"
-
-    - name: "Check for TODOs"
-      command: "grep -r 'TODO' . || true"
-
-    - name: "Mandatory Pre-Commit Checks"
-      # If this script fails with exit code 2, the session stop will be blocked.
-      command: "./scripts/pre-commit-check.sh"
-```
-
-## Configuration Files Summary
-
-| File                                | Purpose                                                              | Management                     |
-| ----------------------------------- | -------------------------------------------------------------------- | ------------------------------ |
-| `.claude/settings.local.json`       | Defines the primary hook triggers for the Claude Code CLI.           | `grove-hooks install` (auto)   |
-| `.canopy.yaml`                      | (Optional) Defines custom repository-specific shell commands for the `Stop` hook. | Manual                         |
-| `~/.local/share/grove-hooks/state.db` | The local SQLite database where all session and event data is stored.  | `grove-hooks` binary (internal) |
 
 ## Environment Variables
 

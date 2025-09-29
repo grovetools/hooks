@@ -54,14 +54,14 @@ This example shows how to use `grove-hooks` to investigate a specific session, w
     Imagine a session ended unexpectedly. You can filter the session list by status to find it.
 
     ```bash
-    grove-hooks sessions list --status failed
+    grove-hooks sessions list --status idle
     ```
 
     **Expected Output:**
 
     ```
     SESSION ID      TYPE      STATUS     CONTEXT               USER    STARTED               DURATION    IN STATE
-    claude-cyz...   claude    failed     api-refactor/feat...  dev     2023-10-27 11:00:00   15m30s      15m30s
+    claude-cyz...   claude    idle     api-refactor/feat...  dev     2023-10-27 11:00:00   15m30s      15m30s
     ```
 
 2.  **Get Detailed Session Information**
@@ -77,7 +77,7 @@ This example shows how to use `grove-hooks` to investigate a specific session, w
     ```
     Session ID: claude-cyz...
     Type: claude_session
-    Status: failed
+    Status: idle
     Repository: api-refactor
     Branch: feature/new-auth
     User: dev
@@ -97,7 +97,7 @@ This example shows how to use `grove-hooks` to investigate a specific session, w
 
     **Observability Insights:**
     *   **Detailed Context:** You get the exact working directory, PID, and user associated with the session.
-    *   **Tool Usage Breakdown:** The `Tool Statistics` section provides a summary of the agent's actions, helping you understand what it was trying to do. A high number of file reads or bash commands might point to the source of an issue.
+    *   **Tool Usage Breakdown:** The `Tool Statistics` section provides a summary of the agent's actions, helping you understand what it was trying to do. 
 
 3.  **Browse Sessions Interactively**
 

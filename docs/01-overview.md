@@ -6,9 +6,7 @@ Grove Hooks captures information about local AI agent sessions and automated job
 
 ## Key Features
 
-Grove Hooks provides a set of targeted features for managing and understanding AI development sessions.
-
-*   **Local-First Tracking**: All session and event data is stored in a local SQLite database (`~/.local/share/grove-hooks/state.db`), ensuring fast, private, and offline-capable operation.
+*   **Local-First Tracking**: All session and event data is stored in a local SQLite database (`~/.local/share/grove-hooks/state.db`).
 
 *   **Unified Session Monitoring**: It tracks both interactive AI agent sessions (e.g., from Claude Code) and automated `oneshot` jobs from `grove-flow`, presenting them in a single, consistent interface.
 
