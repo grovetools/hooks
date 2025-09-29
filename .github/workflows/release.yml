@@ -60,22 +60,7 @@ jobs:
           echo "Building ${output_name} version ${{ github.ref_name }}"
           go build -ldflags="-X 'github.com/mattsolo1/grove-core/version.Version=${{ github.ref_name }}'" -o dist/${output_name} .
 
-      - name: Run unit tests
-        run: |
-          export CGO_ENABLED=1
-          make test
-
-      - name: Build E2E test framework
-        run: |
-          export CGO_ENABLED=1
-          make test-e2e-build
-
-      - name: Run E2E tests
-        run: |
-          export CGO_ENABLED=1
-          make test-e2e
-        env:
-          CX_BINARY: ${{ github.workspace }}/bin/hooks
+      # Tests already passed in CI before tagging
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
