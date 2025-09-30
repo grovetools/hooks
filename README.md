@@ -46,15 +46,6 @@ Requires the `grove` meta-CLI. See the [Grove Installation Guide](https://github
 
 <!-- DOCGEN:OVERVIEW:END -->
 
-## Documentation
-
-See the [documentation](docs/) for detailed usage instructions:
-- [Overview](docs/01-overview.md) - Introduction and core concepts
-- [Examples](docs/02-examples.md) - Common usage patterns
-- [Configuration](docs/03-configuration.md) - Configuration reference
-- [Command Reference](docs/04-command-reference.md) - Complete CLI reference
-
-
 <!-- DOCGEN:TOC:START -->
 
 See the [documentation](docs/) for detailed usage instructions:
