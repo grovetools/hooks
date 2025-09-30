@@ -23,7 +23,7 @@ LDFLAGS = -ldflags="\
 -X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
 -X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
-.PHONY: all build test clean fmt vet lint run check dev build-all help
+.PHONY: all build test clean fmt vet lint run check dev build-all generate-docs help
 
 all: build
 
@@ -73,6 +73,11 @@ dev:
 	@echo "Building $(BINARY_NAME) with race detector..."
 	@go build -race $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
+# Generate documentation
+generate-docs:
+	@echo "Generating documentation..."
+	@docgen sync-readme
+
 # Cross-compilation targets
 # Note: Cross-compilation with CGO requires appropriate C compilers for target platforms
 # For CI/CD, we use native runners for each platform instead
@@ -115,5 +120,6 @@ help:
 	@echo "  make check       - Run all checks"
 	@echo "  make dev         - Build with race detector"
 	@echo "  make build-all   - Build for multiple platforms"
+	@echo "  make generate-docs     - Generate documentation using docgen"
 	@echo "  make test-e2e-build   - Build the E2E test runner binary"
 	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i hooks-basic-generation\")"

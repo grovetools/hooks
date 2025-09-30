@@ -1,5 +1,7 @@
 # Grove Hooks: Local Observability for AI Development
 
+<img src="./images/grove-hooks.svg" width="60%" />
+
 Grove Hooks captures information about local AI agent sessions and automated job lifecycles, storing all data in a local SQLite database. 
 
 <!-- placeholder for animated gif -->

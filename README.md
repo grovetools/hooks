@@ -1,122 +1,66 @@
-# Grove Hooks
+<!-- DOCGEN:OVERVIEW:START -->
 
-<img src="https://github.com/user-attachments/assets/eda77869-0e99-467c-a20d-4d5b8262aecf" width="80%" /> 
+<img src="docs/images/grove-hooks.svg" width="60%" />
 
----
+Grove Hooks captures information about local AI agent sessions and automated job lifecycles, storing all data in a local SQLite database. 
 
-[![CI](https://github.com/mattsolo1/grove-hooks/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-hooks/actions/workflows/ci.yml)
-
-Grove Hooks is a local-first observability and state management tool for AI agent sessions and API requests within the Grove ecosystem. Its hook system captures information about tool usage, session lifecycle, and notifications, storing everything in a local SQLite database for fast, offline-first access.
-
-It provides a command-line interface and an interactive terminal UI to query, browse, and manage both interactive Claude sessions and `grove-flow` jobs.
+<!-- placeholder for animated gif -->
 
 ## Key Features
 
-- **Local-First Session Tracking:** All session data is stored in a local SQLite database (`~/.local/share/grove-hooks/state.db`), requiring no network access.
-- **Claude Code Integration:** An `install` command automatically configures the necessary hooks in your repository's `.claude/settings.local.json`.
-- **CLI interface:** Query and manage sessions with commands to `list`, `get`, `browse`, and `cleanup`.
-- **Interactive Session Browser:** A terminal-based UI (`sessions browse`) to filter, search, and inspect sessions in real-time.
-- **Oneshot Job Support:** Tracks the lifecycle of API requests executed by `grove-flow`, providing unified observability for both interactive and automated tasks.
-- **System Notifications:** Sends native desktop notifications for important events like errors and warnings.
+*   **Local-First Tracking**: All session and event data is stored in a local SQLite database (`~/.local/share/grove-hooks/state.db`).
 
-## Dependencies
+*   **Unified Session Monitoring**: It tracks both interactive AI agent sessions (e.g., from Claude Code) and automated `oneshot` jobs from `grove-flow`, presenting them in a single, consistent interface.
 
-Claude Code (optional)
+*   **State Management**: The tool captures the complete lifecycle of a session, from start to finish, including statuses like `running`, `idle`, `completed`, and `failed`. It also automatically cleans up dead or inactive sessions.
 
-`grove-flow` (optional)
+*   **Interactive TUI**: The `hooks sessions browse` command launches a terminal-based UI for interactively filtering, searching, and inspecting session data in real-time.
+
+*   **AI Agent Integration**: An `install` command automates the integration with tools like Claude Code by configuring the necessary hooks in the local project settings.
+
+*   **System Notifications**: It can deliver native desktop notifications for important events, such as job failures or tasks requiring user input, providing timely feedback on background processes.
+
+## Ecosystem Integration
+
+Grove Hooks functions as the central observability layer within the Grove tool suite, integrating with other components to provide a cohesive development experience.
+
+*   **Grove Flow (`flow`)**: When `grove-flow` executes `oneshot` jobs, it communicates with Grove Hooks to signal the start and stop of each job's lifecycle. This allows developers to monitor the progress of automated plans, view their status, and diagnose failures using the same tools they use for interactive sessions.
+
+*   **Claude Code**: Grove Hooks integrates with Claude's hook system. By running `grove-hooks install`, the tool configures the local repository to automatically report events such as tool usage, notifications, and session termination to the Grove Hooks database.
+
+*   **Grove Meta-CLI (`grove`)**: The `grove` command manages the installation and versioning of the `grove-hooks` binary, ensuring it is available in the user's `PATH` and can be discovered by other ecosystem tools.
 
 ## Installation
 
-Todo
-
-## Getting Started: Integration with Claude
-
-To integrate `grove-hooks` with your project, navigate to your repository's root directory and run the `install` command.
-
+Install via the Grove meta-CLI:
 ```bash
-cd /path/to/your/project
-grove-hooks install
+grove install hooks
 ```
 
-This command will:
-1.  Create a `.claude` directory if one does not exist.
-2.  Create or update the `.claude/settings.local.json` file.
-3.  Inject the necessary hook configurations, pointing them to the `grove-hooks` binary. It preserves any other existing settings in the file.
-
-After installation, the Claude CLI will automatically invoke `grove-hooks` at different stages of a session, populating the local database with observability data.
-
-## Command Reference
-
-### `grove-hooks sessions`
-
-The `sessions` command is the main entrypoint for managing and viewing session data.
-
-#### `sessions list`
-
-List all tracked sessions in a table format.
-
+Verify installation:
 ```bash
-grove-hooks sessions list
+hooks version
 ```
 
-Example Output:
-```
-SESSION ID    TYPE    STATUS      CONTEXT              USER    STARTED               DURATION    IN STATE
-test-job-1... job     completed   test-plan            matt    2023-10-27 10:30:05   1s          1s
-claude-se...  claude  running     grove-hooks/main     matt    2023-10-27 10:29:50   running     15s
-```
+Requires the `grove` meta-CLI. See the [Grove Installation Guide](https://github.com/mattsolo1/grove-meta/blob/main/docs/02-installation.md) if you don't have it installed.
 
-- **CONTEXT:** Shows the repository and branch for Claude sessions, or the plan/job title for oneshot jobs.
-- **IN STATE:** Shows the time elapsed in the current status (e.g., how long it's been `running` or `idle`).
+<!-- DOCGEN:OVERVIEW:END -->
 
-**Flags:**
-- `--status <status>`: Filter by status (e.g., `running`, `idle`, `completed`, `failed`).
-- `--active`: A shorthand to show only active sessions (hides `completed`, `failed`, etc.).
-- `--limit <n>`: Limit the number of results.
-- `--json`: Output the full session data as JSON.
+## Documentation
 
----
+See the [documentation](docs/) for detailed usage instructions:
+- [Overview](docs/01-overview.md) - Introduction and core concepts
+- [Examples](docs/02-examples.md) - Common usage patterns
+- [Configuration](docs/03-configuration.md) - Configuration reference
+- [Command Reference](docs/04-command-reference.md) - Complete CLI reference
 
-#### `sessions get <session-id>`
 
-View detailed information for a specific session.
+<!-- DOCGEN:TOC:START -->
 
-```bash
-grove-hooks sessions get <session-id>
-```
+See the [documentation](docs/) for detailed usage instructions:
+- [Overview](docs/01-overview.md) - <img src="./images/grove-hooks.svg" width="60%" />
+- [Examples](docs/02-examples.md) - This document provides practical examples to demonstrate how to use `grove-ho...
+- [Configuration](docs/03-configuration.md) - Grove Hooks provides observability by integrating with other tools in the Gro...
+- [Command Reference](docs/04-command-reference.md) - This document provides a comprehensive reference for the `grove-hooks` comman...
 
-**Flags:**
-- `--json`: Output the details as a JSON object.
-
----
-
-#### `sessions browse`
-
-Launch an interactive terminal UI to browse, search, and manage sessions.
-
-```bash
-grove-hooks sessions browse
-```
-
-**Keybindings:**
-- **Arrow Keys (↑/↓):** Navigate the session list.
-- **Type to Filter:** Instantly filter sessions by repo, branch, user, or ID.
-- **Tab:** Cycle through status filters (`all` -> `running` -> `idle` -> `completed` -> `failed`).
-- **Enter:** View detailed information for the selected session.
-- **Space:** Select/deselect one or more sessions.
-- **Ctrl+A:** Select/deselect all currently visible sessions.
-- **Ctrl+X:** Archive all currently selected sessions (removes them from view).
-- **Ctrl+Y:** Copy the selected session ID to the clipboard.
-- **Ctrl+O:** Open the session's working directory in your file manager.
-- **Esc / Ctrl+C:** Exit the browser.
-
----
-
-#### `sessions cleanup`
-
-Marks inactive or dead sessions as `completed`. This is run automatically by `sessions list` and `sessions browse`, but can be triggered manually.
-
-```bash
-grove-hooks sessions cleanup --inactive-minutes 60
-```
-
+<!-- DOCGEN:TOC:END -->
