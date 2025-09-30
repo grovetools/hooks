@@ -7,7 +7,8 @@ Create a comprehensive overview that includes:
 2. **Animated GIF placeholder**: Include `<!-- placeholder for animated gif -->`
 3. **Key features**: Local-first observability, session monitoring, state management, AI agent integration
 4. **Ecosystem Integration**: Explain how grove-hooks fits with other Grove tools
-5. **Installation**: Include brief installation instructions at the bottom
+5. **How it works**: Provide a more technical description and exactly what happens under the hood
+6. **Installation**: Include brief installation instructions at the bottom
 
 ## Installation Format
 Include this condensed installation section at the bottom:
