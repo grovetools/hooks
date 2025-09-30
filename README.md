@@ -58,9 +58,9 @@ See the [documentation](docs/) for detailed usage instructions:
 <!-- DOCGEN:TOC:START -->
 
 See the [documentation](docs/) for detailed usage instructions:
-- [Overview](docs/01-overview.md) - <img src="./images/grove-hooks.svg" width="60%" />
-- [Examples](docs/02-examples.md) - This document provides practical examples to demonstrate how to use `grove-ho...
-- [Configuration](docs/03-configuration.md) - Grove Hooks provides observability by integrating with other tools in the Gro...
-- [Command Reference](docs/04-command-reference.md) - This document provides a comprehensive reference for the `grove-hooks` comman...
+- [Overview](docs/01-overview.md)
+- [Examples](docs/02-examples.md)
+- [Configuration](docs/03-configuration.md)
+- [Command Reference](docs/04-command-reference.md)
 
 <!-- DOCGEN:TOC:END -->
