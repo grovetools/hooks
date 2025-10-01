@@ -30,6 +30,8 @@ func NewSessionsCmd() *cobra.Command {
 func newSessionsListCmd() *cobra.Command {
 	var (
 		statusFilter  string
+		planFilter    string
+		typeFilter    string
 		jsonOutput    bool
 		limit         int
 		hideCompleted bool
@@ -60,6 +62,35 @@ func newSessionsListCmd() *cobra.Command {
 				var filtered []*models.Session
 				for _, s := range sessions {
 					if s.Status == statusFilter {
+						filtered = append(filtered, s)
+					}
+				}
+				sessions = filtered
+			}
+
+			// Filter by plan name if requested
+			if planFilter != "" {
+				var filtered []*models.Session
+				for _, s := range sessions {
+					if s.PlanName == planFilter {
+						filtered = append(filtered, s)
+					}
+				}
+				sessions = filtered
+			}
+
+			// Filter by type if requested
+			if typeFilter != "" {
+				var filtered []*models.Session
+				for _, s := range sessions {
+					sessionType := s.Type
+					if sessionType == "" {
+						sessionType = "claude"
+					}
+					// Normalize job type names
+					if sessionType == "oneshot_job" && typeFilter == "job" {
+						filtered = append(filtered, s)
+					} else if sessionType == typeFilter {
 						filtered = append(filtered, s)
 					}
 				}
@@ -248,6 +279,8 @@ func newSessionsListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&statusFilter, "status", "s", "", "Filter by status (running, idle, completed, failed)")
+	cmd.Flags().StringVarP(&planFilter, "plan", "p", "", "Filter by plan name")
+	cmd.Flags().StringVarP(&typeFilter, "type", "t", "", "Filter by session type (claude, job, oneshot_job)")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().IntVarP(&limit, "limit", "l", 0, "Limit number of results")
 	cmd.Flags().BoolVar(&hideCompleted, "active", false, "Show only active sessions (hide completed/failed)")
