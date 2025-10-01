@@ -1,4 +1,6 @@
-This document provides a comprehensive reference for the `grove-hooks` command-line interface, covering all subcommands and their options.
+# Command Reference
+
+This document provides a reference for the `grove-hooks` command-line interface, covering all subcommands and their options.
 
 ## `grove-hooks install`
 
@@ -18,9 +20,9 @@ Existing settings in the file that do not conflict with the hooks configuration 
 
 ### Flags
 
-| Flag        | Shorthand | Description                              | Default |
-|-------------|-----------|------------------------------------------|---------|
-| `--directory` | `-d`      | The target repository directory to install hooks in. | `.`     |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--directory` | `-d` | The target repository directory to install hooks in. | `.` |
 
 ### Example
 
@@ -52,12 +54,14 @@ This command displays a summary of all sessions recorded by `grove-hooks`, inclu
 
 #### Flags
 
-| Flag      | Shorthand | Description                                                               |
-|-----------|-----------|---------------------------------------------------------------------------|
-| `--active`  |           | A shorthand to show only active sessions (hides `completed`, `failed`).   |
-| `--json`    |           | Output the full session data as a structured JSON array.                  |
-| `--limit`   | `-l`      | Limit the number of sessions returned.                                    |
-| `--status`  | `-s`      | Filter the list by a specific status (e.g., `running`, `idle`, `completed`). |
+| Flag | Shorthand | Description |
+| :--- | :--- | :--- |
+| `--active` | | A shorthand to show only active sessions (hides `completed`, `failed`). |
+| `--json` | | Output the full session data as a structured JSON array. |
+| `--limit` | `-l` | Limit the number of sessions returned. |
+| `--status` | `-s` | Filter the list by a specific status (e.g., `running`, `idle`, `completed`). |
+| `--plan` | `-p` | Filter by plan name. |
+| `--type` | `-t` | Filter by session type (`claude`, `job`). |
 
 #### Example
 
@@ -74,8 +78,8 @@ test-job-1... job     completed   test-plan            matt    2023-10-27 10:30:
 claude-se...  claude  running     grove-hooks/main     matt    2023-10-27 10:29:50   running     15s
 ```
 
--   **CONTEXT**: Shows the repository and branch for Claude sessions, or the plan name for `grove-flow` jobs.
--   **IN STATE**: The time elapsed in the current status (e.g., how long a session has been `running`).
+- **CONTEXT**: Shows the repository and branch for Claude sessions, or the plan name for `grove-flow` jobs.
+- **IN STATE**: The time elapsed in the current status (e.g., how long a session has been `running`).
 
 ### `grove-hooks sessions get`
 
@@ -93,14 +97,14 @@ Use this command to inspect the full details of a single session, including its 
 
 #### Arguments
 
-| Argument     | Description                           |
-|--------------|---------------------------------------|
+| Argument | Description |
+| :--- | :--- |
 | `<session-id>` | The unique identifier of the session. |
 
 #### Flags
 
-| Flag   | Description                          |
-|--------|--------------------------------------|
+| Flag | Description |
+| :--- | :--- |
 | `--json` | Output the session details as a JSON object. |
 
 #### Example
@@ -125,19 +129,19 @@ The `browse` command provides a full-screen, real-time view of all sessions. It 
 
 #### Keybindings
 
-| Key             | Action                                             |
-|-----------------|----------------------------------------------------|
-| `↑`/`↓`         | Navigate the session list.                         |
-| `(type to filter)`| Instantly filter sessions by any text content.     |
-| `Tab`           | Cycle through status filters (`all`, `running`, etc.). |
-| `Enter`         | View detailed information for the selected session.  |
-| `Space`         | Select or deselect one or more sessions.             |
-| `Ctrl+A`        | Select or deselect all currently visible sessions.   |
-| `Ctrl+X`        | Archive all selected sessions, removing them from view. |
-| `Ctrl+Y`        | Copy the selected session ID to the clipboard.     |
-| `Ctrl+O`        | Open the session's working directory in your file manager. |
-| `Ctrl+J`        | Export the selected session's data to a JSON file. |
-| `Esc`/`Ctrl+C`  | Exit the browser.                                  |
+| Key | Action |
+| :--- | :--- |
+| `↑`/`↓` | Navigate the session list. |
+| `(type to filter)`| Instantly filter sessions by any text content. |
+| `Tab` | Cycle through status filters (`all`, `running`, etc.). |
+| `Enter` | View detailed information for the selected session. |
+| `Space` | Select or deselect one or more sessions. |
+| `Ctrl+A` | Select or deselect all currently visible sessions. |
+| `Ctrl+X` | Archive all selected sessions, removing them from view. |
+| `Ctrl+Y` | Copy the selected session ID to the clipboard. |
+| `Ctrl+O` | Open the session's working directory in your file manager. |
+| `Ctrl+J` | Export the selected session's data to a JSON file. |
+| `Esc`/`Ctrl+C` | Exit the browser. |
 
 ### `grove-hooks sessions cleanup`
 
@@ -155,9 +159,9 @@ This command finds sessions that are marked as `running` or `idle` but whose cor
 
 #### Flags
 
-| Flag                 | Description                                                   | Default |
-|----------------------|---------------------------------------------------------------|---------|
-| `--inactive-minutes` | The number of minutes a session must be inactive to be cleaned up. | `30`      |
+| Flag | Description | Default |
+| :--- | :--- | :--- |
+| `--inactive-minutes` | The number of minutes a session must be inactive to be cleaned up. | `30` |
 
 ## `grove-hooks oneshot`
 
@@ -183,13 +187,13 @@ grove-hooks version [flags]
 
 ### Flags
 
-| Flag   | Description                               |
-|--------|-------------------------------------------|
+| Flag | Description |
+| :--- | :--- |
 | `--json` | Output the version information as a JSON object. |
 
 ## Environment Variables
 
-| Variable              | Description                                                      |
-|-----------------------|------------------------------------------------------------------|
+| Variable | Description |
+| :--- | :--- |
 | `GROVE_HOOKS_DB_PATH` | Specifies a custom path to the SQLite database file for testing or alternate configurations. |
-| `GROVE_DEBUG`         | If set, enables additional verbose logging for debugging.        |
+| `GROVE_DEBUG` | If set, enables additional verbose logging for debugging. |

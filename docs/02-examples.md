@@ -1,36 +1,38 @@
-This document provides practical examples to demonstrate how to use `grove-hooks` for observability, from basic session monitoring to integrated workflow analysis.
+# Examples
+
+This document provides practical examples for using `grove-hooks`.
 
 ## Example 1: Basic Session Monitoring
 
-This example demonstrates the fundamental workflow of integrating `grove-hooks` with a project using the Claude CLI and monitoring an interactive development session.
+This example covers integrating `grove-hooks` with a project and monitoring an interactive session.
 
 1.  **Install Hooks in Your Project**
 
-    Navigate to your project's root directory and run the `install` command. This configures the Claude CLI to automatically send lifecycle events to `grove-hooks`.
+    Navigate to the project's root directory and run the `install` command.
 
     ```bash
     # In your project's root directory
-    grove-hooks install
+    hooks install
     ```
 
-    This command finds or creates the `.claude/settings.local.json` file and injects the necessary hook configurations, such as `PreToolUse`, `PostToolUse`, and `Stop`.
+    This command modifies or creates `.claude/settings.local.json` to configure the Claude CLI to send lifecycle events to `grove-hooks`.
 
 2.  **Start a Claude Session**
 
-    Begin a development session with Claude as you normally would. For example:
+    Begin a development session using an integrated tool.
 
     ```bash
     claude -p "Refactor the main database connection logic."
     ```
 
-    As soon as the session starts, `grove-hooks` creates a new record in its local SQLite database to track it.
+    When the session starts, `grove-hooks` creates a new record in its local SQLite database.
 
 3.  **List Active Sessions**
 
-    While the Claude session is running, open another terminal and use `grove-hooks sessions list` to see all tracked activity. The `--active` flag is a convenient way to hide completed or failed sessions.
+    While the session is running, open another terminal and use `hooks sessions list`. The `--active` flag hides completed or failed sessions.
 
     ```bash
-    grove-hooks sessions list --active
+    hooks sessions list --active
     ```
 
     **Expected Output:**
@@ -40,21 +42,18 @@ This example demonstrates the fundamental workflow of integrating `grove-hooks` 
     claude-axb...   claude    running    my-project/main      dev     2023-10-27 10:30:05   running     2m15s
     ```
 
-    **Observability Insights:**
-    *   **Real-time Status:** You can immediately see that a `claude` session is `running`.
-    *   **Context at a Glance:** The `CONTEXT` column shows the repository (`my-project`) and branch (`main`), providing clear context for the work being done.
-    *   **Timeliness:** The `IN STATE` column shows how long the session has been in its current state, which is useful for identifying stalled or unexpectedly long-running tasks.
+    The output table shows the session's type, `running` status, repository and branch context, user, start time, and duration in the current state.
 
-## Example 2: Advanced Analysis and Debugging
+## Example 2: Analyzing a Session
 
-This example shows how to use `grove-hooks` to investigate a specific session, which is useful for debugging or reviewing the history of an agent's actions.
+This example shows how to use `grove-hooks` to investigate a specific session's history.
 
 1.  **Find a Specific Session**
 
-    Imagine a session ended unexpectedly. You can filter the session list by status to find it.
+    To find a session that has finished its work but has not been terminated, filter the list by status.
 
     ```bash
-    grove-hooks sessions list --status idle
+    hooks sessions list --status idle
     ```
 
     **Expected Output:**
@@ -64,12 +63,12 @@ This example shows how to use `grove-hooks` to investigate a specific session, w
     claude-cyz...   claude    idle     api-refactor/feat...  dev     2023-10-27 11:00:00   15m30s      15m30s
     ```
 
-2.  **Get Detailed Session Information**
+2.  **Get Detailed Information**
 
-    Use the `sessions get` command with the session ID to retrieve the full record for that session, including tool usage statistics.
+    Use the `sessions get` command with the session ID to retrieve the full record, including tool usage statistics.
 
     ```bash
-    grove-hooks sessions get claude-cyz...
+    hooks sessions get claude-cyz...
     ```
 
     **Expected Output:**
@@ -95,30 +94,28 @@ This example shows how to use `grove-hooks` to investigate a specific session, w
       Search Operations: 1
     ```
 
-    **Observability Insights:**
-    *   **Detailed Context:** You get the exact working directory, PID, and user associated with the session.
-    *   **Tool Usage Breakdown:** The `Tool Statistics` section provides a summary of the agent's actions, helping you understand what it was trying to do. 
+    The output includes the working directory, PID, user, timing, and a summary of tool usage.
 
 3.  **Browse Sessions Interactively**
 
-    For a more fluid investigation, the `sessions browse` command launches a terminal UI that allows for real-time filtering and exploration.
+    The `sessions browse` command opens a terminal interface for filtering and exploring sessions.
 
     ```bash
-    grove-hooks sessions browse
+    hooks sessions browse
     ```
 
-    Within this interface, you can:
-    *   **Type to filter:** Instantly narrow down the list by repository, branch, or user.
-    *   **Press `Tab`:** Cycle through status filters (`running`, `idle`, `completed`, `failed`).
-    *   **Press `Enter`:** View the same detailed information provided by the `get` command.
+    The interface provides keybindings for navigation and actions:
+    *   **Type to filter:** Narrows the list by repository, branch, or user.
+    *   **Press `Tab`:** Cycles through status filters (`running`, `idle`, `completed`, `failed`).
+    *   **Press `Enter`:** Views the detailed information for the selected session.
 
 ## Example 3: Integration with Grove Flow
 
-A key feature of `grove-hooks` is its ability to provide unified observability across the entire Grove ecosystem. This example shows how it automatically tracks automated jobs orchestrated by `grove-flow`.
+This example shows how `grove-hooks` tracks automated jobs orchestrated by `grove-flow`.
 
 1.  **Create and Run a Grove Flow Plan**
 
-    First, use `grove-flow` to define and execute a multi-step plan. `grove-flow` is configured to automatically emit start and stop events to `grove-hooks` for each job it runs.
+    Use `grove-flow` to define and execute a multi-step plan. `grove-flow` is configured to emit start and stop events to `grove-hooks` for each job.
 
     ```bash
     # In a project configured for grove-flow
@@ -135,10 +132,10 @@ A key feature of `grove-hooks` is its ability to provide unified observability a
 
 2.  **View the Unified Session List**
 
-    While the `flow` plan is running (or after it has finished), use `grove-hooks` to view the activity.
+    While the `flow` plan is running or after it has finished, use `hooks` to view the activity.
 
     ```bash
-    grove-hooks sessions list
+    hooks sessions list
     ```
 
     **Expected Output:**
@@ -149,7 +146,4 @@ A key feature of `grove-hooks` is its ability to provide unified observability a
     claude-axb...    claude    completed    my-project/main             dev     2023-10-27 10:30:05   25m10s      25m10s
     ```
 
-    **Observability Insights:**
-    *   **Unified View:** The list now includes both interactive `claude` sessions and automated `job` sessions from `grove-flow`. This provides a single place to monitor all AI-driven activity in your project.
-    *   **Job-Specific Context:** For the `job` session, the `CONTEXT` column displays the name of the `grove-flow` plan (`new-feature-docs`), distinguishing it from the repository/branch context of a Claude session.
-    *   **End-to-End Tracking:** You can trace a feature's lifecycle from an interactive `claude` session where it was developed to the automated `job` that generated its documentation, all within the same observability tool.
+    The list includes entries for both interactive (`claude`) and automated (`job`) sessions. For `job` type entries, the `CONTEXT` column displays the `grove-flow` plan name. This provides a single interface to monitor all AI-driven activity in a project.

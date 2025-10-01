@@ -2,33 +2,34 @@
 
 <img src="docs/images/grove-hooks.svg" width="60%" />
 
-Grove Hooks captures information about local AI agent sessions and automated job lifecycles, storing all data in a local SQLite database. 
+Grove Hooks captures information about local AI agent sessions and automated job lifecycles, storing all data in a local SQLite database.
 
 <!-- placeholder for animated gif -->
 
 ## Key Features
 
-*   **Local-First Tracking**: All session and event data is stored in a local SQLite database (`~/.local/share/grove-hooks/state.db`).
+*   **Local Data Storage**: All session and event data is stored in a local SQLite database, typically at `~/.local/share/grove-hooks/state.db`.
+*   **Session Monitoring**: Tracks interactive agent sessions (from tools like Claude Code) and automated `oneshot` jobs (from `grove-flow`) in a unified list.
+*   **State Tracking**: Records the lifecycle status of a session, such as `running`, `idle`, `completed`, or `failed`, and includes a mechanism to clean up inactive or terminated sessions.
+*   **Terminal Interface**: The `hooks sessions browse` command provides an interactive terminal UI for filtering, searching, and inspecting session data.
+*   **Configuration Automation**: The `install` command modifies local project settings (e.g., `.claude/settings.local.json`) to integrate with AI agent CLIs.
+*   **System Notifications**: Delivers desktop notifications for events like job failures or tasks that require user input.
 
-*   **Unified Session Monitoring**: It tracks both interactive AI agent sessions (e.g., from Claude Code) and automated `oneshot` jobs from `grove-flow`, presenting them in a single, consistent interface.
+## How It Works
 
-*   **State Management**: The tool captures the complete lifecycle of a session, from start to finish, including statuses like `running`, `idle`, `completed`, and `failed`. It also automatically cleans up dead or inactive sessions.
+Grove Hooks is a command-line binary that other tools execute at specific lifecycle events. For example, `grove-flow` calls `grove-hooks oneshot start` before executing a job and `grove-hooks oneshot stop` after it finishes.
 
-*   **Interactive TUI**: The `hooks sessions browse` command launches a terminal-based UI for interactively filtering, searching, and inspecting session data in real-time.
-
-*   **AI Agent Integration**: An `install` command automates the integration with tools like Claude Code by configuring the necessary hooks in the local project settings.
-
-*   **System Notifications**: It can deliver native desktop notifications for important events, such as job failures or tasks requiring user input, providing timely feedback on background processes.
+On each execution, `grove-hooks` receives a JSON payload via standard input containing event details. It parses this data and writes or updates records in its SQLite database. The `install` command automates this process for tools like the Claude CLI by adding the necessary command calls to its local configuration file.
 
 ## Ecosystem Integration
 
-Grove Hooks functions as the central observability layer within the Grove tool suite, integrating with other components to provide a cohesive development experience.
+Grove Hooks serves as an observability component within the Grove tool suite.
 
-*   **Grove Flow (`flow`)**: When `grove-flow` executes `oneshot` jobs, it communicates with Grove Hooks to signal the start and stop of each job's lifecycle. This allows developers to monitor the progress of automated plans, view their status, and diagnose failures using the same tools they use for interactive sessions.
+*   **Grove Flow (`flow`)**: When `grove-flow` runs `oneshot` jobs, it calls Grove Hooks to signal the start and stop of each job. This allows the progress and status of automated plans to be monitored.
 
-*   **Claude Code**: Grove Hooks integrates with Claude's hook system. By running `grove-hooks install`, the tool configures the local repository to automatically report events such as tool usage, notifications, and session termination to the Grove Hooks database.
+*   **Claude Code**: The `grove-hooks install` command configures the local repository to report events such as tool usage, notifications, and session termination to the Grove Hooks database.
 
-*   **Grove Meta-CLI (`grove`)**: The `grove` command manages the installation and versioning of the `grove-hooks` binary, ensuring it is available in the user's `PATH` and can be discovered by other ecosystem tools.
+*   **Grove Meta-CLI (`grove`)**: The `grove` command manages the installation and versioning of the `grove-hooks` binary, making it available in the user's `PATH` for other tools to execute.
 
 ## Installation
 
