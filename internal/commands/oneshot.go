@@ -220,7 +220,7 @@ func sendOneshotNtfyNotification(storage interfaces.SessionStorer, sessionID, jo
 	log.Printf("sendOneshotNtfyNotification called for job %s with status %s", sessionID, jobStatus)
 	
 	// Get notification settings from config
-	configPath := expandPath("~/.config/canopy/config.yaml")
+	configPath := expandPath("~/.config/grove-hooks/config.yaml")
 	configData, err := os.ReadFile(configPath)
 	if err != nil {
 		// Fail silently if config doesn't exist

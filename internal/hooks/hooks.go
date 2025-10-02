@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-hooks/internal/api"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"gopkg.in/yaml.v3"
 )
@@ -237,10 +236,10 @@ func RunStopHook() {
 		
 		// Execute repository-specific hook commands if we have a working directory
 		if workingDir != "" {
-			log.Printf("Checking for .canopy.yaml in working directory: %s", workingDir)
+			log.Printf("Checking for .grove-hooks.yaml in working directory: %s", workingDir)
 			if err := ExecuteRepoHookCommands(ctx, workingDir); err != nil {
 				// Check if this is a blocking error from exit code 2
-				if blockingErr, ok := err.(*api.HookBlockingError); ok {
+				if blockingErr, ok := err.(*HookBlockingError); ok {
 					log.Printf("Hook command returned blocking error: %s", blockingErr.Message)
 					// Write the error message to stderr and exit with code 2
 					fmt.Fprintf(os.Stderr, "%s\n", blockingErr.Message)
@@ -343,7 +342,7 @@ func RunSubagentStopHook() {
 	// In the future, we might want to add a separate subagent tracking table
 }
 
-// ExecuteRepoHookCommands executes on_stop commands from .canopy.yaml
+// ExecuteRepoHookCommands executes on_stop commands from .grove-hooks.yaml
 func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 	config, err := LoadRepoHookConfig(workingDir)
 	if err != nil {
@@ -355,7 +354,7 @@ func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 		return nil
 	}
 
-	log.Printf("Found %d on_stop commands in .canopy.yaml", len(config.Hooks.OnStop))
+	log.Printf("Found %d on_stop commands in .grove-hooks.yaml", len(config.Hooks.OnStop))
 
 	for i, hookCmd := range config.Hooks.OnStop {
 		log.Printf("Executing hook command %d: %s", i+1, hookCmd.Name)
@@ -378,7 +377,7 @@ func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 			log.Printf("Hook command '%s' failed: %v", hookCmd.Name, err)
 
 			// Check if this is a blocking error (exit code 2)
-			if blockingErr, ok := err.(*api.HookBlockingError); ok {
+			if blockingErr, ok := err.(*HookBlockingError); ok {
 				log.Printf("Hook command '%s' returned blocking error, stopping session", hookCmd.Name)
 
 				// Log event for blocking command
@@ -429,9 +428,9 @@ func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 	return nil
 }
 
-// LoadRepoHookConfig loads .canopy.yaml from the specified directory
+// LoadRepoHookConfig loads .grove-hooks.yaml from the specified directory
 func LoadRepoHookConfig(workingDir string) (*models.RepoHookConfig, error) {
-	configPath := filepath.Join(workingDir, ".canopy.yaml")
+	configPath := filepath.Join(workingDir, ".grove-hooks.yaml")
 
 	// Check if file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -441,12 +440,12 @@ func LoadRepoHookConfig(workingDir string) (*models.RepoHookConfig, error) {
 	// Read and parse the file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read .canopy.yaml: %w", err)
+		return nil, fmt.Errorf("failed to read .grove-hooks.yaml: %w", err)
 	}
 
 	var config models.RepoHookConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse .canopy.yaml: %w", err)
+		return nil, fmt.Errorf("failed to parse .grove-hooks.yaml: %w", err)
 	}
 
 	return &config, nil

@@ -429,8 +429,7 @@ func OfflineOperationScenario() *harness.Scenario {
 		Steps: []harness.Step{
 			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Ensure no API is running", func(ctx *harness.Context) error {
-				// The test is already configured with a non-existent API URL
-				// via CANOPY_API_URL=http://test-not-running:8888
+				// Tests now use local storage only, no API server needed
 				return nil
 			}),
 			harness.NewStep("Complete full session lifecycle offline", func(ctx *harness.Context) error {

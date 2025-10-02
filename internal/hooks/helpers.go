@@ -12,10 +12,18 @@ import (
 	"syscall"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-hooks/internal/api"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-notifications"
 )
+
+// HookBlockingError represents an error that should block the session from stopping
+type HookBlockingError struct {
+	Message string
+}
+
+func (e *HookBlockingError) Error() string {
+	return e.Message
+}
 
 // Helper functions
 
@@ -90,59 +98,11 @@ func buildResultSummary(data PostToolUseInput) map[string]any {
 }
 
 func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {
-	// Get notification settings from config
-	config, err := ctx.LoadConfig()
-	if err != nil {
-		log.Printf("Failed to load config for ntfy: %v", err)
-		return
-	}
-
-	// Check if ntfy is enabled in the config
-	ntfyConfig, ok := config["notifications"].(map[string]interface{})
-	if !ok {
-		return
-	}
-
-	ntfy, ok := ntfyConfig["ntfy"].(map[string]interface{})
-	if !ok {
-		return
-	}
-
-	enabled, _ := ntfy["enabled"].(bool)
-	if !enabled {
-		return
-	}
-
-	topic, _ := ntfy["topic"].(string)
-	if topic == "" {
-		return
-	}
-
-	// Get session info
-	session, err := ctx.GetSession(data.SessionID)
-	if err != nil {
-		log.Printf("Failed to get session for ntfy: %v", err)
-		return
-	}
-
-	// Create ntfy notifier
-	ntfyURL := "https://ntfy.sh"
-	if url, ok := ntfy["url"].(string); ok && url != "" {
-		ntfyURL = url
-	}
-
-	// Prepare notification message
-	message := fmt.Sprintf("Claude finished: %s", session.Repo)
-	if session.Branch != "" {
-		message = fmt.Sprintf("Claude finished: %s (%s)", session.Repo, session.Branch)
-	}
-
-	// Send notification
-	if err := notifications.SendNtfy(ntfyURL, topic, "Claude Session Completed", message, "default", []string{"claude", status}); err != nil {
-		log.Printf("Failed to send ntfy notification: %v", err)
-	} else {
-		log.Printf("Sent ntfy notification: %s", message)
-	}
+	// For now, ntfy notifications are disabled since we removed the config loading
+	// This functionality can be re-enabled by implementing a different config mechanism
+	_ = ctx
+	_ = data
+	_ = status
 }
 
 func determineTaskType(task string) string {
@@ -190,9 +150,9 @@ func ExecuteHookCommand(workingDir string, hookCmd models.HookCommand) error {
 				// Exit code 2 means blocking error - feed stderr back to Claude
 				if exitCode == 2 {
 					if stderrOutput != "" {
-						return &api.HookBlockingError{Message: stderrOutput}
+						return &HookBlockingError{Message: stderrOutput}
 					} else {
-						return &api.HookBlockingError{Message: fmt.Sprintf("Hook command '%s' failed with blocking error (exit code 2)", hookCmd.Name)}
+						return &HookBlockingError{Message: fmt.Sprintf("Hook command '%s' failed with blocking error (exit code 2)", hookCmd.Name)}
 					}
 				}
 

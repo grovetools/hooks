@@ -15,7 +15,6 @@ import (
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-tmux/pkg/tmux"
-	"gopkg.in/yaml.v3"
 )
 
 // BaseHookInput contains fields common to all hooks
@@ -132,10 +131,9 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	tmuxKey := ""
 
 	// Detect tmux key using tmux manager
-	configDir := expandPath("~/.config/canopy")
-	sessionsFile := filepath.Join(configDir, "tmux-sessions.yaml")
-	tmuxMgr := tmux.NewManager(configDir, sessionsFile)
-	if tmuxMgr != nil {
+	configDir := expandPath("~/.config/tmux-claude-hud")
+	tmuxMgr, err := tmux.NewManager(configDir)
+	if err == nil && tmuxMgr != nil {
 		tmuxKey = tmuxMgr.DetectTmuxKeyForPath(workingDir)
 	}
 
@@ -156,22 +154,6 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	}
 
 	return hc.Storage.EnsureSessionExists(session)
-}
-
-// LoadConfig loads the application configuration
-func (hc *HookContext) LoadConfig() (map[string]interface{}, error) {
-	configPath := expandPath("~/.config/canopy/config.yaml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
-	}
-
-	var config map[string]interface{}
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
-	}
-
-	return config, nil
 }
 
 // GetSession retrieves a session from local storage
