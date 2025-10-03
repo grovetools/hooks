@@ -1,3 +1,5 @@
+## v0.0.8-nightly.f075336 (2025-10-03)
+
 ## v0.1.0 (2025-10-01)
 
 This release introduces a significant documentation overhaul and new filtering capabilities. The entire documentation structure has been simplified and regenerated, now organized into four sections: Overview, Examples, Configuration, and Command Reference (c798c88, a6e5385). The documentation generation process now supports automatic Table of Contents creation in the README (0760e3c).
