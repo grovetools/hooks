@@ -7,10 +7,10 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.32
-	github.com/mattsolo1/grove-core v0.4.0
-	github.com/mattsolo1/grove-notifications v0.1.0
-	github.com/mattsolo1/grove-tend v0.4.0
-	github.com/mattsolo1/grove-tmux v0.1.0
+	github.com/mattsolo1/grove-core v0.4.1-nightly.8d7daf2
+	github.com/mattsolo1/grove-notifications v0.1.1-nightly.6e40a73
+	github.com/mattsolo1/grove-tend v0.4.1-nightly.4e3f787
+	github.com/mattsolo1/grove-tmux v0.1.1-nightly.45d83bb
 	github.com/spf13/cobra v1.9.1
 	gopkg.in/yaml.v3 v3.0.1
 )
