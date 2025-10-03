@@ -10,11 +10,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-core/tui/components"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	gtable "github.com/mattsolo1/grove-core/tui/components/table"
+	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/spf13/cobra"
@@ -138,6 +143,61 @@ func NewBrowseCmd() *cobra.Command {
 	return cmd
 }
 
+// browseKeyMap is the custom keymap for the session browser
+type browseKeyMap struct {
+	keymap.Base
+	CycleFilter key.Binding
+	Archive     key.Binding
+	CopyID      key.Binding
+	OpenDir     key.Binding
+	ExportJSON  key.Binding
+	SelectAll   key.Binding
+}
+
+func (k browseKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{}
+}
+
+func (k browseKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Confirm, k.Back},
+		{k.Select, k.SelectAll, k.Archive},
+		{k.CycleFilter, k.CopyID, k.OpenDir, k.ExportJSON},
+		{k.Help, k.Quit},
+	}
+}
+
+func newBrowseKeyMap() browseKeyMap {
+	base := keymap.NewBase()
+	return browseKeyMap{
+		Base: base,
+		CycleFilter: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "cycle filter"),
+		),
+		Archive: key.NewBinding(
+			key.WithKeys("ctrl+x"),
+			key.WithHelp("ctrl+x", "archive selected"),
+		),
+		CopyID: key.NewBinding(
+			key.WithKeys("ctrl+y"),
+			key.WithHelp("ctrl+y", "copy id"),
+		),
+		OpenDir: key.NewBinding(
+			key.WithKeys("ctrl+o"),
+			key.WithHelp("ctrl+o", "open dir"),
+		),
+		ExportJSON: key.NewBinding(
+			key.WithKeys("ctrl+j"),
+			key.WithHelp("ctrl+j", "export json"),
+		),
+		SelectAll: key.NewBinding(
+			key.WithKeys("ctrl+a"),
+			key.WithHelp("ctrl+a", "select all"),
+		),
+	}
+}
+
 // browseModel is the model for the interactive session browser
 type browseModel struct {
 	sessions        []*models.Session
@@ -152,6 +212,8 @@ type browseModel struct {
 	selectedIDs     map[string]bool // Track multiple selections
 	storage         interfaces.SessionStorer
 	lastRefresh     time.Time
+	keys            browseKeyMap
+	help            help.Model
 }
 
 func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer) browseModel {
@@ -161,6 +223,15 @@ func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer
 	ti.Focus()
 	ti.CharLimit = 256
 	ti.Width = 60
+
+	// Style the text input with grove-core theme
+	t := theme.DefaultTheme
+	ti.PromptStyle = t.Muted
+	ti.Cursor.Style = t.Cursor
+	ti.TextStyle = t.Input
+
+	// Create keymap and help model
+	keys := newBrowseKeyMap()
 
 	return browseModel{
 		sessions:     sessions,
@@ -172,6 +243,8 @@ func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer
 		selectedIDs:  make(map[string]bool),
 		storage:      storage,
 		lastRefresh:  time.Now(),
+		keys:         keys,
+		help:         help.New(keys),
 	}
 }
 
@@ -266,29 +339,62 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:
-		// Handle key input
-		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
+		// Handle help toggle first
+		if key.Matches(msg, m.keys.Help) {
+			m.help.Toggle()
+			return m, nil
+		}
+
+		// Handle quit even when help is shown
+		if key.Matches(msg, m.keys.Quit) {
+			if m.help.ShowAll {
+				// If help is showing, close it instead of quitting
+				m.help.Toggle()
+				return m, nil
+			}
 			if m.showDetails {
 				m.showDetails = false
 				return m, nil
 			}
 			return m, tea.Quit
+		}
 
-		case tea.KeyUp, tea.KeyCtrlP:
+		// Handle back/escape
+		if key.Matches(msg, m.keys.Back) {
+			if m.help.ShowAll {
+				m.help.Toggle()
+				return m, nil
+			}
+			if m.showDetails {
+				m.showDetails = false
+				return m, nil
+			}
+			return m, tea.Quit
+		}
+
+		// If help is shown, ignore other keys
+		if m.help.ShowAll {
+			return m, nil
+		}
+
+		// Handle other key input
+		if false {
+
+		} else if key.Matches(msg, m.keys.Up) {
 			if !m.showDetails && m.cursor > 0 {
 				m.cursor--
 			}
 
-		case tea.KeyDown, tea.KeyCtrlN:
+		} else if key.Matches(msg, m.keys.Down) {
 			if !m.showDetails && m.cursor < len(m.filtered)-1 {
 				m.cursor++
 			}
 
-		case tea.KeyEnter:
+		} else if key.Matches(msg, m.keys.Confirm) {
 			if m.cursor < len(m.filtered) {
 				if m.showDetails {
 					// If showing details, enter exits
@@ -300,7 +406,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case tea.KeyTab:
+		} else if key.Matches(msg, m.keys.CycleFilter) {
 			// Cycle through status filters
 			switch m.statusFilter {
 			case "":
@@ -317,14 +423,14 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateFiltered()
 			m.cursor = 0
 
-		case tea.KeyCtrlY:
+		} else if key.Matches(msg, m.keys.CopyID) {
 			// Copy session ID to clipboard
 			if m.cursor < len(m.filtered) {
 				session := m.filtered[m.cursor]
 				copyToClipboard(session.ID)
 			}
 
-		case tea.KeyCtrlO:
+		} else if key.Matches(msg, m.keys.OpenDir) {
 			// Open working directory in file manager
 			if m.cursor < len(m.filtered) {
 				session := m.filtered[m.cursor]
@@ -333,7 +439,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case tea.KeyCtrlJ:
+		} else if key.Matches(msg, m.keys.ExportJSON) {
 			// Export selected session as JSON
 			if m.cursor < len(m.filtered) {
 				session := m.filtered[m.cursor]
@@ -342,7 +448,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				os.WriteFile(filename, data, 0644)
 			}
 
-		case tea.KeySpace:
+		} else if key.Matches(msg, m.keys.Select) {
 			// Toggle selection on current session when not in details view
 			if m.cursor < len(m.filtered) && !m.showDetails {
 				session := m.filtered[m.cursor]
@@ -355,7 +461,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case tea.KeyCtrlA:
+		} else if key.Matches(msg, m.keys.SelectAll) {
 			// Select/Deselect all filtered items
 			if len(m.filtered) > 0 && !m.showDetails {
 				// Check if all filtered items are already selected
@@ -380,7 +486,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case tea.KeyCtrlX:
+		} else if key.Matches(msg, m.keys.Archive) {
 			// Archive selected sessions
 			if len(m.selectedIDs) > 0 && !m.showDetails {
 				// Get list of selected IDs
@@ -415,7 +521,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		default:
+		} else {
 			if !m.showDetails {
 				// Update filter input
 				prevValue := m.filterInput.Value()
@@ -460,88 +566,44 @@ func (m *browseModel) updateFiltered() {
 }
 
 func (m browseModel) View() string {
+	// Show help if toggled
+	if m.help.ShowAll {
+		return m.help.View()
+	}
+
 	if m.showDetails && m.selectedSession != nil {
 		return m.viewDetails()
 	}
 
+	t := theme.DefaultTheme
 	var b strings.Builder
 
-	// Header with filter input
-	b.WriteString(m.filterInput.View())
+	// Compact header with filter input on same line
+	filterText := "all"
+	if m.statusFilter != "" {
+		filterText = m.statusFilter
+	}
+
+	headerLine := t.Header.Render("Grove Sessions") + "  " +
+		t.Muted.Render(m.filterInput.View()) + "  " +
+		t.Muted.Render("filter:") + t.Info.Render(filterText) + "  " +
+		t.Success.Render("●")
+
+	b.WriteString(headerLine)
 	b.WriteString("\n")
 
-	// Status filter indicator and refresh status
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-	refreshIndicator := "●"
-	refreshStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00"))
+	// Build table data
+	headers := []string{"", "TYPE", "STATUS", "CONTEXT", "TITLE", "STARTED", "IN STATE"}
+	var rows [][]string
 
-	filterText := "Filter: all"
-	if m.statusFilter != "" {
-		filterText = fmt.Sprintf("Filter: %s", m.statusFilter)
-	}
-
-	// Show filter and refresh indicator on same line
-	b.WriteString(statusStyle.Render(filterText))
-	b.WriteString("  ")
-	b.WriteString(refreshStyle.Render(refreshIndicator))
-	b.WriteString(statusStyle.Render(" Auto-refresh: 1s"))
-	b.WriteString("\n\n")
-
-	// Calculate visible items
-	visibleHeight := m.height - 7 // Reserve space for header and help
-	if visibleHeight < 5 {
-		visibleHeight = 5
-	}
-
-	// Determine visible range with scrolling
-	start := 0
-	end := len(m.filtered)
-
-	if end > visibleHeight {
-		// Center the cursor in the visible area when possible
-		if m.cursor < visibleHeight/2 {
-			start = 0
-		} else if m.cursor >= len(m.filtered)-visibleHeight/2 {
-			start = len(m.filtered) - visibleHeight
-		} else {
-			start = m.cursor - visibleHeight/2
-		}
-
-		end = start + visibleHeight
-		if end > len(m.filtered) {
-			end = len(m.filtered)
-		}
-		if start < 0 {
-			start = 0
-		}
-	}
-
-	// Create table using lipgloss table
-	// Define columns without USER and DURATION columns
-	columns := []table.Column{
-		{Title: "TYPE", Width: 8},
-		{Title: "STATUS", Width: 11},
-		{Title: "CONTEXT", Width: 35},
-		{Title: "TITLE", Width: 35},
-		{Title: "STARTED", Width: 20},
-		{Title: "IN STATE", Width: 15},
-	}
-
-	// Build rows for visible range
-	var rows []table.Row
-	for i := start; i < end && i < len(m.filtered); i++ {
-		session := m.filtered[i]
-
+	for i, session := range m.filtered {
 		// Calculate time in current state
 		inState := ""
 		if session.Status == "running" || session.Status == "idle" {
-			// For active sessions, time since last activity
 			inState = time.Since(session.LastActivity).Round(time.Second).String()
 		} else if session.EndedAt != nil {
-			// For completed sessions, show how long they ran
 			inState = session.EndedAt.Sub(session.StartedAt).Round(time.Second).String()
 		} else {
-			// Fallback to time since started
 			inState = time.Since(session.StartedAt).Round(time.Second).String()
 		}
 
@@ -551,7 +613,6 @@ func (m browseModel) View() string {
 		sessionType := "claude"
 		if session.Type == "oneshot_job" {
 			sessionType = "job"
-			// For oneshot jobs, use Repo field for context
 			if session.Repo != "" {
 				context = session.Repo
 				if session.Branch != "" {
@@ -560,8 +621,7 @@ func (m browseModel) View() string {
 			} else {
 				context = "n/a"
 			}
-			
-			// Use JobTitle for the title column
+
 			if session.JobTitle != "" {
 				title = session.JobTitle
 			} else if session.PlanName != "" {
@@ -570,7 +630,6 @@ func (m browseModel) View() string {
 				title = "untitled"
 			}
 		} else {
-			// Claude session
 			if session.Repo != "" && session.Branch != "" {
 				context = fmt.Sprintf("%s/%s", session.Repo, session.Branch)
 			} else if session.Repo != "" {
@@ -578,140 +637,71 @@ func (m browseModel) View() string {
 			} else {
 				context = "n/a"
 			}
-			// Claude sessions don't have titles
 			title = "-"
 		}
 
-		rows = append(rows, table.Row{
+		// Selection and cursor indicator
+		var indicator string
+		isSelected := m.selectedIDs[session.ID]
+		isCursor := i == m.cursor
+
+		if isSelected && isCursor {
+			indicator = "[*]▶"
+		} else if isSelected {
+			indicator = "[*] "
+		} else if isCursor {
+			indicator = "  ▶"
+		} else {
+			indicator = "   "
+		}
+
+		// Style the status based on session state
+		statusStyle := getStatusStyle(session.Status)
+		styledStatus := statusStyle.Render(session.Status)
+
+		rows = append(rows, []string{
+			indicator,
 			sessionType,
-			session.Status,
-			context,
-			title,
+			styledStatus,
+			truncateStr(context, 45),
+			truncateStr(title, 45),
 			session.StartedAt.Format("2006-01-02 15:04:05"),
-			truncateStr(inState, 15),
+			truncateStr(inState, 18),
 		})
 	}
 
-	// Create the table
-	t := table.New(
-		table.WithColumns(columns),
-		table.WithRows(rows),
-		table.WithFocused(false), // We manage focus ourselves
-		table.WithHeight(len(rows)),
-	)
-
-	// Style the table
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(true).
-		Foreground(lipgloss.Color("#4ecdc4"))
-
-	// Remove selection styling since we handle it manually
-	s.Selected = s.Selected.
-		Foreground(lipgloss.NoColor{}).
-		Background(lipgloss.NoColor{}).
-		Bold(false)
-
-	t.SetStyles(s)
-
-	// Render table with custom row styling
-	tableLines := strings.Split(t.View(), "\n")
-
-	// Write header (first 3 lines: header, border, content)
-	if len(tableLines) >= 3 {
-		b.WriteString(tableLines[0] + "\n") // Header
-		b.WriteString(tableLines[1] + "\n") // Border
-
-		// Render data rows with custom styling
-		for i := 0; i < len(rows) && i+2 < len(tableLines); i++ {
-			session := m.filtered[start+i]
-
-			// Status color
-			statusColor := "#808080"
-			switch session.Status {
-			case "running":
-				statusColor = "#00ff00"
-			case "idle":
-				statusColor = "#ffaa00"
-			case "completed":
-				statusColor = "#4ecdc4"
-			case "failed", "error":
-				statusColor = "#ff4444"
-			}
-
-			// Selection and cursor prefix
-			var prefix string
-			isSelected := m.selectedIDs[session.ID]
-			isCursor := start+i == m.cursor
-
-			if isSelected && isCursor {
-				prefix = "[*]▶ "
-			} else if isSelected {
-				prefix = "[*]  "
-			} else if isCursor {
-				prefix = "   ▶ "
-			} else {
-				prefix = "     "
-			}
-
-			// Apply row styling
-			rowStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(statusColor))
-
-			if isCursor {
-				rowStyle = rowStyle.Bold(true)
-			}
-
-			// Skip the pipe character at the beginning of each table row
-			rowContent := tableLines[i+2]
-			if strings.HasPrefix(rowContent, "│") {
-				rowContent = rowContent[3:] // Skip "│ " at the beginning
-			}
-			if strings.HasSuffix(rowContent, "│") {
-				rowContent = rowContent[:len(rowContent)-3] // Skip " │" at the end
-			}
-
-			b.WriteString(prefix + rowStyle.Render(rowContent))
-			b.WriteString("\n")
-		}
+	// Render table using SelectableTable
+	if len(m.filtered) > 0 {
+		tableStr := gtable.SelectableTable(headers, rows, m.cursor)
+		b.WriteString(tableStr)
+	} else {
+		b.WriteString("\n" + t.Muted.Render("No matching sessions"))
 	}
 
-	// Show scroll indicators if needed
-	if start > 0 || end < len(m.filtered) {
-		scrollInfo := fmt.Sprintf("\n(%d-%d of %d)", start+1, end, len(m.filtered))
-		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-		b.WriteString(scrollStyle.Render(scrollInfo))
-	}
-
-	// Show "no results" if filtered list is empty
-	if len(m.filtered) == 0 {
-		noResultsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-		b.WriteString("\n" + noResultsStyle.Render("No matching sessions"))
-	}
-
-	// Help text
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-
-	// Build first line of help text
-	helpLine1Parts := []string{
-		"↑/↓: navigate",
-		"enter: details",
-		"tab: filter",
-		"space: select",
-		"ctrl+a: select all",
-	}
+	// Selection count and help on same line
+	b.WriteString("\n")
 	if len(m.selectedIDs) > 0 {
-		helpLine1Parts = append(helpLine1Parts, fmt.Sprintf("ctrl+x: archive (%d)", len(m.selectedIDs)))
+		b.WriteString(t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedIDs))) + " ")
 	}
-	helpText := strings.Join(helpLine1Parts, " • ")
-
-	b.WriteString("\n" + helpStyle.Render(helpText))
-	b.WriteString("\n" + helpStyle.Render("ctrl+y: copy ID • ctrl+o: open dir • ctrl+j: export • esc: quit"))
+	b.WriteString(m.help.View())
 
 	return b.String()
+}
+
+func getStatusStyle(status string) lipgloss.Style {
+	t := theme.DefaultTheme
+	switch status {
+	case "running":
+		return t.Success
+	case "idle":
+		return t.Warning
+	case "completed":
+		return t.Info
+	case "failed", "error":
+		return t.Error
+	default:
+		return t.Muted
+	}
 }
 
 func (m browseModel) viewDetails() string {
@@ -720,132 +710,145 @@ func (m browseModel) viewDetails() string {
 	}
 
 	s := m.selectedSession
-	var b strings.Builder
-
-	// Title
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ecdc4"))
-	b.WriteString(titleStyle.Render("Session Details"))
-	b.WriteString("\n\n")
-
-	// Helper function to add a field
-	addField := func(label, value string, color ...string) {
-		labelStyle := lipgloss.NewStyle().Bold(true).Width(20)
-		valueStyle := lipgloss.NewStyle()
-		if len(color) > 0 {
-			valueStyle = valueStyle.Foreground(lipgloss.Color(color[0]))
-		}
-		b.WriteString(labelStyle.Render(label+":") + " " + valueStyle.Render(value) + "\n")
-	}
+	t := theme.DefaultTheme
+	var content strings.Builder
 
 	// Basic info
-	addField("Session ID", s.ID)
+	content.WriteString(components.RenderKeyValue("Session ID", s.ID))
+	content.WriteString("\n")
+
 	sessionType := s.Type
 	if sessionType == "" {
 		sessionType = "claude_session"
 	}
-	addField("Type", sessionType)
-	addField("Status", s.Status, getStatusColor(s.Status))
+	content.WriteString(components.RenderKeyValue("Type", sessionType))
+	content.WriteString("\n")
+
+	statusStyle := getStatusStyle(s.Status)
+	content.WriteString(components.RenderKeyValue("Status", statusStyle.Render(s.Status)))
+	content.WriteString("\n")
 
 	if s.Type == "oneshot_job" {
-		// Oneshot job specific fields
 		if s.PlanName != "" {
-			addField("Plan", s.PlanName)
+			content.WriteString(components.RenderKeyValue("Plan", s.PlanName))
+			content.WriteString("\n")
 		}
 		if s.PlanDirectory != "" {
-			addField("Plan Directory", s.PlanDirectory)
+			content.WriteString(components.RenderKeyValue("Plan Directory", s.PlanDirectory))
+			content.WriteString("\n")
 		}
 		if s.JobTitle != "" {
-			addField("Job Title", s.JobTitle)
+			content.WriteString(components.RenderKeyValue("Job Title", s.JobTitle))
+			content.WriteString("\n")
 		}
 		if s.JobFilePath != "" {
-			addField("Job File", s.JobFilePath)
+			content.WriteString(components.RenderKeyValue("Job File", s.JobFilePath))
+			content.WriteString("\n")
 		}
 	} else {
-		// Claude session specific fields
-		addField("Repository", s.Repo)
-		addField("Branch", s.Branch)
+		content.WriteString(components.RenderKeyValue("Repository", s.Repo))
+		content.WriteString("\n")
+		content.WriteString(components.RenderKeyValue("Branch", s.Branch))
+		content.WriteString("\n")
 	}
 
-	addField("User", s.User)
-	addField("PID", fmt.Sprintf("%d", s.PID))
-	addField("Working Directory", s.WorkingDirectory)
+	content.WriteString(components.RenderKeyValue("User", s.User))
+	content.WriteString("\n")
+	content.WriteString(components.RenderKeyValue("PID", fmt.Sprintf("%d", s.PID)))
+	content.WriteString("\n")
+	content.WriteString(components.RenderKeyValue("Working Directory", s.WorkingDirectory))
+	content.WriteString("\n")
 
 	// Timing info
-	addField("Started", s.StartedAt.Format("2006-01-02 15:04:05 MST"))
+	content.WriteString(components.RenderKeyValue("Started", s.StartedAt.Format("2006-01-02 15:04:05 MST")))
+	content.WriteString("\n")
 	if s.EndedAt != nil {
-		addField("Ended", s.EndedAt.Format("2006-01-02 15:04:05 MST"))
-		addField("Duration", s.EndedAt.Sub(s.StartedAt).Round(time.Second).String())
+		content.WriteString(components.RenderKeyValue("Ended", s.EndedAt.Format("2006-01-02 15:04:05 MST")))
+		content.WriteString("\n")
+		content.WriteString(components.RenderKeyValue("Duration", s.EndedAt.Sub(s.StartedAt).Round(time.Second).String()))
+		content.WriteString("\n")
 	} else {
-		addField("Duration", time.Since(s.StartedAt).Round(time.Second).String()+" (ongoing)")
+		content.WriteString(components.RenderKeyValue("Duration", time.Since(s.StartedAt).Round(time.Second).String()+" (ongoing)"))
+		content.WriteString("\n")
 	}
-	addField("Last Activity", s.LastActivity.Format("2006-01-02 15:04:05 MST"))
+	content.WriteString(components.RenderKeyValue("Last Activity", s.LastActivity.Format("2006-01-02 15:04:05 MST")))
+	content.WriteString("\n")
 
-	// Tmux info
 	if s.TmuxKey != "" {
-		addField("Tmux Key", s.TmuxKey)
+		content.WriteString(components.RenderKeyValue("Tmux Key", s.TmuxKey))
+		content.WriteString("\n")
 	}
 
 	// Tool statistics
 	if s.ToolStats != nil {
-		b.WriteString("\n")
-		b.WriteString(titleStyle.Render("Tool Statistics"))
-		b.WriteString("\n")
-		addField("Total Calls", fmt.Sprintf("%d", s.ToolStats.TotalCalls))
-		addField("Bash Commands", fmt.Sprintf("%d", s.ToolStats.BashCommands))
-		addField("File Modifications", fmt.Sprintf("%d", s.ToolStats.FileModifications))
-		addField("File Reads", fmt.Sprintf("%d", s.ToolStats.FileReads))
-		addField("Search Operations", fmt.Sprintf("%d", s.ToolStats.SearchOperations))
+		var statsContent strings.Builder
+		statsContent.WriteString(components.RenderKeyValue("Total Calls", fmt.Sprintf("%d", s.ToolStats.TotalCalls)))
+		statsContent.WriteString("\n")
+		statsContent.WriteString(components.RenderKeyValue("Bash Commands", fmt.Sprintf("%d", s.ToolStats.BashCommands)))
+		statsContent.WriteString("\n")
+		statsContent.WriteString(components.RenderKeyValue("File Modifications", fmt.Sprintf("%d", s.ToolStats.FileModifications)))
+		statsContent.WriteString("\n")
+		statsContent.WriteString(components.RenderKeyValue("File Reads", fmt.Sprintf("%d", s.ToolStats.FileReads)))
+		statsContent.WriteString("\n")
+		statsContent.WriteString(components.RenderKeyValue("Search Operations", fmt.Sprintf("%d", s.ToolStats.SearchOperations)))
+		statsContent.WriteString("\n")
 		if s.ToolStats.TotalCalls > 0 {
-			addField("Avg Tool Duration", fmt.Sprintf("%.0fms", s.ToolStats.AverageToolDuration))
+			statsContent.WriteString(components.RenderKeyValue("Avg Tool Duration", fmt.Sprintf("%.0fms", s.ToolStats.AverageToolDuration)))
+			statsContent.WriteString("\n")
 		}
+
+		content.WriteString("\n")
+		content.WriteString(components.RenderSection("Tool Statistics", statsContent.String()))
+		content.WriteString("\n")
 	}
 
 	// Session summary
 	if s.SessionSummary != nil {
-		b.WriteString("\n")
-		b.WriteString(titleStyle.Render("Session Summary"))
-		b.WriteString("\n")
-		addField("Total Tools Used", fmt.Sprintf("%d", s.SessionSummary.TotalTools))
-		addField("Files Modified", fmt.Sprintf("%d", s.SessionSummary.FilesModified))
-		addField("Commands Executed", fmt.Sprintf("%d", s.SessionSummary.CommandsExecuted))
-		addField("Errors Count", fmt.Sprintf("%d", s.SessionSummary.ErrorsCount))
-		addField("Notifications", fmt.Sprintf("%d", s.SessionSummary.NotificationsSent))
+		var summaryContent strings.Builder
+		summaryContent.WriteString(components.RenderKeyValue("Total Tools Used", fmt.Sprintf("%d", s.SessionSummary.TotalTools)))
+		summaryContent.WriteString("\n")
+		summaryContent.WriteString(components.RenderKeyValue("Files Modified", fmt.Sprintf("%d", s.SessionSummary.FilesModified)))
+		summaryContent.WriteString("\n")
+		summaryContent.WriteString(components.RenderKeyValue("Commands Executed", fmt.Sprintf("%d", s.SessionSummary.CommandsExecuted)))
+		summaryContent.WriteString("\n")
+		summaryContent.WriteString(components.RenderKeyValue("Errors Count", fmt.Sprintf("%d", s.SessionSummary.ErrorsCount)))
+		summaryContent.WriteString("\n")
+		summaryContent.WriteString(components.RenderKeyValue("Notifications", fmt.Sprintf("%d", s.SessionSummary.NotificationsSent)))
+		summaryContent.WriteString("\n")
+
+		content.WriteString("\n")
+		content.WriteString(components.RenderSection("Session Summary", summaryContent.String()))
+		content.WriteString("\n")
 
 		// AI Summary if available
 		if s.SessionSummary.AISummary != nil && s.SessionSummary.AISummary.CurrentActivity != "" {
-			b.WriteString("\n")
-			b.WriteString(titleStyle.Render("AI Summary"))
-			b.WriteString("\n")
-			addField("Current Activity", s.SessionSummary.AISummary.CurrentActivity)
+			var aiContent strings.Builder
+			aiContent.WriteString(components.RenderKeyValue("Current Activity", s.SessionSummary.AISummary.CurrentActivity))
+			aiContent.WriteString("\n")
+
 			if len(s.SessionSummary.AISummary.History) > 0 {
-				b.WriteString("\nKey Accomplishments:\n")
+				aiContent.WriteString("\n")
+				aiContent.WriteString(t.Muted.Render("Key Accomplishments:"))
+				aiContent.WriteString("\n")
 				for i, milestone := range s.SessionSummary.AISummary.History {
-					b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, milestone.Summary))
+					aiContent.WriteString(fmt.Sprintf("  %s. %s\n",
+						t.Highlight.Render(fmt.Sprintf("%d", i+1)),
+						milestone.Summary))
 				}
 			}
+
+			content.WriteString("\n")
+			content.WriteString(components.RenderSection("AI Summary", aiContent.String()))
+			content.WriteString("\n")
 		}
 	}
 
 	// Help
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#808080"))
-	b.WriteString("\n" + helpStyle.Render("enter/esc: back to list"))
+	content.WriteString("\n")
+	content.WriteString(t.Muted.Render("enter/esc: back to list"))
 
-	return b.String()
-}
-
-func getStatusColor(status string) string {
-	switch status {
-	case "running":
-		return "#00ff00"
-	case "idle":
-		return "#ffaa00"
-	case "completed":
-		return "#4ecdc4"
-	case "failed", "error":
-		return "#ff4444"
-	default:
-		return "#808080"
-	}
+	// Wrap in a box
+	return components.RenderBox("Session Details", content.String(), m.width)
 }
 
 func truncateStr(s string, maxLen int) string {
