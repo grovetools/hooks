@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,7 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	gtable "github.com/mattsolo1/grove-core/tui/components/table"
@@ -23,6 +24,7 @@ import (
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -32,10 +34,10 @@ func NewBrowseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "browse",
 		Aliases: []string{"b"},
-		Short:   "Browse sessions interactively with search and filtering",
-		Long:    `Launch an interactive terminal UI to browse, search, and filter Claude sessions. Navigate with arrow keys, search by typing, and select sessions to view details.`,
+		Short:   "Browse workspace projects and their sessions",
+		Long:    `Launch an interactive terminal UI to browse all workspace projects and their Claude sessions. Navigate with arrow keys, search by typing, and select projects to view details.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Create storage
+			// Create storage for session cleanup
 			storage, err := disk.NewSQLiteStore()
 			if err != nil {
 				return fmt.Errorf("failed to create storage: %w", err)
@@ -45,56 +47,79 @@ func NewBrowseCmd() *cobra.Command {
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
 
-			// Get all extended sessions
-			sessions, err := storage.(*disk.SQLiteStore).GetAllExtendedSessions()
+			// Initialize the workspace discovery service
+			logger := logrus.New()
+			logger.SetLevel(logrus.WarnLevel) // Keep it quiet for TUI
+			discoverySvc := workspace.NewDiscoveryService(logger)
+
+			// Discover all projects, ecosystems, and worktrees
+			discoveryResult, err := discoverySvc.DiscoverAll()
 			if err != nil {
-				return fmt.Errorf("failed to get sessions: %w", err)
+				return fmt.Errorf("failed to discover projects: %w", err)
 			}
 
-			// Filter out completed sessions if requested
-			if hideCompleted {
-				var filtered []*disk.ExtendedSession
-				for _, s := range sessions {
-					if s.Status != "completed" && s.Status != "failed" && s.Status != "error" {
-						filtered = append(filtered, s)
-					}
-				}
-				sessions = filtered
-			}
+			// Transform the result into a flat list for the TUI
+			projects := workspace.TransformToProjectInfo(discoveryResult)
 
-			if len(sessions) == 0 {
-				fmt.Println("No sessions found.")
+			if len(projects) == 0 {
+				fmt.Println("No projects found in configured groves.")
 				return nil
 			}
 
-			// Sort sessions: running first, then idle, then others by started_at desc
-			sort.Slice(sessions, func(i, j int) bool {
-				// Define status priority: running=1, idle=2, others=3
-				iPriority := 3
-				if sessions[i].Status == "running" {
-					iPriority = 1
-				} else if sessions[i].Status == "idle" {
-					iPriority = 2
+			// Enrich the projects with session data
+			enrichOpts := &workspace.EnrichmentOptions{
+				FetchClaudeSessions: true,
+				FetchGitStatus:      false, // Don't fetch git status upfront for performance
+			}
+			if err := workspace.EnrichProjects(context.Background(), projects, enrichOpts); err != nil {
+				// Non-fatal - just log and continue without enrichment
+				logger.Warnf("Failed to enrich projects: %v", err)
+			}
+
+			// Filter out projects without sessions if hideCompleted is set
+			if hideCompleted {
+				var filtered []*workspace.ProjectInfo
+				for _, p := range projects {
+					if p.ClaudeSession != nil && p.ClaudeSession.Status != "completed" && p.ClaudeSession.Status != "failed" {
+						filtered = append(filtered, p)
+					}
+				}
+				projects = filtered
+			}
+
+			// Sort projects: those with running sessions first, then idle, then others
+			sort.Slice(projects, func(i, j int) bool {
+				// Define session priority
+				iPriority := 4 // No session
+				if projects[i].ClaudeSession != nil {
+					switch projects[i].ClaudeSession.Status {
+					case "running":
+						iPriority = 1
+					case "idle":
+						iPriority = 2
+					default:
+						iPriority = 3
+					}
 				}
 
-				jPriority := 3
-				if sessions[j].Status == "running" {
-					jPriority = 1
-				} else if sessions[j].Status == "idle" {
-					jPriority = 2
+				jPriority := 4
+				if projects[j].ClaudeSession != nil {
+					switch projects[j].ClaudeSession.Status {
+					case "running":
+						jPriority = 1
+					case "idle":
+						jPriority = 2
+					default:
+						jPriority = 3
+					}
 				}
 
-				// Sort by priority first
-				if iPriority != jPriority {
-					return iPriority < jPriority
-				}
-
-				// Within same status group, sort by most recent first
-				return sessions[i].StartedAt.After(sessions[j].StartedAt)
+				// Sort by priority
+				return iPriority < jPriority
 			})
 
 			// Create the interactive model
-			m := newBrowseModel(sessions, storage)
+			m := newBrowseModel(projects, storage)
 
 			// Run the interactive program
 			p := tea.NewProgram(m, tea.WithAltScreen())
@@ -103,35 +128,17 @@ func NewBrowseCmd() *cobra.Command {
 				return fmt.Errorf("error running program: %w", err)
 			}
 
-			// Check if a session was selected
-			if bm, ok := finalModel.(browseModel); ok && bm.selectedSession != nil {
-				// Output the selected session details
-				s := bm.selectedSession
-				fmt.Printf("\nSelected Session: %s\n", s.ID)
-				sessionType := s.Type
-				if sessionType == "" {
-					sessionType = "claude_session"
+			// Check if a project was selected
+			if bm, ok := finalModel.(browseModel); ok && bm.selectedProject != nil {
+				// Output the selected project details
+				proj := bm.selectedProject
+				fmt.Printf("\nSelected Project: %s\n", proj.Name)
+				fmt.Printf("Path: %s\n", proj.Path)
+				if proj.ParentEcosystemPath != "" {
+					fmt.Printf("Ecosystem: %s\n", filepath.Base(proj.ParentEcosystemPath))
 				}
-				fmt.Printf("Type: %s\n", sessionType)
-				fmt.Printf("Status: %s\n", s.Status)
-
-				if s.Type == "oneshot_job" {
-					// Oneshot job specific fields
-					if s.PlanName != "" {
-						fmt.Printf("Plan: %s\n", s.PlanName)
-					}
-					if s.JobTitle != "" {
-						fmt.Printf("Job Title: %s\n", s.JobTitle)
-					}
-				} else {
-					// Claude session specific fields
-					fmt.Printf("Repository: %s\n", s.Repo)
-					fmt.Printf("Branch: %s\n", s.Branch)
-				}
-
-				fmt.Printf("Started: %s\n", s.StartedAt.Format(time.RFC3339))
-				if s.EndedAt != nil {
-					fmt.Printf("Duration: %s\n", s.EndedAt.Sub(s.StartedAt).Round(time.Second))
+				if proj.ClaudeSession != nil {
+					fmt.Printf("Session Status: %s\n", proj.ClaudeSession.Status)
 				}
 			}
 
@@ -199,28 +206,28 @@ func newBrowseKeyMap() browseKeyMap {
 	}
 }
 
-// browseModel is the model for the interactive session browser
+// browseModel is the model for the interactive workspace browser
 type browseModel struct {
-	sessions        []*disk.ExtendedSession
-	filtered        []*disk.ExtendedSession
-	selectedSession *disk.ExtendedSession
+	projects        []*workspace.ProjectInfo
+	filtered        []*workspace.ProjectInfo
+	selectedProject *workspace.ProjectInfo
 	cursor          int
 	filterInput     textinput.Model
 	width           int
 	height          int
-	statusFilter    string // "", "running", "idle", "completed", "failed"
+	statusFilter    string // "", "running", "idle", "no_session"
 	showDetails     bool
-	selectedIDs     map[string]bool // Track multiple selections
+	selectedPaths   map[string]bool // Track multiple selections by path
 	storage         interfaces.SessionStorer
 	lastRefresh     time.Time
 	keys            browseKeyMap
 	help            help.Model
 }
 
-func newBrowseModel(sessions []*disk.ExtendedSession, storage interfaces.SessionStorer) browseModel {
+func newBrowseModel(projects []*workspace.ProjectInfo, storage interfaces.SessionStorer) browseModel {
 	// Create text input for filtering
 	ti := textinput.New()
-	ti.Placeholder = "Type to filter by repo, branch, user, or session ID..."
+	ti.Placeholder = "Type to filter by project name, ecosystem, or path..."
 	ti.Focus()
 	ti.CharLimit = 256
 	ti.Width = 60
@@ -235,13 +242,13 @@ func newBrowseModel(sessions []*disk.ExtendedSession, storage interfaces.Session
 	keys := newBrowseKeyMap()
 
 	return browseModel{
-		sessions:     sessions,
-		filtered:     sessions,
+		projects:     projects,
+		filtered:     projects,
 		filterInput:  ti,
 		cursor:       0,
 		statusFilter: "",
 		showDetails:  false,
-		selectedIDs:  make(map[string]bool),
+		selectedPaths: make(map[string]bool),
 		storage:      storage,
 		lastRefresh:  time.Now(),
 		keys:         keys,
@@ -266,70 +273,73 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tickMsg:
-		// Refresh sessions data every second
-		if !m.showDetails {
-			// Clean up dead sessions
-			_, _ = CleanupDeadSessions(m.storage)
-
-			// Get updated extended sessions
-			sessions, err := m.storage.(*disk.SQLiteStore).GetAllExtendedSessions()
-			if err == nil {
-				// Sort sessions: running first, then idle, then others by started_at desc
-				sort.Slice(sessions, func(i, j int) bool {
-					// Define status priority: running=1, idle=2, others=3
-					iPriority := 3
-					if sessions[i].Status == "running" {
-						iPriority = 1
-					} else if sessions[i].Status == "idle" {
-						iPriority = 2
-					}
-
-					jPriority := 3
-					if sessions[j].Status == "running" {
-						jPriority = 1
-					} else if sessions[j].Status == "idle" {
-						jPriority = 2
-					}
-
-					// Sort by priority first
-					if iPriority != jPriority {
-						return iPriority < jPriority
-					}
-
-					// Within same status group, sort by most recent first
-					return sessions[i].StartedAt.After(sessions[j].StartedAt)
-				})
-
-				// Remember the currently selected session ID
-				var selectedID string
-				if m.cursor >= 0 && m.cursor < len(m.filtered) {
-					selectedID = m.filtered[m.cursor].ID
-				}
-
-				// Update sessions
-				m.sessions = sessions
-				m.updateFiltered()
-
-				// Try to maintain cursor position on the same session
-				if selectedID != "" {
-					for i, s := range m.filtered {
-						if s.ID == selectedID {
-							m.cursor = i
-							break
-						}
-					}
-				}
-
-				// Ensure cursor is within bounds
-				if len(m.filtered) == 0 {
-					m.cursor = 0
-				} else if m.cursor >= len(m.filtered) {
-					m.cursor = len(m.filtered) - 1
-				}
-
-				// Update last refresh time
-				m.lastRefresh = time.Now()
+		// Refresh project data every 5 seconds (less frequent than before to reduce load)
+		if !m.showDetails && time.Since(m.lastRefresh) >= 5*time.Second {
+			// Re-enrich projects with updated session data
+			enrichOpts := &workspace.EnrichmentOptions{
+				FetchClaudeSessions: true,
+				FetchGitStatus:      false,
 			}
+			// Remember the currently selected project path
+			var selectedPath string
+			if m.cursor >= 0 && m.cursor < len(m.filtered) {
+				selectedPath = m.filtered[m.cursor].Path
+			}
+
+			// Enrich in place
+			_ = workspace.EnrichProjects(context.Background(), m.projects, enrichOpts)
+
+			// Re-sort projects
+			sort.Slice(m.projects, func(i, j int) bool {
+				iPriority := 4
+				if m.projects[i].ClaudeSession != nil {
+					switch m.projects[i].ClaudeSession.Status {
+					case "running":
+						iPriority = 1
+					case "idle":
+						iPriority = 2
+					default:
+						iPriority = 3
+					}
+				}
+
+				jPriority := 4
+				if m.projects[j].ClaudeSession != nil {
+					switch m.projects[j].ClaudeSession.Status {
+					case "running":
+						jPriority = 1
+					case "idle":
+						jPriority = 2
+					default:
+						jPriority = 3
+					}
+				}
+
+				return iPriority < jPriority
+			})
+
+			// Update filtered list
+			m.updateFiltered()
+
+			// Try to maintain cursor position on the same project
+			if selectedPath != "" {
+				for i, p := range m.filtered {
+					if p.Path == selectedPath {
+						m.cursor = i
+						break
+					}
+				}
+			}
+
+			// Ensure cursor is within bounds
+			if len(m.filtered) == 0 {
+				m.cursor = 0
+			} else if m.cursor >= len(m.filtered) {
+				m.cursor = len(m.filtered) - 1
+			}
+
+			// Update last refresh time
+			m.lastRefresh = time.Now()
 		}
 
 		// Continue ticking
@@ -402,7 +412,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				} else {
 					// Toggle details view
-					m.selectedSession = m.filtered[m.cursor]
+					m.selectedProject = m.filtered[m.cursor]
 					m.showDetails = true
 				}
 			}
@@ -415,48 +425,46 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "running":
 				m.statusFilter = "idle"
 			case "idle":
-				m.statusFilter = "completed"
-			case "completed":
-				m.statusFilter = "failed"
-			case "failed":
+				m.statusFilter = "no_session"
+			case "no_session":
 				m.statusFilter = ""
 			}
 			m.updateFiltered()
 			m.cursor = 0
 
 		} else if key.Matches(msg, m.keys.CopyID) {
-			// Copy session ID to clipboard
+			// Copy project path to clipboard
 			if m.cursor < len(m.filtered) {
-				session := m.filtered[m.cursor]
-				copyToClipboard(session.ID)
+				project := m.filtered[m.cursor]
+				copyToClipboard(project.Path)
 			}
 
 		} else if key.Matches(msg, m.keys.OpenDir) {
-			// Open working directory in file manager
+			// Open project directory in file manager
 			if m.cursor < len(m.filtered) {
-				session := m.filtered[m.cursor]
-				if session.WorkingDirectory != "" {
-					openInFileManager(session.WorkingDirectory)
+				project := m.filtered[m.cursor]
+				if project.Path != "" {
+					openInFileManager(project.Path)
 				}
 			}
 
 		} else if key.Matches(msg, m.keys.ExportJSON) {
-			// Export selected session as JSON
+			// Export selected project as JSON
 			if m.cursor < len(m.filtered) {
-				session := m.filtered[m.cursor]
-				data, _ := json.MarshalIndent(session, "", "  ")
-				filename := fmt.Sprintf("session_%s.json", session.ID)
+				project := m.filtered[m.cursor]
+				data, _ := json.MarshalIndent(project, "", "  ")
+				filename := fmt.Sprintf("project_%s.json", project.Name)
 				os.WriteFile(filename, data, 0644)
 			}
 
 		} else if key.Matches(msg, m.keys.Select) {
-			// Toggle selection on current session when not in details view
+			// Toggle selection on current project when not in details view
 			if m.cursor < len(m.filtered) && !m.showDetails {
-				session := m.filtered[m.cursor]
-				if m.selectedIDs[session.ID] {
-					delete(m.selectedIDs, session.ID)
+				project := m.filtered[m.cursor]
+				if m.selectedPaths[project.Path] {
+					delete(m.selectedPaths, project.Path)
 				} else {
-					m.selectedIDs[session.ID] = true
+					m.selectedPaths[project.Path] = true
 				}
 				// Don't open details view when using space for selection
 				return m, nil
@@ -467,8 +475,8 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.filtered) > 0 && !m.showDetails {
 				// Check if all filtered items are already selected
 				allSelected := true
-				for _, s := range m.filtered {
-					if !m.selectedIDs[s.ID] {
+				for _, p := range m.filtered {
+					if !m.selectedPaths[p.Path] {
 						allSelected = false
 						break
 					}
@@ -476,51 +484,20 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if allSelected {
 					// If all are selected, deselect all filtered items
-					for _, s := range m.filtered {
-						delete(m.selectedIDs, s.ID)
+					for _, p := range m.filtered {
+						delete(m.selectedPaths, p.Path)
 					}
 				} else {
 					// Otherwise, select all filtered items
-					for _, s := range m.filtered {
-						m.selectedIDs[s.ID] = true
+					for _, p := range m.filtered {
+						m.selectedPaths[p.Path] = true
 					}
 				}
 			}
 
 		} else if key.Matches(msg, m.keys.Archive) {
-			// Archive selected sessions
-			if len(m.selectedIDs) > 0 && !m.showDetails {
-				// Get list of selected IDs
-				sessionIDs := make([]string, 0, len(m.selectedIDs))
-				for id := range m.selectedIDs {
-					sessionIDs = append(sessionIDs, id)
-				}
-
-				// Archive them
-				if err := m.storage.ArchiveSessions(sessionIDs); err == nil {
-					// Remove archived sessions from the lists
-					newSessions := []*models.Session{}
-					for _, s := range m.sessions {
-						if !m.selectedIDs[s.ID] {
-							newSessions = append(newSessions, s)
-						}
-					}
-					m.sessions = newSessions
-
-					// Clear selections
-					m.selectedIDs = make(map[string]bool)
-
-					// Update filtered list
-					m.updateFiltered()
-
-					// Adjust cursor if needed
-					if len(m.filtered) == 0 {
-						m.cursor = 0
-					} else if m.cursor >= len(m.filtered) {
-						m.cursor = len(m.filtered) - 1
-					}
-				}
-			}
+			// Archive functionality removed for workspace dashboard
+			// Projects themselves aren't archived, only sessions are
 
 		} else {
 			if !m.showDetails {
@@ -543,27 +520,40 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *browseModel) updateFiltered() {
 	filter := strings.ToLower(m.filterInput.Value())
-	m.filtered = []*disk.ExtendedSession{}
+	m.filtered = []*workspace.ProjectInfo{}
 
-	for _, s := range m.sessions {
+	for _, p := range m.projects {
 		// Apply status filter first
-		if m.statusFilter != "" && s.Status != m.statusFilter {
-			continue
+		if m.statusFilter != "" {
+			sessionStatus := ""
+			if p.ClaudeSession != nil {
+				sessionStatus = p.ClaudeSession.Status
+			}
+
+			if m.statusFilter == "no_session" {
+				if p.ClaudeSession != nil {
+					continue
+				}
+			} else if sessionStatus != m.statusFilter {
+				continue
+			}
 		}
 
 		// Apply text filter if present
 		if filter != "" {
-			// Include job-specific and workspace fields in search
-			searchText := strings.ToLower(fmt.Sprintf("%s %s %s %s %s %s %s %s %s %s",
-				s.ID, s.Repo, s.Branch, s.User, s.WorkingDirectory,
-				s.PlanName, s.JobTitle, s.JobFilePath,
-				s.ProjectName, s.ParentEcosystemPath))
+			// Build search text from project info
+			ecosystemName := ""
+			if p.ParentEcosystemPath != "" {
+				ecosystemName = filepath.Base(p.ParentEcosystemPath)
+			}
+			searchText := strings.ToLower(fmt.Sprintf("%s %s %s %s",
+				p.Name, p.Path, ecosystemName, p.WorktreeName))
 			if !strings.Contains(searchText, filter) {
 				continue
 			}
 		}
 
-		m.filtered = append(m.filtered, s)
+		m.filtered = append(m.filtered, p)
 	}
 }
 
@@ -573,7 +563,7 @@ func (m browseModel) View() string {
 		return m.help.View()
 	}
 
-	if m.showDetails && m.selectedSession != nil {
+	if m.showDetails && m.selectedProject != nil {
 		return m.viewDetails()
 	}
 
@@ -586,7 +576,7 @@ func (m browseModel) View() string {
 		filterText = m.statusFilter
 	}
 
-	headerLine := t.Header.Render("Grove Sessions") + "  " +
+	headerLine := t.Header.Render("Grove Workspace Dashboard") + "  " +
 		t.Muted.Render(m.filterInput.View()) + "  " +
 		t.Muted.Render("filter:") + t.Info.Render(filterText) + "  " +
 		t.Success.Render("●")
@@ -595,64 +585,42 @@ func (m browseModel) View() string {
 	b.WriteString("\n")
 
 	// Build table data
-	headers := []string{"", "TYPE", "STATUS", "CONTEXT", "TITLE", "STARTED", "IN STATE"}
+	headers := []string{"", "TYPE", "PROJECT", "ECOSYSTEM", "SESSION"}
 	var rows [][]string
 
-	for i, session := range m.filtered {
-		// Calculate time in current state
-		inState := ""
-		if session.Status == "running" || session.Status == "idle" {
-			inState = time.Since(session.LastActivity).Round(time.Second).String()
-		} else if session.EndedAt != nil {
-			inState = session.EndedAt.Sub(session.StartedAt).Round(time.Second).String()
-		} else {
-			inState = time.Since(session.StartedAt).Round(time.Second).String()
+	for i, proj := range m.filtered {
+		// Determine project type
+		projType := "project"
+		if proj.IsEcosystem && !proj.IsWorktree {
+			projType = "ecosystem"
+		} else if proj.IsWorktree {
+			projType = "worktree"
 		}
 
-		// Format context and title based on session type and workspace info
-		context := ""
-		title := ""
-		sessionType := "claude"
-
-		// Build context string with workspace hierarchy
-		if session.ParentEcosystemPath != "" && session.ProjectName != "" {
-			// Show as ecosystem/project
-			ecosystemName := filepath.Base(session.ParentEcosystemPath)
-			context = fmt.Sprintf("%s/%s", ecosystemName, session.ProjectName)
-			if session.Branch != "" && session.IsWorktree {
-				context = fmt.Sprintf("%s (%s)", context, session.Branch)
-			}
-		} else if session.ProjectName != "" {
-			// Just show project name
-			context = session.ProjectName
-			if session.Branch != "" {
-				context = fmt.Sprintf("%s (%s)", context, session.Branch)
-			}
-		} else if session.Repo != "" && session.Branch != "" {
-			// Fallback to repo/branch
-			context = fmt.Sprintf("%s/%s", session.Repo, session.Branch)
-		} else if session.Repo != "" {
-			context = session.Repo
-		} else {
-			context = "n/a"
+		// Format project name (with hierarchy for worktrees)
+		projectName := proj.Name
+		if proj.IsWorktree && proj.ParentPath != "" {
+			// Show as "parent-name / worktree-name"
+			parentName := filepath.Base(proj.ParentPath)
+			projectName = fmt.Sprintf("%s / %s", parentName, proj.Name)
 		}
 
-		if session.Type == "oneshot_job" {
-			sessionType = "job"
-			if session.JobTitle != "" {
-				title = session.JobTitle
-			} else if session.PlanName != "" {
-				title = session.PlanName
-			} else {
-				title = "untitled"
-			}
-		} else {
-			title = "-"
+		// Format ecosystem column
+		ecosystem := "-"
+		if proj.ParentEcosystemPath != "" && !proj.IsEcosystem {
+			ecosystem = filepath.Base(proj.ParentEcosystemPath)
+		}
+
+		// Format session status
+		sessionStatus := "-"
+		if proj.ClaudeSession != nil {
+			statusStyle := getStatusStyle(proj.ClaudeSession.Status)
+			sessionStatus = statusStyle.Render(fmt.Sprintf("%s (%s)", proj.ClaudeSession.Status, proj.ClaudeSession.Duration))
 		}
 
 		// Selection and cursor indicator
 		var indicator string
-		isSelected := m.selectedIDs[session.ID]
+		isSelected := m.selectedPaths[proj.Path]
 		isCursor := i == m.cursor
 
 		if isSelected && isCursor {
@@ -665,18 +633,12 @@ func (m browseModel) View() string {
 			indicator = "   "
 		}
 
-		// Style the status based on session state
-		statusStyle := getStatusStyle(session.Status)
-		styledStatus := statusStyle.Render(session.Status)
-
 		rows = append(rows, []string{
 			indicator,
-			sessionType,
-			styledStatus,
-			truncateStr(context, 45),
-			truncateStr(title, 45),
-			session.StartedAt.Format("2006-01-02 15:04:05"),
-			truncateStr(inState, 18),
+			projType,
+			truncateStr(projectName, 50),
+			truncateStr(ecosystem, 30),
+			sessionStatus,
 		})
 	}
 
@@ -685,13 +647,13 @@ func (m browseModel) View() string {
 		tableStr := gtable.SelectableTable(headers, rows, m.cursor)
 		b.WriteString(tableStr)
 	} else {
-		b.WriteString("\n" + t.Muted.Render("No matching sessions"))
+		b.WriteString("\n" + t.Muted.Render("No matching projects"))
 	}
 
 	// Selection count and help on same line
 	b.WriteString("\n")
-	if len(m.selectedIDs) > 0 {
-		b.WriteString(t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedIDs))) + " ")
+	if len(m.selectedPaths) > 0 {
+		b.WriteString(t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedPaths))) + " ")
 	}
 	b.WriteString(m.help.View())
 
@@ -715,157 +677,75 @@ func getStatusStyle(status string) lipgloss.Style {
 }
 
 func (m browseModel) viewDetails() string {
-	if m.selectedSession == nil {
-		return "No session selected"
+	if m.selectedProject == nil {
+		return "No project selected"
 	}
 
-	s := m.selectedSession
+	p := m.selectedProject
 	t := theme.DefaultTheme
 	var content strings.Builder
 
-	// Basic info
-	content.WriteString(components.RenderKeyValue("Session ID", s.ID))
+	// Basic project info
+	content.WriteString(components.RenderKeyValue("Project Name", p.Name))
+	content.WriteString("\n")
+	content.WriteString(components.RenderKeyValue("Path", p.Path))
 	content.WriteString("\n")
 
-	sessionType := s.Type
-	if sessionType == "" {
-		sessionType = "claude_session"
+	// Project type
+	projType := "Project"
+	if p.IsEcosystem && !p.IsWorktree {
+		projType = "Ecosystem"
+	} else if p.IsWorktree {
+		projType = "Worktree"
 	}
-	content.WriteString(components.RenderKeyValue("Type", sessionType))
+	content.WriteString(components.RenderKeyValue("Type", projType))
 	content.WriteString("\n")
 
-	statusStyle := getStatusStyle(s.Status)
-	content.WriteString(components.RenderKeyValue("Status", statusStyle.Render(s.Status)))
-	content.WriteString("\n")
-
-	if s.Type == "oneshot_job" {
-		if s.PlanName != "" {
-			content.WriteString(components.RenderKeyValue("Plan", s.PlanName))
-			content.WriteString("\n")
-		}
-		if s.PlanDirectory != "" {
-			content.WriteString(components.RenderKeyValue("Plan Directory", s.PlanDirectory))
-			content.WriteString("\n")
-		}
-		if s.JobTitle != "" {
-			content.WriteString(components.RenderKeyValue("Job Title", s.JobTitle))
-			content.WriteString("\n")
-		}
-		if s.JobFilePath != "" {
-			content.WriteString(components.RenderKeyValue("Job File", s.JobFilePath))
-			content.WriteString("\n")
-		}
-	} else {
-		content.WriteString(components.RenderKeyValue("Repository", s.Repo))
+	// Hierarchy info
+	if p.IsWorktree && p.ParentPath != "" {
+		content.WriteString(components.RenderKeyValue("Parent Project", filepath.Base(p.ParentPath)))
 		content.WriteString("\n")
-		content.WriteString(components.RenderKeyValue("Branch", s.Branch))
+		content.WriteString(components.RenderKeyValue("Parent Path", p.ParentPath))
 		content.WriteString("\n")
 	}
 
-	content.WriteString(components.RenderKeyValue("User", s.User))
-	content.WriteString("\n")
-	content.WriteString(components.RenderKeyValue("PID", fmt.Sprintf("%d", s.PID)))
-	content.WriteString("\n")
-	content.WriteString(components.RenderKeyValue("Working Directory", s.WorkingDirectory))
-	content.WriteString("\n")
-
-	// Workspace context
-	if s.ProjectName != "" {
-		content.WriteString(components.RenderKeyValue("Project Name", s.ProjectName))
-		content.WriteString("\n")
-	}
-	if s.IsWorktree {
-		content.WriteString(components.RenderKeyValue("Is Worktree", "Yes"))
-		content.WriteString("\n")
-	}
-	if s.ParentEcosystemPath != "" {
-		ecosystemName := filepath.Base(s.ParentEcosystemPath)
+	if p.ParentEcosystemPath != "" && !p.IsEcosystem {
+		ecosystemName := filepath.Base(p.ParentEcosystemPath)
 		content.WriteString(components.RenderKeyValue("Parent Ecosystem", ecosystemName))
 		content.WriteString("\n")
+		content.WriteString(components.RenderKeyValue("Ecosystem Path", p.ParentEcosystemPath))
+		content.WriteString("\n")
 	}
 
-	// Timing info
-	content.WriteString(components.RenderKeyValue("Started", s.StartedAt.Format("2006-01-02 15:04:05 MST")))
-	content.WriteString("\n")
-	if s.EndedAt != nil {
-		content.WriteString(components.RenderKeyValue("Ended", s.EndedAt.Format("2006-01-02 15:04:05 MST")))
+	if p.WorktreeName != "" {
+		content.WriteString(components.RenderKeyValue("Worktree Name", p.WorktreeName))
 		content.WriteString("\n")
-		content.WriteString(components.RenderKeyValue("Duration", s.EndedAt.Sub(s.StartedAt).Round(time.Second).String()))
+	}
+
+	// Claude session info
+	if p.ClaudeSession != nil {
+		content.WriteString("\n")
+		var sessionContent strings.Builder
+
+		sessionContent.WriteString(components.RenderKeyValue("Session ID", p.ClaudeSession.ID))
+		sessionContent.WriteString("\n")
+
+		statusStyle := getStatusStyle(p.ClaudeSession.Status)
+		sessionContent.WriteString(components.RenderKeyValue("Status", statusStyle.Render(p.ClaudeSession.Status)))
+		sessionContent.WriteString("\n")
+
+		sessionContent.WriteString(components.RenderKeyValue("PID", fmt.Sprintf("%d", p.ClaudeSession.PID)))
+		sessionContent.WriteString("\n")
+
+		sessionContent.WriteString(components.RenderKeyValue("Duration", p.ClaudeSession.Duration))
+		sessionContent.WriteString("\n")
+
+		content.WriteString(components.RenderSection("Active Claude Session", sessionContent.String()))
 		content.WriteString("\n")
 	} else {
-		content.WriteString(components.RenderKeyValue("Duration", time.Since(s.StartedAt).Round(time.Second).String()+" (ongoing)"))
 		content.WriteString("\n")
-	}
-	content.WriteString(components.RenderKeyValue("Last Activity", s.LastActivity.Format("2006-01-02 15:04:05 MST")))
-	content.WriteString("\n")
-
-	if s.TmuxKey != "" {
-		content.WriteString(components.RenderKeyValue("Tmux Key", s.TmuxKey))
+		content.WriteString(components.RenderKeyValue("Claude Session", t.Muted.Render("No active session")))
 		content.WriteString("\n")
-	}
-
-	// Tool statistics
-	if s.ToolStats != nil {
-		var statsContent strings.Builder
-		statsContent.WriteString(components.RenderKeyValue("Total Calls", fmt.Sprintf("%d", s.ToolStats.TotalCalls)))
-		statsContent.WriteString("\n")
-		statsContent.WriteString(components.RenderKeyValue("Bash Commands", fmt.Sprintf("%d", s.ToolStats.BashCommands)))
-		statsContent.WriteString("\n")
-		statsContent.WriteString(components.RenderKeyValue("File Modifications", fmt.Sprintf("%d", s.ToolStats.FileModifications)))
-		statsContent.WriteString("\n")
-		statsContent.WriteString(components.RenderKeyValue("File Reads", fmt.Sprintf("%d", s.ToolStats.FileReads)))
-		statsContent.WriteString("\n")
-		statsContent.WriteString(components.RenderKeyValue("Search Operations", fmt.Sprintf("%d", s.ToolStats.SearchOperations)))
-		statsContent.WriteString("\n")
-		if s.ToolStats.TotalCalls > 0 {
-			statsContent.WriteString(components.RenderKeyValue("Avg Tool Duration", fmt.Sprintf("%.0fms", s.ToolStats.AverageToolDuration)))
-			statsContent.WriteString("\n")
-		}
-
-		content.WriteString("\n")
-		content.WriteString(components.RenderSection("Tool Statistics", statsContent.String()))
-		content.WriteString("\n")
-	}
-
-	// Session summary
-	if s.SessionSummary != nil {
-		var summaryContent strings.Builder
-		summaryContent.WriteString(components.RenderKeyValue("Total Tools Used", fmt.Sprintf("%d", s.SessionSummary.TotalTools)))
-		summaryContent.WriteString("\n")
-		summaryContent.WriteString(components.RenderKeyValue("Files Modified", fmt.Sprintf("%d", s.SessionSummary.FilesModified)))
-		summaryContent.WriteString("\n")
-		summaryContent.WriteString(components.RenderKeyValue("Commands Executed", fmt.Sprintf("%d", s.SessionSummary.CommandsExecuted)))
-		summaryContent.WriteString("\n")
-		summaryContent.WriteString(components.RenderKeyValue("Errors Count", fmt.Sprintf("%d", s.SessionSummary.ErrorsCount)))
-		summaryContent.WriteString("\n")
-		summaryContent.WriteString(components.RenderKeyValue("Notifications", fmt.Sprintf("%d", s.SessionSummary.NotificationsSent)))
-		summaryContent.WriteString("\n")
-
-		content.WriteString("\n")
-		content.WriteString(components.RenderSection("Session Summary", summaryContent.String()))
-		content.WriteString("\n")
-
-		// AI Summary if available
-		if s.SessionSummary.AISummary != nil && s.SessionSummary.AISummary.CurrentActivity != "" {
-			var aiContent strings.Builder
-			aiContent.WriteString(components.RenderKeyValue("Current Activity", s.SessionSummary.AISummary.CurrentActivity))
-			aiContent.WriteString("\n")
-
-			if len(s.SessionSummary.AISummary.History) > 0 {
-				aiContent.WriteString("\n")
-				aiContent.WriteString(t.Muted.Render("Key Accomplishments:"))
-				aiContent.WriteString("\n")
-				for i, milestone := range s.SessionSummary.AISummary.History {
-					aiContent.WriteString(fmt.Sprintf("  %s. %s\n",
-						t.Highlight.Render(fmt.Sprintf("%d", i+1)),
-						milestone.Summary))
-				}
-			}
-
-			content.WriteString("\n")
-			content.WriteString(components.RenderSection("AI Summary", aiContent.String()))
-			content.WriteString("\n")
-		}
 	}
 
 	// Help
@@ -873,7 +753,7 @@ func (m browseModel) viewDetails() string {
 	content.WriteString(t.Muted.Render("enter/esc: back to list"))
 
 	// Wrap in a box
-	return components.RenderBox("Session Details", content.String(), m.width)
+	return components.RenderBox("Project Details", content.String(), m.width)
 }
 
 func truncateStr(s string, maxLen int) string {
