@@ -17,11 +17,14 @@ import (
 // ExtendedSession wraps the grove-core Session with oneshot-specific fields
 type ExtendedSession struct {
 	models.Session
-	Type          string `json:"type" db:"type"`
-	PlanName      string `json:"plan_name" db:"plan_name"`
-	PlanDirectory string `json:"plan_directory" db:"plan_directory"`
-	JobTitle      string `json:"job_title" db:"job_title"`
-	JobFilePath   string `json:"job_file_path" db:"job_file_path"`
+	Type                string `json:"type" db:"type"`
+	PlanName            string `json:"plan_name" db:"plan_name"`
+	PlanDirectory       string `json:"plan_directory" db:"plan_directory"`
+	JobTitle            string `json:"job_title" db:"job_title"`
+	JobFilePath         string `json:"job_file_path" db:"job_file_path"`
+	ProjectName         string `json:"project_name" db:"project_name"`
+	IsWorktree          bool   `json:"is_worktree" db:"is_worktree"`
+	ParentEcosystemPath string `json:"parent_ecosystem_path" db:"parent_ecosystem_path"`
 }
 
 // MarshalJSON implements custom JSON marshaling to include extended fields
@@ -46,6 +49,9 @@ func (e *ExtendedSession) MarshalJSON() ([]byte, error) {
 	data["plan_directory"] = e.PlanDirectory
 	data["job_title"] = e.JobTitle
 	data["job_file_path"] = e.JobFilePath
+	data["project_name"] = e.ProjectName
+	data["is_worktree"] = e.IsWorktree
+	data["parent_ecosystem_path"] = e.ParentEcosystemPath
 
 	return json.Marshal(data)
 }
@@ -175,6 +181,9 @@ func (s *SQLiteStore) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN job_title TEXT",
 		"ALTER TABLE sessions ADD COLUMN job_file_path TEXT",
 		"ALTER TABLE sessions ADD COLUMN last_error TEXT",
+		"ALTER TABLE sessions ADD COLUMN project_name TEXT",
+		"ALTER TABLE sessions ADD COLUMN is_worktree BOOLEAN DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN parent_ecosystem_path TEXT",
 	}
 
 	// Execute each ALTER statement separately to tolerate existing columns
@@ -191,6 +200,8 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 	var baseSession *models.Session
 	var sessionType string = "claude_session"
 	var planName, planDirectory, jobTitle, jobFilePath string
+	var projectName, parentEcosystemPath string
+	var isWorktree bool
 
 	switch v := session.(type) {
 	case *models.Session:
@@ -205,6 +216,9 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 		planDirectory = v.PlanDirectory
 		jobTitle = v.JobTitle
 		jobFilePath = v.JobFilePath
+		projectName = v.ProjectName
+		isWorktree = v.IsWorktree
+		parentEcosystemPath = v.ParentEcosystemPath
 	default:
 		return fmt.Errorf("unsupported session type: %T", session)
 	}
@@ -232,19 +246,23 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 	INSERT INTO sessions (
 		id, type, pid, repo, branch, tmux_key, working_directory, user,
 		status, started_at, last_activity, is_test, tool_stats, session_summary,
-		plan_name, plan_directory, job_title, job_file_path
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		plan_name, plan_directory, job_title, job_file_path,
+		project_name, is_worktree, parent_ecosystem_path
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		status = excluded.status,
 		last_activity = excluded.last_activity,
 		tool_stats = excluded.tool_stats,
 		session_summary = excluded.session_summary,
+		project_name = excluded.project_name,
+		is_worktree = excluded.is_worktree,
+		parent_ecosystem_path = excluded.parent_ecosystem_path,
 		updated_at = CURRENT_TIMESTAMP,
 		started_at = CASE
 			WHEN excluded.status = 'running' THEN excluded.started_at
 			ELSE sessions.started_at
 		END,
-		ended_at = CASE 
+		ended_at = CASE
 			WHEN excluded.status = 'running' THEN NULL
 			ELSE sessions.ended_at
 		END,
@@ -259,6 +277,7 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 		baseSession.WorkingDirectory, baseSession.User, baseSession.Status, baseSession.StartedAt,
 		baseSession.LastActivity, baseSession.IsTest, toolStatsJSON, sessionSummaryJSON,
 		planName, planDirectory, jobTitle, jobFilePath,
+		projectName, isWorktree, parentEcosystemPath,
 	)
 
 	return err
@@ -270,8 +289,9 @@ func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
 		status, started_at, ended_at, last_activity, is_test,
 		tool_stats, session_summary,
-		COALESCE(plan_name, ''), COALESCE(plan_directory, ''), 
-		COALESCE(job_title, ''), COALESCE(job_file_path, '')
+		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
+		COALESCE(job_title, ''), COALESCE(job_file_path, ''),
+		COALESCE(project_name, ''), COALESCE(is_worktree, 0), COALESCE(parent_ecosystem_path, '')
 	FROM sessions WHERE id = ?
 	`
 
@@ -286,6 +306,7 @@ func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 		&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
 		&session.PlanName, &session.PlanDirectory,
 		&session.JobTitle, &session.JobFilePath,
+		&session.ProjectName, &session.IsWorktree, &session.ParentEcosystemPath,
 	)
 
 	if err != nil {
@@ -320,14 +341,85 @@ func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 	return &session, nil
 }
 
+// GetAllExtendedSessions retrieves all sessions as ExtendedSession objects
+func (s *SQLiteStore) GetAllExtendedSessions() ([]*ExtendedSession, error) {
+	query := `
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
+		status, started_at, ended_at, last_activity, is_test,
+		tool_stats, session_summary,
+		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
+		COALESCE(job_title, ''), COALESCE(job_file_path, ''),
+		COALESCE(project_name, ''), COALESCE(is_worktree, 0), COALESCE(parent_ecosystem_path, '')
+	FROM sessions
+	WHERE is_deleted = 0
+	ORDER BY started_at DESC
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []*ExtendedSession
+	for rows.Next() {
+		var session ExtendedSession
+		var endedAt sql.NullTime
+		var toolStatsJSON, sessionSummaryJSON string
+
+		err := rows.Scan(
+			&session.ID, &session.Type, &session.PID, &session.Repo, &session.Branch,
+			&session.TmuxKey, &session.WorkingDirectory, &session.User,
+			&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
+			&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
+			&session.PlanName, &session.PlanDirectory,
+			&session.JobTitle, &session.JobFilePath,
+			&session.ProjectName, &session.IsWorktree, &session.ParentEcosystemPath,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if endedAt.Valid {
+			session.EndedAt = &endedAt.Time
+		}
+
+		// Unmarshal complex fields
+		if toolStatsJSON != "" && toolStatsJSON != "{}" {
+			var toolStats models.ToolStatistics
+			if err := json.Unmarshal([]byte(toolStatsJSON), &toolStats); err != nil {
+				// Log error but continue
+				log.Printf("Failed to unmarshal tool stats for session %s: %v", session.ID, err)
+			} else {
+				session.ToolStats = &toolStats
+			}
+		}
+
+		if sessionSummaryJSON != "" && sessionSummaryJSON != "{}" {
+			var summary models.Summary
+			if err := json.Unmarshal([]byte(sessionSummaryJSON), &summary); err != nil {
+				// Log error but continue
+				log.Printf("Failed to unmarshal session summary for session %s: %v", session.ID, err)
+			} else {
+				session.SessionSummary = &summary
+			}
+		}
+
+		sessions = append(sessions, &session)
+	}
+
+	return sessions, rows.Err()
+}
+
 // GetAllSessions retrieves all sessions
 func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 	query := `
 	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
 		status, started_at, ended_at, last_activity, is_test,
 		tool_stats, session_summary,
-		COALESCE(plan_name, ''), COALESCE(plan_directory, ''), 
-		COALESCE(job_title, ''), COALESCE(job_file_path, '')
+		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
+		COALESCE(job_title, ''), COALESCE(job_file_path, ''),
+		COALESCE(project_name, ''), COALESCE(is_worktree, 0), COALESCE(parent_ecosystem_path, '')
 	FROM sessions
 	WHERE is_deleted = 0
 	ORDER BY started_at DESC
@@ -345,6 +437,8 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 		var endedAt sql.NullTime
 		var toolStatsJSON, sessionSummaryJSON string
 		var sessionType string
+		var projectName, parentEcosystemPath string
+		var isWorktree bool
 
 		err := rows.Scan(
 			&session.ID, &sessionType, &session.PID, &session.Repo, &session.Branch,
@@ -353,6 +447,7 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 			&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
 			&session.PlanName, &session.PlanDirectory,
 			&session.JobTitle, &session.JobFilePath,
+			&projectName, &isWorktree, &parentEcosystemPath,
 		)
 		if err != nil {
 			return nil, err

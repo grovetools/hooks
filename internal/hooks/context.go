@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-hooks/internal/git"
 	"github.com/mattsolo1/grove-hooks/internal/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
@@ -137,20 +138,36 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		tmuxKey = tmuxMgr.DetectTmuxKeyForPath(workingDir)
 	}
 
-	// Create session
+	// Get project info using grove-core workspace package
+	projInfo, err := workspace.GetProjectByPath(workingDir)
+	if err != nil {
+		// Log the error but continue, as this is for enrichment
+		// Note: We don't have a logger here, so we'll just continue silently
+	}
+
+	// Create extended session with workspace context
 	now := time.Now()
-	session := &models.Session{
-		ID:               sessionID,
-		PID:              process.GetClaudePID(), // Use parent/Claude PID instead of hook PID
-		Repo:             repo,
-		Branch:           gitBranch,
-		TmuxKey:          tmuxKey,
-		WorkingDirectory: workingDir,
-		User:             username,
-		Status:           "running",
-		StartedAt:        now,
-		LastActivity:     now,
-		IsTest:           false,
+	session := &disk.ExtendedSession{
+		Session: models.Session{
+			ID:               sessionID,
+			PID:              process.GetClaudePID(), // Use parent/Claude PID instead of hook PID
+			Repo:             repo,
+			Branch:           gitBranch,
+			TmuxKey:          tmuxKey,
+			WorkingDirectory: workingDir,
+			User:             username,
+			Status:           "running",
+			StartedAt:        now,
+			LastActivity:     now,
+			IsTest:           false,
+		},
+	}
+
+	// Populate workspace context fields if available
+	if projInfo != nil {
+		session.ProjectName = projInfo.Name
+		session.IsWorktree = projInfo.IsWorktree
+		session.ParentEcosystemPath = projInfo.ParentEcosystemPath
 	}
 
 	return hc.Storage.EnsureSessionExists(session)

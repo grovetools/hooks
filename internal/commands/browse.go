@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -44,15 +45,15 @@ func NewBrowseCmd() *cobra.Command {
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
 
-			// Get all sessions
-			sessions, err := storage.GetAllSessions()
+			// Get all extended sessions
+			sessions, err := storage.(*disk.SQLiteStore).GetAllExtendedSessions()
 			if err != nil {
 				return fmt.Errorf("failed to get sessions: %w", err)
 			}
 
 			// Filter out completed sessions if requested
 			if hideCompleted {
-				var filtered []*models.Session
+				var filtered []*disk.ExtendedSession
 				for _, s := range sessions {
 					if s.Status != "completed" && s.Status != "failed" && s.Status != "error" {
 						filtered = append(filtered, s)
@@ -200,9 +201,9 @@ func newBrowseKeyMap() browseKeyMap {
 
 // browseModel is the model for the interactive session browser
 type browseModel struct {
-	sessions        []*models.Session
-	filtered        []*models.Session
-	selectedSession *models.Session
+	sessions        []*disk.ExtendedSession
+	filtered        []*disk.ExtendedSession
+	selectedSession *disk.ExtendedSession
 	cursor          int
 	filterInput     textinput.Model
 	width           int
@@ -216,7 +217,7 @@ type browseModel struct {
 	help            help.Model
 }
 
-func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer) browseModel {
+func newBrowseModel(sessions []*disk.ExtendedSession, storage interfaces.SessionStorer) browseModel {
 	// Create text input for filtering
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter by repo, branch, user, or session ID..."
@@ -270,8 +271,8 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clean up dead sessions
 			_, _ = CleanupDeadSessions(m.storage)
 
-			// Get updated sessions
-			sessions, err := m.storage.GetAllSessions()
+			// Get updated extended sessions
+			sessions, err := m.storage.(*disk.SQLiteStore).GetAllExtendedSessions()
 			if err == nil {
 				// Sort sessions: running first, then idle, then others by started_at desc
 				sort.Slice(sessions, func(i, j int) bool {
@@ -542,7 +543,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *browseModel) updateFiltered() {
 	filter := strings.ToLower(m.filterInput.Value())
-	m.filtered = []*models.Session{}
+	m.filtered = []*disk.ExtendedSession{}
 
 	for _, s := range m.sessions {
 		// Apply status filter first
@@ -552,10 +553,11 @@ func (m *browseModel) updateFiltered() {
 
 		// Apply text filter if present
 		if filter != "" {
-			// Include job-specific fields in search
-			searchText := strings.ToLower(fmt.Sprintf("%s %s %s %s %s %s %s %s",
+			// Include job-specific and workspace fields in search
+			searchText := strings.ToLower(fmt.Sprintf("%s %s %s %s %s %s %s %s %s %s",
 				s.ID, s.Repo, s.Branch, s.User, s.WorkingDirectory,
-				s.PlanName, s.JobTitle, s.JobFilePath))
+				s.PlanName, s.JobTitle, s.JobFilePath,
+				s.ProjectName, s.ParentEcosystemPath))
 			if !strings.Contains(searchText, filter) {
 				continue
 			}
@@ -607,21 +609,36 @@ func (m browseModel) View() string {
 			inState = time.Since(session.StartedAt).Round(time.Second).String()
 		}
 
-		// Format context and title based on session type
+		// Format context and title based on session type and workspace info
 		context := ""
 		title := ""
 		sessionType := "claude"
+
+		// Build context string with workspace hierarchy
+		if session.ParentEcosystemPath != "" && session.ProjectName != "" {
+			// Show as ecosystem/project
+			ecosystemName := filepath.Base(session.ParentEcosystemPath)
+			context = fmt.Sprintf("%s/%s", ecosystemName, session.ProjectName)
+			if session.Branch != "" && session.IsWorktree {
+				context = fmt.Sprintf("%s (%s)", context, session.Branch)
+			}
+		} else if session.ProjectName != "" {
+			// Just show project name
+			context = session.ProjectName
+			if session.Branch != "" {
+				context = fmt.Sprintf("%s (%s)", context, session.Branch)
+			}
+		} else if session.Repo != "" && session.Branch != "" {
+			// Fallback to repo/branch
+			context = fmt.Sprintf("%s/%s", session.Repo, session.Branch)
+		} else if session.Repo != "" {
+			context = session.Repo
+		} else {
+			context = "n/a"
+		}
+
 		if session.Type == "oneshot_job" {
 			sessionType = "job"
-			if session.Repo != "" {
-				context = session.Repo
-				if session.Branch != "" {
-					context = fmt.Sprintf("%s/%s", session.Repo, session.Branch)
-				}
-			} else {
-				context = "n/a"
-			}
-
 			if session.JobTitle != "" {
 				title = session.JobTitle
 			} else if session.PlanName != "" {
@@ -630,13 +647,6 @@ func (m browseModel) View() string {
 				title = "untitled"
 			}
 		} else {
-			if session.Repo != "" && session.Branch != "" {
-				context = fmt.Sprintf("%s/%s", session.Repo, session.Branch)
-			} else if session.Repo != "" {
-				context = session.Repo
-			} else {
-				context = "n/a"
-			}
 			title = "-"
 		}
 
@@ -758,6 +768,21 @@ func (m browseModel) viewDetails() string {
 	content.WriteString("\n")
 	content.WriteString(components.RenderKeyValue("Working Directory", s.WorkingDirectory))
 	content.WriteString("\n")
+
+	// Workspace context
+	if s.ProjectName != "" {
+		content.WriteString(components.RenderKeyValue("Project Name", s.ProjectName))
+		content.WriteString("\n")
+	}
+	if s.IsWorktree {
+		content.WriteString(components.RenderKeyValue("Is Worktree", "Yes"))
+		content.WriteString("\n")
+	}
+	if s.ParentEcosystemPath != "" {
+		ecosystemName := filepath.Base(s.ParentEcosystemPath)
+		content.WriteString(components.RenderKeyValue("Parent Ecosystem", ecosystemName))
+		content.WriteString("\n")
+	}
 
 	// Timing info
 	content.WriteString(components.RenderKeyValue("Started", s.StartedAt.Format("2006-01-02 15:04:05 MST")))
