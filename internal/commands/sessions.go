@@ -23,6 +23,7 @@ func NewSessionsCmd() *cobra.Command {
 	cmd.AddCommand(newSessionsGetCmd())
 	cmd.AddCommand(NewBrowseCmd())
 	cmd.AddCommand(NewCleanupCmd())
+	cmd.AddCommand(newSessionsArchiveCmd())
 
 	return cmd
 }
@@ -400,4 +401,93 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func newSessionsArchiveCmd() *cobra.Command {
+	var (
+		archiveAll       bool
+		archiveCompleted bool
+		archiveFailed    bool
+		archiveRunning   bool
+		archiveIdle      bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "archive [session-id...]",
+		Short: "Archive one or more sessions",
+		Long: `Archive sessions by marking them as deleted. Archived sessions are hidden from normal queries.
+
+You can archive specific sessions by ID or use flags to archive multiple sessions:
+  - Use --all to archive all sessions regardless of status
+  - Use --completed to archive only completed sessions
+  - Use --failed to archive only failed sessions
+  - Use --running to archive only running sessions
+  - Use --idle to archive only idle sessions`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Create storage
+			storage, err := disk.NewSQLiteStore()
+			if err != nil {
+				return fmt.Errorf("failed to create storage: %w", err)
+			}
+			defer storage.(*disk.SQLiteStore).Close()
+
+			var sessionIDs []string
+
+			// If specific session IDs provided, use those
+			if len(args) > 0 {
+				sessionIDs = args
+			} else if archiveAll || archiveCompleted || archiveFailed || archiveRunning || archiveIdle {
+				// Get all sessions
+				sessions, err := storage.GetAllSessions()
+				if err != nil {
+					return fmt.Errorf("failed to get sessions: %w", err)
+				}
+
+				// Filter based on flags
+				for _, s := range sessions {
+					shouldArchive := false
+
+					if archiveAll {
+						// Archive all sessions
+						shouldArchive = true
+					} else if archiveCompleted && s.Status == "completed" {
+						shouldArchive = true
+					} else if archiveFailed && (s.Status == "failed" || s.Status == "error") {
+						shouldArchive = true
+					} else if archiveRunning && s.Status == "running" {
+						shouldArchive = true
+					} else if archiveIdle && s.Status == "idle" {
+						shouldArchive = true
+					}
+
+					if shouldArchive {
+						sessionIDs = append(sessionIDs, s.ID)
+					}
+				}
+			} else {
+				return fmt.Errorf("no session IDs provided and no archive flags specified. Use --all, --completed, --failed, --running, --idle, or provide session IDs")
+			}
+
+			if len(sessionIDs) == 0 {
+				fmt.Println("No sessions to archive")
+				return nil
+			}
+
+			// Archive the sessions
+			if err := storage.ArchiveSessions(sessionIDs); err != nil {
+				return fmt.Errorf("failed to archive sessions: %w", err)
+			}
+
+			fmt.Printf("Archived %d session(s)\n", len(sessionIDs))
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&archiveAll, "all", false, "Archive all sessions regardless of status")
+	cmd.Flags().BoolVar(&archiveCompleted, "completed", false, "Archive only completed sessions")
+	cmd.Flags().BoolVar(&archiveFailed, "failed", false, "Archive only failed sessions")
+	cmd.Flags().BoolVar(&archiveRunning, "running", false, "Archive only running sessions")
+	cmd.Flags().BoolVar(&archiveIdle, "idle", false, "Archive only idle sessions")
+
+	return cmd
 }
