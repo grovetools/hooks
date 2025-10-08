@@ -52,14 +52,24 @@ func newSessionsListCmd() *cobra.Command {
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
 
-			// Discover live sessions from filesystem
-			liveSessions, err := DiscoverLiveClaudeSessions()
+			// Discover live Claude sessions from filesystem
+			liveClaudeSessions, err := DiscoverLiveClaudeSessions()
 			if err != nil {
-				// Log error but continue with DB sessions
+				// Log error but continue
 				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "Warning: failed to discover live sessions: %v\n", err)
+					fmt.Fprintf(os.Stderr, "Warning: failed to discover live Claude sessions: %v\n", err)
 				}
-				liveSessions = []*models.Session{}
+				liveClaudeSessions = []*models.Session{}
+			}
+
+			// Discover live grove-flow jobs from plan directories
+			liveFlowJobs, err := DiscoverLiveFlowJobs()
+			if err != nil {
+				// Log error but continue
+				if os.Getenv("GROVE_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "Warning: failed to discover live flow jobs: %v\n", err)
+				}
+				liveFlowJobs = []*models.Session{}
 			}
 
 			// Get archived sessions from database
@@ -68,13 +78,19 @@ func newSessionsListCmd() *cobra.Command {
 				return fmt.Errorf("failed to get sessions: %w", err)
 			}
 
-			// Merge live and DB sessions, prioritizing live sessions
+			// Merge all sources, prioritizing live sessions
 			// Create a map to track which session IDs we've seen from live sessions
 			seenIDs := make(map[string]bool)
-			sessions := make([]*models.Session, 0, len(liveSessions)+len(dbSessions))
+			sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(liveFlowJobs)+len(dbSessions))
 
-			// Add live sessions first
-			for _, session := range liveSessions {
+			// Add live Claude sessions first
+			for _, session := range liveClaudeSessions {
+				sessions = append(sessions, session)
+				seenIDs[session.ID] = true
+			}
+
+			// Add live flow jobs
+			for _, session := range liveFlowJobs {
 				sessions = append(sessions, session)
 				seenIDs[session.ID] = true
 			}

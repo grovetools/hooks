@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
@@ -47,6 +48,26 @@ func NewBrowseCmd() *cobra.Command {
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
 
+			// Discover live Claude sessions from filesystem
+			liveClaudeSessions, err := DiscoverLiveClaudeSessions()
+			if err != nil {
+				// Log error but continue
+				if os.Getenv("GROVE_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "Warning: failed to discover live Claude sessions: %v\n", err)
+				}
+				liveClaudeSessions = make([]*models.Session, 0)
+			}
+
+			// Discover live grove-flow jobs from plan directories
+			liveFlowJobs, err := DiscoverLiveFlowJobs()
+			if err != nil {
+				// Log error but continue
+				if os.Getenv("GROVE_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "Warning: failed to discover live flow jobs: %v\n", err)
+				}
+				liveFlowJobs = make([]*models.Session, 0)
+			}
+
 			// Initialize the workspace discovery service
 			logger := logrus.New()
 			logger.SetLevel(logrus.WarnLevel) // Keep it quiet for TUI
@@ -66,7 +87,8 @@ func NewBrowseCmd() *cobra.Command {
 				return nil
 			}
 
-			// Enrich the projects with session data
+			// Enrich the projects with session data from the database
+			// This is now secondary - we'll override with live data
 			enrichOpts := &workspace.EnrichmentOptions{
 				FetchClaudeSessions: true,
 				FetchGitStatus:      false, // Don't fetch git status upfront for performance
@@ -74,6 +96,47 @@ func NewBrowseCmd() *cobra.Command {
 			if err := workspace.EnrichProjects(context.Background(), projects, enrichOpts); err != nil {
 				// Non-fatal - just log and continue without enrichment
 				logger.Warnf("Failed to enrich projects: %v", err)
+			}
+
+			// Override with live session data from filesystem
+			// Match live sessions to projects by working directory
+			for _, project := range projects {
+				// Check Claude sessions
+				for _, session := range liveClaudeSessions {
+					if strings.Contains(session.WorkingDirectory, project.Path) {
+						// Convert models.Session to workspace.ClaudeSessionInfo
+						duration := "running"
+						if session.EndedAt != nil {
+							duration = session.EndedAt.Sub(session.StartedAt).String()
+						}
+						project.ClaudeSession = &workspace.ClaudeSessionInfo{
+							ID:       session.ID,
+							PID:      session.PID,
+							Status:   session.Status,
+							Duration: duration,
+						}
+						break
+					}
+				}
+				// Check flow jobs
+				for _, job := range liveFlowJobs {
+					if strings.Contains(job.WorkingDirectory, project.Path) {
+						// Add flow job as a session (browse shows the most recent active work)
+						if project.ClaudeSession == nil || project.ClaudeSession.Status != "running" {
+							duration := "running"
+							if job.EndedAt != nil {
+								duration = job.EndedAt.Sub(job.StartedAt).String()
+							}
+							project.ClaudeSession = &workspace.ClaudeSessionInfo{
+								ID:       job.ID,
+								PID:      job.PID,
+								Status:   job.Status,
+								Duration: duration,
+							}
+						}
+						break
+					}
+				}
 			}
 
 			// Filter out projects without sessions if hideCompleted is set

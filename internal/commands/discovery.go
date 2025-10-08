@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
@@ -112,4 +113,245 @@ func DiscoverLiveClaudeSessions() ([]*models.Session, error) {
 	}
 
 	return sessions, nil
+}
+
+// DiscoverLiveFlowJobs scans for grove-flow plans and returns running jobs as sessions
+// This allows unified display of both Claude sessions and grove-flow jobs
+func DiscoverLiveFlowJobs() ([]*models.Session, error) {
+	var sessions []*models.Session
+
+	// Common locations to search for plans
+	planDirs := []string{
+		expandPath("~/Documents/nb/repos"),
+		expandPath("~/Code/nb/repos"),
+		expandPath("~/Code"),
+	}
+
+	for _, baseDir := range planDirs {
+		if _, err := os.Stat(baseDir); os.IsNotExist(err) {
+			continue
+		}
+
+		// Walk the directory tree looking for plan directories
+		err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil // Skip errors
+			}
+
+			// Look for "plans" directories
+			if !info.IsDir() || info.Name() != "plans" {
+				return nil
+			}
+
+			// Check subdirectories of the plans directory
+			planEntries, err := os.ReadDir(path)
+			if err != nil {
+				return nil
+			}
+
+			for _, planEntry := range planEntries {
+				if !planEntry.IsDir() {
+					continue
+				}
+
+				planDir := filepath.Join(path, planEntry.Name())
+				planSessions, err := discoverJobsInPlan(planDir)
+				if err != nil {
+					// Skip this plan if there's an error
+					continue
+				}
+
+				sessions = append(sessions, planSessions...)
+			}
+
+			return filepath.SkipDir // Don't descend into plans directories
+		})
+
+		if err != nil {
+			// Continue with other base directories
+			continue
+		}
+	}
+
+	return sessions, nil
+}
+
+// discoverJobsInPlan scans a single plan directory for running jobs
+func discoverJobsInPlan(planDir string) ([]*models.Session, error) {
+	var sessions []*models.Session
+
+	entries, err := os.ReadDir(planDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract plan name and context from the directory path
+	planName := filepath.Base(planDir)
+
+	// Try to determine repo/branch from path
+	// Path is typically: .../repos/REPO/main/plans/PLAN or .../REPO/.grove-worktrees/PLAN
+	pathParts := strings.Split(planDir, string(filepath.Separator))
+	var repo, branch string
+	for i, part := range pathParts {
+		if part == "repos" && i+2 < len(pathParts) {
+			repo = pathParts[i+1]
+			branch = pathParts[i+2]
+			break
+		} else if part == ".grove-worktrees" && i > 0 {
+			repo = pathParts[i-1]
+			branch = planName
+			break
+		}
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		filename := entry.Name()
+
+		// Skip non-.md files
+		if !strings.HasSuffix(filename, ".md") {
+			continue
+		}
+
+		// Skip spec.md and other non-job files
+		if filename == "spec.md" || filename == "README.md" {
+			continue
+		}
+
+		filePath := filepath.Join(planDir, filename)
+
+		// Read the frontmatter to check status
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		// Parse frontmatter to get status
+		status := parseJobStatus(string(content))
+		if status != "running" {
+			continue
+		}
+
+		// Check for lock file
+		lockFile := filePath + ".lock"
+		pidContent, err := os.ReadFile(lockFile)
+		if err != nil {
+			// No lock file, but status is running - mark as interrupted
+			status = "interrupted"
+		} else {
+			// Check if PID is alive
+			var pid int
+			if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err == nil {
+				if !process.IsProcessAlive(pid) {
+					status = "interrupted"
+				}
+			} else {
+				status = "interrupted"
+			}
+		}
+
+		// Parse job metadata
+		jobID, jobTitle, startedAt := parseJobMetadata(string(content))
+		if jobID == "" {
+			jobID = strings.TrimSuffix(filename, ".md")
+		}
+
+		// Create session object for this job
+		session := &models.Session{
+			ID:               jobID,
+			Type:             "oneshot_job",
+			Status:           status,
+			Repo:             repo,
+			Branch:           branch,
+			WorkingDirectory: planDir,
+			User:             os.Getenv("USER"),
+			StartedAt:        startedAt,
+			LastActivity:     startedAt,
+			PlanName:         planName,
+			JobTitle:         jobTitle,
+		}
+
+		sessions = append(sessions, session)
+	}
+
+	return sessions, nil
+}
+
+// parseJobStatus extracts the status from job frontmatter
+func parseJobStatus(content string) string {
+	// Look for status: line in frontmatter
+	lines := strings.Split(content, "\n")
+	inFrontmatter := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+				continue
+			} else {
+				break
+			}
+		}
+
+		if inFrontmatter && strings.HasPrefix(trimmed, "status:") {
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+
+	return "pending"
+}
+
+// parseJobMetadata extracts ID, title, and started_at from frontmatter
+func parseJobMetadata(content string) (id, title string, startedAt time.Time) {
+	lines := strings.Split(content, "\n")
+	inFrontmatter := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+				continue
+			} else {
+				break
+			}
+		}
+
+		if !inFrontmatter {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "id:") {
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				id = strings.TrimSpace(parts[1])
+			}
+		} else if strings.HasPrefix(trimmed, "title:") {
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				title = strings.TrimSpace(parts[1])
+			}
+		} else if strings.HasPrefix(trimmed, "updated_at:") {
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				timeStr := strings.Trim(strings.TrimSpace(parts[1]), `"`)
+				if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+					startedAt = t
+				}
+			}
+		}
+	}
+
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+
+	return
 }
