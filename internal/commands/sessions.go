@@ -52,10 +52,39 @@ func newSessionsListCmd() *cobra.Command {
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
 
-			// Get all sessions
-			sessions, err := storage.GetAllSessions()
+			// Discover live sessions from filesystem
+			liveSessions, err := DiscoverLiveClaudeSessions()
+			if err != nil {
+				// Log error but continue with DB sessions
+				if os.Getenv("GROVE_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "Warning: failed to discover live sessions: %v\n", err)
+				}
+				liveSessions = []*models.Session{}
+			}
+
+			// Get archived sessions from database
+			dbSessions, err := storage.GetAllSessions()
 			if err != nil {
 				return fmt.Errorf("failed to get sessions: %w", err)
+			}
+
+			// Merge live and DB sessions, prioritizing live sessions
+			// Create a map to track which session IDs we've seen from live sessions
+			seenIDs := make(map[string]bool)
+			sessions := make([]*models.Session, 0, len(liveSessions)+len(dbSessions))
+
+			// Add live sessions first
+			for _, session := range liveSessions {
+				sessions = append(sessions, session)
+				seenIDs[session.ID] = true
+			}
+
+			// Add DB sessions that aren't already in live sessions
+			// (these are completed/archived sessions)
+			for _, session := range dbSessions {
+				if !seenIDs[session.ID] {
+					sessions = append(sessions, session)
+				}
 			}
 
 			// Filter by status if requested

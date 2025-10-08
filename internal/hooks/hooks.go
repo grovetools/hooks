@@ -218,7 +218,7 @@ func RunStopHook() {
 	// Get session details to obtain working directory and type
 	var sessionType string = "claude_session" // default
 	var workingDir string
-	
+
 	// Get session data from storage directly to access type information
 	sessionData, err := ctx.Storage.GetSession(data.SessionID)
 	if err != nil {
@@ -233,7 +233,7 @@ func RunStopHook() {
 		} else if session, ok := sessionData.(*models.Session); ok {
 			workingDir = session.WorkingDirectory
 		}
-		
+
 		// Execute repository-specific hook commands if we have a working directory
 		if workingDir != "" {
 			log.Printf("Checking for .grove-hooks.yaml in working directory: %s", workingDir)
@@ -264,35 +264,51 @@ func RunStopHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
-	// Update session status based on exit reason and session type
-	// For oneshot jobs, always mark as completed when stop hook is called
+	// Determine final status based on exit reason and session type
+	finalStatus := "idle"
+	isComplete := false
+
 	if sessionType == "oneshot_job" {
+		// For oneshot jobs, always mark as completed when stop hook is called
+		finalStatus = "completed"
+		isComplete = true
 		log.Printf("Marking oneshot job session as completed")
-		if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "completed"); err != nil {
-			log.Printf("Failed to complete oneshot job session: %v", err)
-		}
-		// Send ntfy notification for completed oneshot job
-		sendNtfyNotification(ctx, data, "completed")
 	} else {
 		// For regular claude sessions, use exit reason to determine status
-		// Mark as completed for actual completion or errors
-		// Otherwise, set to idle (for normal end-of-turn stops)
 		if data.ExitReason == "completed" || data.ExitReason == "error" || data.ExitReason == "interrupted" || data.ExitReason == "killed" {
-			if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "completed"); err != nil {
-				log.Printf("Failed to complete session: %v", err)
-			}
-
-			// Send ntfy notification for completed sessions
-			sendNtfyNotification(ctx, data, "completed")
+			finalStatus = "completed"
+			isComplete = true
 		} else {
 			// Normal end-of-turn stop (empty exit_reason or other) - set to idle
-			if err := ctx.Storage.UpdateSessionStatus(data.SessionID, "idle"); err != nil {
-				log.Printf("Failed to update session status to idle: %v", err)
-			}
-
-			// Send ntfy notification for normal session stops too
-			sendNtfyNotification(ctx, data, "stopped")
+			finalStatus = "idle"
 		}
+	}
+
+	// Update database status
+	if err := ctx.Storage.UpdateSessionStatus(data.SessionID, finalStatus); err != nil {
+		log.Printf("Failed to update session status: %v", err)
+	}
+
+	// Handle session directory cleanup based on completion status
+	claudeSessionsDir := expandPath("~/.claude/sessions")
+	sessionDir := filepath.Join(claudeSessionsDir, data.SessionID)
+
+	if isComplete {
+		// Session is complete - archive metadata to DB and delete directory
+		// The metadata has already been written to the DB by previous hooks
+		// Now we can safely delete the session directory
+		if err := os.RemoveAll(sessionDir); err != nil {
+			log.Printf("Warning: failed to remove session directory %s: %v", sessionDir, err)
+		} else {
+			log.Printf("Removed session directory for completed session: %s", data.SessionID)
+		}
+
+		// Send ntfy notification for completed sessions
+		sendNtfyNotification(ctx, data, "completed")
+	} else {
+		// Session is idle - keep directory for later resumption
+		// Just send notification
+		sendNtfyNotification(ctx, data, "stopped")
 	}
 }
 

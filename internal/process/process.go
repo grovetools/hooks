@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"syscall"
 )
 
 // GetParentPID returns the parent process ID of the current process
@@ -32,4 +33,26 @@ func GetClaudePID() int {
 		fmt.Printf("Using parent PID: %d (current PID: %d)\n", ppid, os.Getpid())
 	}
 	return ppid
+}
+
+// IsProcessAlive checks if a process with the given PID is currently running
+func IsProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+
+	// Send signal 0 to check if process exists
+	// Signal 0 doesn't actually send a signal, but performs error checking
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+
+	// On Unix systems, FindProcess always succeeds, so we need to send a signal
+	err = process.Signal(syscall.Signal(0))
+	if err != nil {
+		return false
+	}
+
+	return true
 }

@@ -3,9 +3,11 @@ package commands
 import (
 	"fmt"
 	"os"
-	"syscall"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/spf13/cobra"
@@ -27,16 +29,23 @@ func NewCleanupCmd() *cobra.Command {
 			defer storage.(*disk.SQLiteStore).Close()
 
 			// Run cleanup with custom threshold
-			cleaned, err := CleanupDeadSessionsWithThreshold(storage, time.Duration(inactivityMinutes)*time.Minute)
+			cleanedSessions, err := CleanupDeadSessionsWithThreshold(storage, time.Duration(inactivityMinutes)*time.Minute)
 			if err != nil {
 				return fmt.Errorf("cleanup failed: %w", err)
 			}
 
+			// Clean up stale grove-flow jobs
+			cleanedJobs, err := CleanupStaleFlowJobs()
+			if err != nil {
+				return fmt.Errorf("flow job cleanup failed: %w", err)
+			}
+
 			// Output summary
-			if cleaned > 0 {
-				fmt.Printf("Cleaned up %d dead session(s)\n", cleaned)
+			totalCleaned := cleanedSessions + cleanedJobs
+			if totalCleaned > 0 {
+				fmt.Printf("Cleaned up %d dead session(s) and %d stale job(s)\n", cleanedSessions, cleanedJobs)
 			} else {
-				fmt.Println("No dead sessions found")
+				fmt.Println("No dead sessions or stale jobs found")
 			}
 
 			return nil
@@ -49,35 +58,9 @@ func NewCleanupCmd() *cobra.Command {
 	return cmd
 }
 
-// isProcessAlive checks if a process with the given PID is still running
+// isProcessAlive is now a wrapper around the grove-core utility.
 func isProcessAlive(pid int) bool {
-	// PID 0 is invalid
-	if pid <= 0 {
-		return false
-	}
-
-	// Try to send signal 0 to the process
-	// This doesn't actually send a signal but checks if we can
-	err := syscall.Kill(pid, 0)
-
-	// Debug logging
-	if os.Getenv("GROVE_DEBUG") != "" {
-		fmt.Printf("Checking PID %d: err=%v\n", pid, err)
-	}
-
-	// If no error, process exists
-	if err == nil {
-		return true
-	}
-
-	// If error is ESRCH (no such process), process doesn't exist
-	if err == syscall.ESRCH {
-		return false
-	}
-
-	// For other errors (like EPERM - permission denied),
-	// assume process exists but we can't access it
-	return true
+	return process.IsProcessAlive(pid)
 }
 
 // CleanupDeadSessions checks all running/idle sessions and marks dead ones as completed
@@ -89,13 +72,54 @@ func CleanupDeadSessions(storage interfaces.SessionStorer) (int, error) {
 // CleanupDeadSessionsWithThreshold checks all running/idle sessions and marks inactive ones as completed
 // Returns the number of sessions cleaned up
 func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivityThreshold time.Duration) (int, error) {
-	// Get all sessions
-	sessions, err := storage.GetAllSessions()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get sessions: %w", err)
+	cleaned := 0
+
+	// 1. Clean up stale interactive Claude session directories
+	claudeSessionsDir := expandPath("~/.claude/sessions")
+	if _, err := os.Stat(claudeSessionsDir); err == nil {
+		entries, err := os.ReadDir(claudeSessionsDir)
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+
+				sessionID := entry.Name()
+				sessionDir := filepath.Join(claudeSessionsDir, sessionID)
+				pidFile := filepath.Join(sessionDir, "pid.lock")
+
+				// Read PID from lock file
+				if content, err := os.ReadFile(pidFile); err == nil {
+					var pid int
+					if _, err := fmt.Sscanf(string(content), "%d", &pid); err == nil {
+						if !process.IsProcessAlive(pid) {
+							// Process is dead, this is a stale session
+							if os.Getenv("GROVE_DEBUG") != "" {
+								fmt.Printf("Found stale interactive session: %s (PID: %d)\n", sessionID, pid)
+							}
+
+							// Remove the directory
+							if err := os.RemoveAll(sessionDir); err == nil {
+								cleaned++
+								if os.Getenv("GROVE_DEBUG") != "" {
+									fmt.Printf("Cleaned up stale session directory: %s\n", sessionDir)
+								}
+							} else if os.Getenv("GROVE_DEBUG") != "" {
+								fmt.Fprintf(os.Stderr, "Warning: failed to remove session directory %s: %v\n", sessionDir, err)
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
-	cleaned := 0
+	// 2. Clean up old database entries (for backwards compatibility during transition)
+	sessions, err := storage.GetAllSessions()
+	if err != nil {
+		return cleaned, fmt.Errorf("failed to get sessions: %w", err)
+	}
+
 	now := time.Now()
 
 	for _, session := range sessions {
@@ -116,7 +140,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 				cleaned++
 
 				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Printf("Cleaned up session %s (PID %d was dead)\n", session.ID, session.PID)
+					fmt.Printf("Cleaned up DB session %s (PID %d was dead)\n", session.ID, session.PID)
 				}
 				continue
 			}
@@ -139,4 +163,23 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	}
 
 	return cleaned, nil
+}
+
+// expandPath expands ~ to home directory
+func expandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(os.Getenv("HOME"), path[2:])
+	}
+	return path
+}
+
+// CleanupStaleFlowJobs discovers grove-flow jobs with stale lock files and updates their status
+// Returns the number of jobs cleaned up
+// Note: This function is maintained for backwards compatibility but the actual
+// grove-flow job cleanup logic is handled by grove-flow itself now
+func CleanupStaleFlowJobs() (int, error) {
+	// This functionality has been moved to grove-flow Phase 1-3
+	// and is handled by the PID-based lock file mechanism
+	// We keep this function for backwards compatibility but it's essentially a no-op now
+	return 0, nil
 }

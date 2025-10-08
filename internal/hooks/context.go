@@ -90,22 +90,30 @@ func (hc *HookContext) LogEvent(eventType models.EventType, data map[string]any)
 
 // EnsureSessionExists creates a session if it doesn't exist
 func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath string) error {
-	// Try to get existing session
-	existingSessionData, err := hc.Storage.GetSession(sessionID)
-	if err == nil && existingSessionData != nil {
-		// Check the status based on the type
-		var status string
-		if extSession, ok := existingSessionData.(*disk.ExtendedSession); ok {
-			status = extSession.Status
-		} else if session, ok := existingSessionData.(*models.Session); ok {
-			status = session.Status
-		}
+	// Create ~/.claude/sessions directory if it doesn't exist
+	claudeSessionsDir := expandPath("~/.claude/sessions")
+	if err := os.MkdirAll(claudeSessionsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create sessions directory: %w", err)
+	}
 
-		// Session exists - update status if idle
-		if status == "idle" {
-			return hc.Storage.UpdateSessionStatus(sessionID, "running")
+	sessionDir := filepath.Join(claudeSessionsDir, sessionID)
+	pidFile := filepath.Join(sessionDir, "pid.lock")
+	metadataFile := filepath.Join(sessionDir, "metadata.json")
+
+	// Check if session directory already exists
+	if _, err := os.Stat(sessionDir); err == nil {
+		// Directory exists - check if PID is alive
+		if content, err := os.ReadFile(pidFile); err == nil {
+			var pid int
+			if _, err := fmt.Sscanf(string(content), "%d", &pid); err == nil {
+				if process.IsProcessAlive(pid) {
+					// Session is already running and tracked
+					return nil
+				}
+			}
 		}
-		return nil
+		// Stale directory, remove it before creating a new one
+		os.RemoveAll(sessionDir)
 	}
 
 	// Extract working directory
@@ -145,12 +153,87 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		// Note: We don't have a logger here, so we'll just continue silently
 	}
 
-	// Create extended session with workspace context
+	// Get Claude PID
+	pid := process.GetClaudePID()
+
+	// Create the session directory structure
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		return fmt.Errorf("failed to create session directory: %w", err)
+	}
+
+	// Write the PID lock file
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", pid)), 0644); err != nil {
+		return fmt.Errorf("failed to write pid.lock: %w", err)
+	}
+
+	// Create metadata structure
 	now := time.Now()
+	metadata := struct {
+		SessionID            string    `json:"session_id"`
+		PID                  int       `json:"pid"`
+		Repo                 string    `json:"repo,omitempty"`
+		Branch               string    `json:"branch,omitempty"`
+		TmuxKey              string    `json:"tmux_key,omitempty"`
+		WorkingDirectory     string    `json:"working_directory"`
+		User                 string    `json:"user"`
+		StartedAt            time.Time `json:"started_at"`
+		TranscriptPath       string    `json:"transcript_path,omitempty"`
+		ProjectName          string    `json:"project_name,omitempty"`
+		IsWorktree           bool      `json:"is_worktree,omitempty"`
+		ParentEcosystemPath  string    `json:"parent_ecosystem_path,omitempty"`
+	}{
+		SessionID:        sessionID,
+		PID:              pid,
+		Repo:             repo,
+		Branch:           gitBranch,
+		TmuxKey:          tmuxKey,
+		WorkingDirectory: workingDir,
+		User:             username,
+		StartedAt:        now,
+		TranscriptPath:   transcriptPath,
+	}
+
+	// Populate workspace context fields if available
+	if projInfo != nil {
+		metadata.ProjectName = projInfo.Name
+		metadata.IsWorktree = projInfo.IsWorktree
+		metadata.ParentEcosystemPath = projInfo.ParentEcosystemPath
+	}
+
+	// Write metadata.json
+	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	if err := os.WriteFile(metadataFile, metadataJSON, 0644); err != nil {
+		return fmt.Errorf("failed to write metadata.json: %w", err)
+	}
+
+	// Also create a DB record for backwards compatibility (will be removed later)
+	// This allows existing tools to continue working during the transition
+	existingSessionData, err := hc.Storage.GetSession(sessionID)
+	if err == nil && existingSessionData != nil {
+		// Check the status based on the type
+		var status string
+		if extSession, ok := existingSessionData.(*disk.ExtendedSession); ok {
+			status = extSession.Status
+		} else if session, ok := existingSessionData.(*models.Session); ok {
+			status = session.Status
+		}
+
+		// Session exists - update status if idle
+		if status == "idle" {
+			return hc.Storage.UpdateSessionStatus(sessionID, "running")
+		}
+		return nil
+	}
+
+	// Create extended session with workspace context
 	session := &disk.ExtendedSession{
 		Session: models.Session{
 			ID:               sessionID,
-			PID:              process.GetClaudePID(), // Use parent/Claude PID instead of hook PID
+			PID:              pid,
 			Repo:             repo,
 			Branch:           gitBranch,
 			TmuxKey:          tmuxKey,
