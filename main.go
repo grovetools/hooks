@@ -27,7 +27,6 @@ func main() {
 		rootCmd.AddCommand(newStopCmd())
 		rootCmd.AddCommand(newSubagentStopCmd())
 		rootCmd.AddCommand(newSessionsCmd())
-		rootCmd.AddCommand(newOneshotCmd())
 		rootCmd.AddCommand(newInstallCmd())
 		rootCmd.AddCommand(commands.NewVersionCmd())
 	} else {
@@ -127,10 +126,6 @@ func runSubagentStopHook() {
 
 func newSessionsCmd() *cobra.Command {
 	return commands.NewSessionsCmd()
-}
-
-func newOneshotCmd() *cobra.Command {
-	return commands.NewOneshotCmd()
 }
 
 func newInstallCmd() *cobra.Command {

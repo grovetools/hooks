@@ -40,7 +40,7 @@ func newSessionsListCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all sessions",
+		Short: "List all sessions (primarily interactive Claude sessions)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Create storage
 			storage, err := disk.NewSQLiteStore()
@@ -88,10 +88,13 @@ func newSessionsListCmd() *cobra.Command {
 					if sessionType == "" {
 						sessionType = "claude"
 					}
-					// Normalize job type names
-					if sessionType == "oneshot_job" && typeFilter == "job" {
+					// Normalize job type names. 'job' is an alias for 'oneshot_job'.
+					isJob := sessionType == "oneshot_job"
+
+					if (typeFilter == "job" && isJob) || sessionType == typeFilter {
 						filtered = append(filtered, s)
-					} else if sessionType == typeFilter {
+					} else if typeFilter == "claude" && !isJob {
+						// If user filters for 'claude', include sessions that are not jobs.
 						filtered = append(filtered, s)
 					}
 				}
