@@ -24,10 +24,13 @@ type TestExtendedSession struct {
 }
 
 // OneshotJobScenario tests the oneshot job tracking functionality
+// NOTE: This scenario tests deprecated functionality (oneshot command removed in Phase 2)
+// It is marked as ExplicitOnly and kept for reference only
 func OneshotJobScenario() *harness.Scenario {
 	return &harness.Scenario{
-		Name:        "Oneshot Job Tracking",
-		Description: "Tests the oneshot job lifecycle (start, stop, query)",
+		Name:         "Oneshot Job Tracking",
+		Description:  "Tests the oneshot job lifecycle (start, stop, query) - DEPRECATED",
+		ExplicitOnly: true,
 		Steps: []harness.Step{
 			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Start a oneshot job", func(ctx *harness.Context) error {
@@ -370,10 +373,13 @@ func OneshotJobScenario() *harness.Scenario {
 }
 
 // OneshotJobValidationScenario tests input validation and error cases
+// NOTE: This scenario tests deprecated functionality (oneshot command removed in Phase 2)
+// It is marked as ExplicitOnly and kept for reference only
 func OneshotJobValidationScenario() *harness.Scenario {
 	return &harness.Scenario{
-		Name:        "Oneshot Job Validation",
-		Description: "Tests oneshot job input validation and error handling",
+		Name:         "Oneshot Job Validation",
+		Description:  "Tests oneshot job input validation and error handling - DEPRECATED",
+		ExplicitOnly: true,
 		Steps: []harness.Step{
 			harness.NewStep("Set up test database", SetupTestDatabase),
 			harness.NewStep("Reject invalid JSON input", func(ctx *harness.Context) error {
@@ -441,10 +447,13 @@ func OneshotJobValidationScenario() *harness.Scenario {
 }
 
 // MixedSessionTypesScenario tests handling of mixed Claude sessions and oneshot jobs
+// NOTE: This scenario tests deprecated functionality (oneshot command removed in Phase 2)
+// It is marked as ExplicitOnly and kept for reference only
 func MixedSessionTypesScenario() *harness.Scenario {
 	return &harness.Scenario{
-		Name:        "Mixed Session Types",
-		Description: "Tests that Claude sessions and oneshot jobs coexist properly",
+		Name:         "Mixed Session Types",
+		Description:  "Tests that Claude sessions and oneshot jobs coexist properly - DEPRECATED",
+		ExplicitOnly: true,
 		Steps: []harness.Step{
 			harness.NewStep("Create a Claude session and oneshot job", func(ctx *harness.Context) error {
 				hooksBinary, err := FindProjectBinary()
