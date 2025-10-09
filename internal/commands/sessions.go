@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/spf13/cobra"
 )
@@ -24,6 +28,9 @@ func NewSessionsCmd() *cobra.Command {
 	cmd.AddCommand(NewBrowseCmd())
 	cmd.AddCommand(NewCleanupCmd())
 	cmd.AddCommand(newSessionsArchiveCmd())
+	cmd.AddCommand(newMarkInterruptedCmd())
+	cmd.AddCommand(newKillCmd())
+	cmd.AddCommand(newSetStatusCmd())
 
 	return cmd
 }
@@ -536,6 +543,260 @@ You can archive specific sessions by ID or use flags to archive multiple session
 	cmd.Flags().BoolVar(&archiveFailed, "failed", false, "Archive only failed sessions")
 	cmd.Flags().BoolVar(&archiveRunning, "running", false, "Archive only running sessions")
 	cmd.Flags().BoolVar(&archiveIdle, "idle", false, "Archive only idle sessions")
+
+	return cmd
+}
+
+func newMarkInterruptedCmd() *cobra.Command {
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "mark-interrupted",
+		Short: "Mark all stale grove-flow jobs as interrupted",
+		Long: `Find all grove-flow job files with status: running and mark them as interrupted if:
+  - Their lock file is missing, OR
+  - Their PID is no longer alive
+
+This updates the job frontmatter files directly.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			updated := 0
+
+			// Common locations to search for plans
+			planDirs := []string{
+				expandPath("~/Documents/nb/repos"),
+				expandPath("~/Code/nb/repos"),
+				expandPath("~/Code"),
+			}
+
+			for _, baseDir := range planDirs {
+				if _, err := os.Stat(baseDir); os.IsNotExist(err) {
+					continue
+				}
+
+				// Walk the directory tree looking for plan directories
+				err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						return nil // Skip errors
+					}
+
+					// Look for "plans" directories
+					if !info.IsDir() || info.Name() != "plans" {
+						return nil
+					}
+
+					// Check subdirectories of the plans directory
+					planEntries, err := os.ReadDir(path)
+					if err != nil {
+						return nil
+					}
+
+					for _, planEntry := range planEntries {
+						if !planEntry.IsDir() {
+							continue
+						}
+
+						planDir := filepath.Join(path, planEntry.Name())
+						count, err := markInterruptedJobsInPlan(planDir, dryRun)
+						if err != nil {
+							// Log error but continue
+							fmt.Fprintf(os.Stderr, "Warning: error processing plan %s: %v\n", planDir, err)
+							continue
+						}
+						updated += count
+					}
+
+					return filepath.SkipDir // Don't descend into plans directories
+				})
+
+				if err != nil {
+					// Continue with other base directories
+					continue
+				}
+			}
+
+			if dryRun {
+				fmt.Printf("Dry run: would update %d job(s)\n", updated)
+			} else {
+				fmt.Printf("Updated %d job(s) to interrupted status\n", updated)
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be updated without making changes")
+
+	return cmd
+}
+
+func newKillCmd() *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "kill <session-id>",
+		Short: "Kill a running Claude session",
+		Long: `Kill a running Claude session by sending a SIGTERM signal to its process.
+The session directory will be cleaned up after killing the process.
+
+WARNING: This will terminate the Claude process immediately.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sessionID := args[0]
+
+			// First, try to find the session in the filesystem
+			groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+			sessionDir := filepath.Join(groveSessionsDir, sessionID)
+			pidFile := filepath.Join(sessionDir, "pid.lock")
+
+			// Check if session directory exists
+			if _, err := os.Stat(sessionDir); os.IsNotExist(err) {
+				return fmt.Errorf("session not found: %s", sessionID)
+			}
+
+			// Read PID from lock file
+			pidContent, err := os.ReadFile(pidFile)
+			if err != nil {
+				return fmt.Errorf("failed to read PID file: %w", err)
+			}
+
+			var pid int
+			if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err != nil {
+				return fmt.Errorf("invalid PID in lock file: %w", err)
+			}
+
+			// Check if process is alive
+			if !process.IsProcessAlive(pid) {
+				fmt.Printf("Session %s (PID %d) is not running\n", sessionID, pid)
+				// Clean up the stale directory
+				if err := os.RemoveAll(sessionDir); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to remove stale session directory: %v\n", err)
+				} else {
+					fmt.Printf("Cleaned up stale session directory\n")
+				}
+				return nil
+			}
+
+			// Confirm before killing unless --force is used
+			if !force {
+				fmt.Printf("Kill session %s (PID %d)? [y/N] ", sessionID, pid)
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+					fmt.Println("Cancelled")
+					return nil
+				}
+			}
+
+			// Kill the process using SIGTERM
+			if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+				return fmt.Errorf("failed to kill process: %w", err)
+			}
+
+			fmt.Printf("Killed session %s (PID %d)\n", sessionID, pid)
+
+			// Clean up the session directory
+			if err := os.RemoveAll(sessionDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove session directory: %v\n", err)
+			} else {
+				fmt.Printf("Cleaned up session directory\n")
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompt")
+
+	return cmd
+}
+
+func newSetStatusCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set-status <job-file-path> <status>",
+		Short: "Set the status of a grove-flow job",
+		Long: `Update the status field in a grove-flow job's frontmatter.
+
+Valid statuses: pending, running, completed, failed, interrupted
+
+Example:
+  grove-hooks sessions set-status ~/Code/nb/repos/my-repo/main/plans/my-plan/01-job.md interrupted`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			jobFilePath := args[0]
+			newStatus := args[1]
+
+			// Validate status
+			validStatuses := map[string]bool{
+				"pending":     true,
+				"running":     true,
+				"completed":   true,
+				"failed":      true,
+				"interrupted": true,
+			}
+			if !validStatuses[newStatus] {
+				return fmt.Errorf("invalid status: %s (valid: pending, running, completed, failed, interrupted)", newStatus)
+			}
+
+			// Check if file exists
+			if _, err := os.Stat(jobFilePath); os.IsNotExist(err) {
+				return fmt.Errorf("job file not found: %s", jobFilePath)
+			}
+
+			// Read the file
+			content, err := os.ReadFile(jobFilePath)
+			if err != nil {
+				return fmt.Errorf("failed to read job file: %w", err)
+			}
+
+			contentStr := string(content)
+
+			// Parse frontmatter to find current status
+			lines := strings.Split(contentStr, "\n")
+			inFrontmatter := false
+			statusLineIdx := -1
+			currentStatus := ""
+
+			for i, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if trimmed == "---" {
+					if !inFrontmatter {
+						inFrontmatter = true
+						continue
+					} else {
+						break
+					}
+				}
+
+				if inFrontmatter && strings.HasPrefix(trimmed, "status:") {
+					statusLineIdx = i
+					parts := strings.SplitN(trimmed, ":", 2)
+					if len(parts) == 2 {
+						currentStatus = strings.TrimSpace(parts[1])
+					}
+					break
+				}
+			}
+
+			if statusLineIdx == -1 {
+				return fmt.Errorf("no status field found in frontmatter")
+			}
+
+			fmt.Printf("Changing status from '%s' to '%s' in %s\n", currentStatus, newStatus, jobFilePath)
+
+			// Update the status line
+			lines[statusLineIdx] = fmt.Sprintf("status: %s", newStatus)
+			newContent := strings.Join(lines, "\n")
+
+			// Write back to file
+			if err := os.WriteFile(jobFilePath, []byte(newContent), 0644); err != nil {
+				return fmt.Errorf("failed to write job file: %w", err)
+			}
+
+			fmt.Printf("Successfully updated status to '%s'\n", newStatus)
+
+			return nil
+		},
+	}
 
 	return cmd
 }

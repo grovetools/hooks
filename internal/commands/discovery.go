@@ -355,3 +355,88 @@ func parseJobMetadata(content string) (id, title string, startedAt time.Time) {
 
 	return
 }
+
+// markInterruptedJobsInPlan scans a single plan directory and marks jobs with status: running as interrupted
+// if their lock file is missing or PID is dead. Returns the number of jobs updated.
+func markInterruptedJobsInPlan(planDir string, dryRun bool) (int, error) {
+	updated := 0
+
+	entries, err := os.ReadDir(planDir)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		filename := entry.Name()
+
+		// Skip non-.md files
+		if !strings.HasSuffix(filename, ".md") {
+			continue
+		}
+
+		// Skip spec.md and other non-job files
+		if filename == "spec.md" || filename == "README.md" {
+			continue
+		}
+
+		filePath := filepath.Join(planDir, filename)
+
+		// Read the file
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		contentStr := string(content)
+
+		// Parse frontmatter to check status
+		status := parseJobStatus(contentStr)
+		if status != "running" {
+			continue
+		}
+
+		// Check for lock file
+		lockFile := filePath + ".lock"
+		shouldMark := false
+
+		if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+			// No lock file - mark as interrupted
+			shouldMark = true
+		} else {
+			// Lock file exists - check if PID is alive
+			pidContent, err := os.ReadFile(lockFile)
+			if err != nil {
+				shouldMark = true
+			} else {
+				var pid int
+				if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err == nil {
+					if !process.IsProcessAlive(pid) {
+						shouldMark = true
+					}
+				} else {
+					shouldMark = true
+				}
+			}
+		}
+
+		if shouldMark {
+			if dryRun {
+				fmt.Printf("Would update: %s\n", filePath)
+			} else {
+				// Update the frontmatter
+				newContent := strings.Replace(contentStr, "status: running", "status: interrupted", 1)
+				if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+					return updated, fmt.Errorf("failed to update %s: %w", filePath, err)
+				}
+				fmt.Printf("Updated: %s\n", filePath)
+			}
+			updated++
+		}
+	}
+
+	return updated, nil
+}
