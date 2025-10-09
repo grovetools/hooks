@@ -90,13 +90,13 @@ func (hc *HookContext) LogEvent(eventType models.EventType, data map[string]any)
 
 // EnsureSessionExists creates a session if it doesn't exist
 func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath string) error {
-	// Create ~/.claude/sessions directory if it doesn't exist
-	claudeSessionsDir := expandPath("~/.claude/sessions")
-	if err := os.MkdirAll(claudeSessionsDir, 0755); err != nil {
+	// Create ~/.grove/hooks/sessions directory if it doesn't exist
+	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	if err := os.MkdirAll(groveSessionsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 
-	sessionDir := filepath.Join(claudeSessionsDir, sessionID)
+	sessionDir := filepath.Join(groveSessionsDir, sessionID)
 	pidFile := filepath.Join(sessionDir, "pid.lock")
 	metadataFile := filepath.Join(sessionDir, "metadata.json")
 
@@ -273,10 +273,20 @@ func (hc *HookContext) GetSession(sessionID string) (*models.Session, error) {
 	return nil, fmt.Errorf("unexpected session type: %T", sessionData)
 }
 
-// expandPath expands ~ to home directory
+// expandPath expands ~ to home directory, respecting XDG_DATA_HOME for .grove paths
 func expandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(os.Getenv("HOME"), path[2:])
+		expandedPath := path[2:]
+
+		// If the path is for .grove, respect XDG_DATA_HOME
+		if strings.HasPrefix(expandedPath, ".grove/") {
+			if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
+				// Use XDG_DATA_HOME/... (strip .grove/ prefix since XDG_DATA_HOME already points to .grove)
+				return filepath.Join(xdgDataHome, expandedPath[7:]) // Strip ".grove/"
+			}
+		}
+
+		return filepath.Join(os.Getenv("HOME"), expandedPath)
 	}
 	return path
 }

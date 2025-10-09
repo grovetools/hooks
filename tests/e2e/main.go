@@ -25,6 +25,11 @@ func main() {
 		FlowRealLLMScenario(),
 		// TODO: Fix MixedSessionTypesScenario - it's not properly isolating the test database
 		// MixedSessionTypesScenario(),
+		// PID-based session tracking tests
+		PIDBasedSessionTracking(),
+		SessionCleanupOnStop(),
+		SessionDiscoveryService(),
+		SessionsListIntegration(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {

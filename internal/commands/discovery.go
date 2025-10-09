@@ -28,17 +28,17 @@ type SessionMetadata struct {
 	ParentEcosystemPath string    `json:"parent_ecosystem_path,omitempty"`
 }
 
-// DiscoverLiveClaudeSessions scans ~/.claude/sessions/ directory and returns live sessions
+// DiscoverLiveClaudeSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
 // A session is considered live if its PID is still alive
 func DiscoverLiveClaudeSessions() ([]*models.Session, error) {
-	claudeSessionsDir := expandPath("~/.claude/sessions")
+	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
 
 	// Check if directory exists
-	if _, err := os.Stat(claudeSessionsDir); os.IsNotExist(err) {
+	if _, err := os.Stat(groveSessionsDir); os.IsNotExist(err) {
 		return []*models.Session{}, nil
 	}
 
-	entries, err := os.ReadDir(claudeSessionsDir)
+	entries, err := os.ReadDir(groveSessionsDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
 	}
@@ -51,7 +51,7 @@ func DiscoverLiveClaudeSessions() ([]*models.Session, error) {
 		}
 
 		sessionID := entry.Name()
-		sessionDir := filepath.Join(claudeSessionsDir, sessionID)
+		sessionDir := filepath.Join(groveSessionsDir, sessionID)
 		pidFile := filepath.Join(sessionDir, "pid.lock")
 		metadataFile := filepath.Join(sessionDir, "metadata.json")
 

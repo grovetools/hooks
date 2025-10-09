@@ -75,9 +75,9 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	cleaned := 0
 
 	// 1. Clean up stale interactive Claude session directories
-	claudeSessionsDir := expandPath("~/.claude/sessions")
-	if _, err := os.Stat(claudeSessionsDir); err == nil {
-		entries, err := os.ReadDir(claudeSessionsDir)
+	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	if _, err := os.Stat(groveSessionsDir); err == nil {
+		entries, err := os.ReadDir(groveSessionsDir)
 		if err == nil {
 			for _, entry := range entries {
 				if !entry.IsDir() {
@@ -85,7 +85,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 				}
 
 				sessionID := entry.Name()
-				sessionDir := filepath.Join(claudeSessionsDir, sessionID)
+				sessionDir := filepath.Join(groveSessionsDir, sessionID)
 				pidFile := filepath.Join(sessionDir, "pid.lock")
 
 				// Read PID from lock file
@@ -132,8 +132,8 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 		if session.Status == "running" || session.Status == "idle" {
 			// First check if process is dead (quick check)
 			if session.PID > 0 && !isProcessAlive(session.PID) {
-				// Mark session as completed
-				if err := storage.UpdateSessionStatus(session.ID, "completed"); err != nil {
+				// Mark session as interrupted
+				if err := storage.UpdateSessionStatus(session.ID, "interrupted"); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
 					continue
 				}
@@ -143,6 +143,27 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 					fmt.Printf("Cleaned up DB session %s (PID %d was dead)\n", session.ID, session.PID)
 				}
 				continue
+			}
+
+			// For sessions without PID (old sessions before PID tracking), check filesystem
+			if session.PID == 0 {
+				sessionDir := filepath.Join(groveSessionsDir, session.ID)
+				pidFile := filepath.Join(sessionDir, "pid.lock")
+
+				// If no pid.lock file exists, this is a zombie session
+				if _, err := os.Stat(pidFile); os.IsNotExist(err) {
+					// Mark session as interrupted (no filesystem tracking)
+					if err := storage.UpdateSessionStatus(session.ID, "interrupted"); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
+						continue
+					}
+					cleaned++
+
+					if os.Getenv("GROVE_DEBUG") != "" {
+						fmt.Printf("Cleaned up zombie session %s (no PID tracking)\n", session.ID)
+					}
+					continue
+				}
 			}
 
 			// Then check if session has been inactive for too long
@@ -165,10 +186,20 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	return cleaned, nil
 }
 
-// expandPath expands ~ to home directory
+// expandPath expands ~ to home directory, respecting XDG_DATA_HOME for .grove paths
 func expandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(os.Getenv("HOME"), path[2:])
+		expandedPath := path[2:]
+
+		// If the path is for .grove, respect XDG_DATA_HOME
+		if strings.HasPrefix(expandedPath, ".grove/") {
+			if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
+				// Use XDG_DATA_HOME/... (strip .grove/ prefix since XDG_DATA_HOME already points to .grove)
+				return filepath.Join(xdgDataHome, expandedPath[7:]) // Strip ".grove/"
+			}
+		}
+
+		return filepath.Join(os.Getenv("HOME"), expandedPath)
 	}
 	return path
 }

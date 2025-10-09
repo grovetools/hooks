@@ -290,8 +290,8 @@ func RunStopHook() {
 	}
 
 	// Handle session directory cleanup based on completion status
-	claudeSessionsDir := expandPath("~/.claude/sessions")
-	sessionDir := filepath.Join(claudeSessionsDir, data.SessionID)
+	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	sessionDir := filepath.Join(groveSessionsDir, data.SessionID)
 
 	if isComplete {
 		// Session is complete - archive metadata to DB and delete directory
