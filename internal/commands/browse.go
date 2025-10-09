@@ -656,8 +656,8 @@ func (m *browseModel) updateFiltered() {
 		if filter != "" {
 			// Build search text from session info
 			sessionType := s.Type
-			if sessionType == "" {
-				sessionType = "claude"
+			if sessionType == "" || sessionType == "claude_session" {
+				sessionType = "claude_code"
 			}
 			searchText := strings.ToLower(fmt.Sprintf("%s %s %s %s %s %s %s",
 				s.ID, s.Repo, s.Branch, s.WorkingDirectory, s.User, sessionType, s.PlanName))
@@ -698,7 +698,7 @@ func (m browseModel) View() string {
 	b.WriteString("\n")
 
 	// Build table data with viewport scrolling (matching sessions list format)
-	headers := []string{"", "SESSION ID", "TYPE", "STATUS", "CONTEXT", "USER", "STARTED"}
+	headers := []string{"", "SESSION ID", "TYPE", "STATUS", "REPOSITORY", "WORKTREE", "STARTED", "ELAPSED"}
 	var rows [][]string
 
 	// Calculate visible range
@@ -715,30 +715,41 @@ func (m browseModel) View() string {
 
 		// Format session type
 		sessionType := s.Type
-		if sessionType == "" {
-			sessionType = "claude"
+		if sessionType == "" || sessionType == "claude_session" {
+			sessionType = "claude_code"
 		} else if sessionType == "oneshot_job" {
 			sessionType = "job"
 		}
 
-		// Format context (repo/branch or plan name)
-		context := ""
-		if sessionType == "job" {
-			if s.Repo != "" && s.Branch != "" {
-				context = fmt.Sprintf("%s/%s", s.Repo, s.Branch)
-			} else if s.PlanName != "" {
-				context = s.PlanName
+		// Format session ID/name
+		sessionID := s.ID
+		if sessionType == "job" && s.JobTitle != "" {
+			sessionID = s.JobTitle
+		}
+
+		// Format repository and worktree
+		repository := s.Repo
+		if repository == "" {
+			if sessionType == "job" && s.PlanName != "" {
+				repository = s.PlanName
 			} else {
-				context = "oneshot"
+				repository = "n/a"
 			}
+		}
+
+		worktree := s.Branch
+		if worktree == "" {
+			worktree = "n/a"
+		}
+
+		// Calculate elapsed time
+		var elapsed string
+		if s.Status == "running" || s.Status == "idle" {
+			elapsed = formatDuration(time.Since(s.StartedAt))
+		} else if s.EndedAt != nil && !s.EndedAt.IsZero() {
+			elapsed = formatDuration(s.EndedAt.Sub(s.StartedAt))
 		} else {
-			if s.Repo != "" && s.Branch != "" {
-				context = fmt.Sprintf("%s/%s", s.Repo, s.Branch)
-			} else if s.Repo != "" {
-				context = s.Repo
-			} else {
-				context = "n/a"
-			}
+			elapsed = "n/a"
 		}
 
 		// Format status with color
@@ -762,12 +773,13 @@ func (m browseModel) View() string {
 
 		rows = append(rows, []string{
 			indicator,
-			truncateStr(s.ID, 12),
+			truncateStr(sessionID, 20),
 			sessionType,
 			statusStr,
-			truncateStr(context, 30),
-			s.User,
+			truncateStr(repository, 25),
+			truncateStr(worktree, 20),
 			s.StartedAt.Format("2006-01-02 15:04"),
+			elapsed,
 		})
 	}
 
@@ -850,8 +862,8 @@ func (m browseModel) viewDetails() string {
 
 	// Session type
 	sessionType := s.Type
-	if sessionType == "" {
-		sessionType = "claude"
+	if sessionType == "" || sessionType == "claude_session" {
+		sessionType = "claude_code"
 	} else if sessionType == "oneshot_job" {
 		sessionType = "job"
 	}
@@ -930,6 +942,22 @@ func truncateStr(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := d / time.Hour
+	d -= h * time.Hour
+	m := d / time.Minute
+	d -= m * time.Minute
+	s := d / time.Second
+
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm%ds", h, m, s)
+	} else if m > 0 {
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }
 
 func copyToClipboard(text string) {

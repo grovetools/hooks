@@ -137,16 +137,16 @@ func newSessionsListCmd() *cobra.Command {
 				var filtered []*models.Session
 				for _, s := range sessions {
 					sessionType := s.Type
-					if sessionType == "" {
-						sessionType = "claude"
+					if sessionType == "" || sessionType == "claude_session" {
+						sessionType = "claude_code"
 					}
 					// Normalize job type names. 'job' is an alias for 'oneshot_job'.
 					isJob := sessionType == "oneshot_job"
 
 					if (typeFilter == "job" && isJob) || sessionType == typeFilter {
 						filtered = append(filtered, s)
-					} else if typeFilter == "claude" && !isJob {
-						// If user filters for 'claude', include sessions that are not jobs.
+					} else if (typeFilter == "claude" || typeFilter == "claude_code") && !isJob {
+						// If user filters for 'claude' or 'claude_code', include sessions that are not jobs.
 						filtered = append(filtered, s)
 					}
 				}
@@ -278,8 +278,8 @@ func newSessionsListCmd() *cobra.Command {
 				// Format context based on session type
 				context := ""
 				sessionType := s.Type
-				if sessionType == "" {
-					sessionType = "claude"
+				if sessionType == "" || sessionType == "claude_session" {
+					sessionType = "claude_code"
 				}
 				if s.Type == "oneshot_job" {
 					sessionType = "job"
@@ -394,12 +394,19 @@ func newSessionsGetCmd() *cobra.Command {
 				return fmt.Errorf("unexpected session type: %T", sessionData)
 			}
 
+			// Normalize session type for display
+			if sessionType == "claude_session" || sessionType == "" {
+				sessionType = "claude_code"
+			} else if sessionType == "oneshot_job" {
+				sessionType = "job"
+			}
+
 			// Detailed text output
 			fmt.Printf("Session ID: %s\n", baseSession.ID)
 			fmt.Printf("Type: %s\n", sessionType)
 			fmt.Printf("Status: %s\n", baseSession.Status)
 
-			if sessionType == "oneshot_job" {
+			if sessionType == "job" {
 				// Oneshot job specific fields
 				if planName != "" {
 					fmt.Printf("Plan: %s\n", planName)
