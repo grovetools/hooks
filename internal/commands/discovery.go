@@ -161,13 +161,9 @@ func startBackgroundRefresh() {
 	flowJobsRefreshStarted = true
 
 	go func() {
-		// Initial delay to not block startup
-		time.Sleep(100 * time.Millisecond)
-
-		// Refresh immediately on startup
-		refreshFlowJobsCache()
-
-		// Then refresh every 30 seconds
+		// Only refresh periodically; initial data is loaded by the main thread
+		// This avoids race condition where both initial load and background refresh
+		// try to execute 'flow plan list' simultaneously, causing cache corruption
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
@@ -246,7 +242,7 @@ func refreshFlowJobsCache() {
 
 			session := &models.Session{
 				ID:               job.ID,
-				Type:             "job",
+				Type:             job.Type, // Use specific job type (e.g. chat, interactive_agent, oneshot)
 				Status:           displayStatus,
 				Repo:             plan.WorkspaceName,
 				Branch:           job.Worktree,
@@ -286,7 +282,8 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 			if time.Since(cached.Timestamp) < flowJobsCacheTTL {
 				// Update real-time status for cached sessions before returning
 				for _, session := range cached.Sessions {
-					if session.Type == "job" {
+					// Check if it's a flow job (not a claude_code session)
+					if session.Type != "" && session.Type != "claude_session" {
 						updateSessionStatusFromFilesystem(session)
 					}
 				}
@@ -377,7 +374,7 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 
 			session := &models.Session{
 				ID:               job.ID,
-				Type:             "job", // Use "job" for flow jobs
+				Type:             job.Type, // Use specific job type (e.g. chat, interactive_agent, oneshot)
 				Status:           displayStatus,
 				Repo:             plan.WorkspaceName,
 				Branch:           job.Worktree,
@@ -408,7 +405,8 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 
 	// After getting sessions from cache or command, update their status in real-time
 	for _, session := range sessions {
-		if session.Type == "job" {
+		// Check if it's a flow job (not a claude_code session)
+		if session.Type != "" && session.Type != "claude_session" {
 			updateSessionStatusFromFilesystem(session)
 		}
 	}

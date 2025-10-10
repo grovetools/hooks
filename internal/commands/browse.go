@@ -26,6 +26,74 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// BrowseFilterPreferences stores the user's filter preferences
+type BrowseFilterPreferences struct {
+	StatusFilters map[string]bool `json:"status_filters"`
+	TypeFilters   map[string]bool `json:"type_filters"`
+}
+
+var browseFiltersPath = expandPath("~/.grove/hooks/browse_filters.json")
+
+// loadFilterPreferences loads saved filter preferences from disk
+func loadFilterPreferences() BrowseFilterPreferences {
+	prefs := BrowseFilterPreferences{
+		StatusFilters: map[string]bool{
+			"running":     true,
+			"idle":        true,
+			"completed":   true,
+			"interrupted": true,
+			"failed":      true,
+			"error":       true,
+		},
+		TypeFilters: map[string]bool{
+			"claude_code":       true,
+			"chat":              true,
+			"interactive_agent": true,
+			"oneshot":           true,
+			"headless_agent":    true,
+			"agent":             true,
+			"shell":             true,
+		},
+	}
+
+	// Try to load from file
+	data, err := os.ReadFile(browseFiltersPath)
+	if err != nil {
+		return prefs // Return defaults if file doesn't exist
+	}
+
+	var saved BrowseFilterPreferences
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return prefs // Return defaults if JSON is invalid
+	}
+
+	// Merge saved preferences with defaults (in case new filters were added)
+	for k, v := range saved.StatusFilters {
+		prefs.StatusFilters[k] = v
+	}
+	for k, v := range saved.TypeFilters {
+		prefs.TypeFilters[k] = v
+	}
+
+	return prefs
+}
+
+// saveFilterPreferences saves filter preferences to disk
+func saveFilterPreferences(prefs BrowseFilterPreferences) error {
+	data, err := json.MarshalIndent(prefs, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(browseFiltersPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(browseFiltersPath, data, 0644)
+}
+
 func NewBrowseCmd() *cobra.Command {
 	var hideCompleted bool
 
@@ -94,15 +162,17 @@ func NewBrowseCmd() *cobra.Command {
 // browseKeyMap is the custom keymap for the session browser
 type browseKeyMap struct {
 	keymap.Base
-	CycleFilter key.Binding
-	Archive     key.Binding
-	CopyID      key.Binding
-	OpenDir     key.Binding
-	ExportJSON  key.Binding
-	SelectAll   key.Binding
-	ScrollDown  key.Binding
-	ScrollUp    key.Binding
-	Kill        key.Binding
+	CycleFilter  key.Binding
+	Archive      key.Binding
+	CopyID       key.Binding
+	OpenDir      key.Binding
+	ExportJSON   key.Binding
+	SelectAll    key.Binding
+	ScrollDown   key.Binding
+	ScrollUp     key.Binding
+	Kill         key.Binding
+	ToggleFilter key.Binding
+	SearchFilter key.Binding
 }
 
 func (k browseKeyMap) ShortHelp() []key.Binding {
@@ -113,7 +183,7 @@ func (k browseKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.ScrollUp, k.ScrollDown},
 		{k.Confirm, k.Back, k.Select, k.SelectAll},
-		{k.CycleFilter, k.CopyID, k.OpenDir, k.ExportJSON},
+		{k.ToggleFilter, k.SearchFilter, k.CopyID, k.OpenDir, k.ExportJSON},
 		{k.Kill, k.Help, k.Quit},
 	}
 }
@@ -125,6 +195,14 @@ func newBrowseKeyMap() browseKeyMap {
 		CycleFilter: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "cycle filter"),
+		),
+		ToggleFilter: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", "toggle filter view"),
+		),
+		SearchFilter: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "search"),
 		),
 		Archive: key.NewBinding(
 			key.WithKeys("ctrl+x"),
@@ -180,13 +258,17 @@ type browseModel struct {
 	help            help.Model
 	statusMessage   string // For showing kill/error messages
 	hideCompleted   bool   // Store the initial --active flag
+	showFilterView  bool   // Toggle for filter options view
+	filterCursor    int    // Cursor position in filter view (0-12: 6 statuses + 7 types)
+	statusFilters   map[string]bool
+	typeFilters     map[string]bool
+	searchActive    bool // Whether search input is active
 }
 
 func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer, hideCompleted bool) browseModel {
 	// Create text input for filtering
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter by session ID, repo, branch, or working directory..."
-	ti.Focus()
 	ti.CharLimit = 256
 	ti.Width = 60
 
@@ -199,21 +281,34 @@ func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer
 	// Create keymap and help model
 	keys := newBrowseKeyMap()
 
-	return browseModel{
-		sessions:      sessions,
-		filtered:      sessions,
-		filterInput:   ti,
-		cursor:        0,
-		scrollOffset:  0,
-		statusFilter:  "",
-		showDetails:   false,
-		selectedIDs:   make(map[string]bool),
-		storage:       storage,
-		lastRefresh:   time.Now(),
-		keys:          keys,
-		help:          help.New(keys),
-		hideCompleted: hideCompleted,
+	// Load saved filter preferences
+	prefs := loadFilterPreferences()
+
+	model := browseModel{
+		sessions:       sessions,
+		filtered:       sessions,
+		filterInput:    ti,
+		cursor:         0,
+		scrollOffset:   0,
+		statusFilter:   "",
+		showDetails:    false,
+		selectedIDs:    make(map[string]bool),
+		storage:        storage,
+		lastRefresh:    time.Now(),
+		keys:           keys,
+		help:           help.New(keys),
+		hideCompleted:  hideCompleted,
+		showFilterView: false,
+		filterCursor:   0,
+		statusFilters:  prefs.StatusFilters,
+		typeFilters:    prefs.TypeFilters,
+		searchActive:   false,
 	}
+
+	// Apply initial filtering based on loaded preferences
+	model.updateFiltered()
+
+	return model
 }
 
 // tickMsg is sent on a regular interval for refreshing data
@@ -222,7 +317,8 @@ type tickMsg time.Time
 func (m browseModel) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
-		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		// Delay first tick to 1 second to let background cache refresh complete
+		tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		}),
 	)
@@ -309,6 +405,16 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.help.Toggle()
 				return m, nil
 			}
+			if m.searchActive {
+				// Deactivate search
+				m.searchActive = false
+				m.filterInput.Blur()
+				return m, nil
+			}
+			if m.showFilterView {
+				m.showFilterView = false
+				return m, nil
+			}
 			if m.showDetails {
 				m.showDetails = false
 				return m, nil
@@ -318,6 +424,59 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// If help is shown, ignore other keys
 		if m.help.ShowAll {
+			return m, nil
+		}
+
+		// Handle filter view keys
+		if m.showFilterView {
+			statusOptions := []string{"running", "idle", "completed", "interrupted", "failed", "error"}
+			typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
+			totalOptions := len(statusOptions) + len(typeOptions)
+
+			if key.Matches(msg, m.keys.Up) {
+				if m.filterCursor > 0 {
+					m.filterCursor--
+				}
+			} else if key.Matches(msg, m.keys.Down) {
+				if m.filterCursor < totalOptions-1 {
+					m.filterCursor++
+				}
+			} else if key.Matches(msg, m.keys.Select) || msg.String() == " " {
+				// Toggle the current filter option
+				if m.filterCursor < len(statusOptions) {
+					// It's a status filter
+					status := statusOptions[m.filterCursor]
+					m.statusFilters[status] = !m.statusFilters[status]
+				} else {
+					// It's a type filter
+					typeIdx := m.filterCursor - len(statusOptions)
+					typ := typeOptions[typeIdx]
+					m.typeFilters[typ] = !m.typeFilters[typ]
+				}
+				// Save preferences to disk
+				prefs := BrowseFilterPreferences{
+					StatusFilters: m.statusFilters,
+					TypeFilters:   m.typeFilters,
+				}
+				saveFilterPreferences(prefs) // Ignore errors - best effort
+				// Update filtered list
+				m.updateFiltered()
+				m.cursor = 0
+				m.scrollOffset = 0
+			}
+			return m, nil
+		}
+
+		// Handle search activation with '/'
+		if key.Matches(msg, m.keys.SearchFilter) && !m.showDetails && !m.searchActive {
+			m.searchActive = true
+			m.filterInput.Focus()
+			return m, textinput.Blink
+		}
+
+		// Handle filter view toggle with 'f'
+		if key.Matches(msg, m.keys.ToggleFilter) && !m.showDetails && !m.searchActive {
+			m.showFilterView = !m.showFilterView
 			return m, nil
 		}
 
@@ -522,7 +681,8 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Projects themselves aren't archived, only sessions are
 
 		} else {
-			if !m.showDetails {
+			// Only update filter input when search is active
+			if !m.showDetails && m.searchActive {
 				// Update filter input
 				prevValue := m.filterInput.Value()
 				m.filterInput, cmd = m.filterInput.Update(msg)
@@ -609,7 +769,21 @@ func (m *browseModel) updateFiltered() {
 	m.filtered = []*models.Session{}
 
 	for _, s := range m.sessions {
-		// Apply status filter first
+		// Apply status filter from filter map
+		if !m.statusFilters[s.Status] {
+			continue
+		}
+
+		// Apply type filter from filter map
+		sessionType := s.Type
+		if sessionType == "" || sessionType == "claude_session" {
+			sessionType = "claude_code"
+		}
+		if !m.typeFilters[sessionType] {
+			continue
+		}
+
+		// Apply legacy status filter (for backwards compatibility with tab cycling)
 		if m.statusFilter != "" {
 			if s.Status != m.statusFilter {
 				continue
@@ -619,10 +793,6 @@ func (m *browseModel) updateFiltered() {
 		// Apply text filter if present
 		if filter != "" {
 			// Build search text from session info
-			sessionType := s.Type
-			if sessionType == "" || sessionType == "claude_session" {
-				sessionType = "claude_code"
-			}
 			searchText := strings.ToLower(fmt.Sprintf("%s %s %s %s %s %s %s",
 				s.ID, s.Repo, s.Branch, s.WorkingDirectory, s.User, sessionType, s.PlanName))
 			if !strings.Contains(searchText, filter) {
@@ -640,6 +810,10 @@ func (m browseModel) View() string {
 		return m.help.View()
 	}
 
+	if m.showFilterView {
+		return m.viewFilterOptions()
+	}
+
 	if m.showDetails && m.selectedSession != nil {
 		return m.viewDetails()
 	}
@@ -647,16 +821,12 @@ func (m browseModel) View() string {
 	t := theme.DefaultTheme
 	var b strings.Builder
 
-	// Compact header with filter input on same line
-	filterText := "all"
-	if m.statusFilter != "" {
-		filterText = m.statusFilter
+	// Compact header with optional filter input
+	headerLine := t.Header.Render("Grove Sessions Browser") + "  "
+	if m.searchActive {
+		headerLine += t.Muted.Render(m.filterInput.View()) + "  "
 	}
-
-	headerLine := t.Header.Render("Grove Sessions Browser") + "  " +
-		t.Muted.Render(m.filterInput.View()) + "  " +
-		t.Muted.Render("filter:") + t.Info.Render(filterText) + "  " +
-		t.Success.Render("●")
+	headerLine += t.Success.Render("●")
 
 	b.WriteString(headerLine)
 	b.WriteString("\n")
@@ -679,22 +849,33 @@ func (m browseModel) View() string {
 
 		// Format session type
 		sessionType := s.Type
-		if sessionType == "" || sessionType == "claude_session" {
+		isClaudeSession := sessionType == "" || sessionType == "claude_session"
+		if isClaudeSession {
 			sessionType = "claude_code"
-		} else if sessionType == "oneshot_job" {
-			sessionType = "job"
 		}
 
-		// Format session ID/name
+		// Format session ID/name with color coding
 		sessionID := s.ID
-		if sessionType == "job" && s.JobTitle != "" {
+		if !isClaudeSession && s.JobTitle != "" {
 			sessionID = s.JobTitle
+		}
+
+		// Apply color to session ID and type based on session type (subtle, no bold)
+		var sessionIDStr, sessionTypeStr string
+		if isClaudeSession {
+			// Claude sessions: blue but not bold
+			sessionIDStr = lipgloss.NewStyle().Foreground(t.Colors.Blue).Render(truncateStr(sessionID, 30))
+			sessionTypeStr = lipgloss.NewStyle().Foreground(t.Colors.Blue).Render(sessionType)
+		} else {
+			// Flow jobs: violet but not bold
+			sessionIDStr = lipgloss.NewStyle().Foreground(t.Colors.Violet).Render(truncateStr(sessionID, 30))
+			sessionTypeStr = lipgloss.NewStyle().Foreground(t.Colors.Violet).Render(sessionType)
 		}
 
 		// Format repository and worktree
 		repository := s.Repo
 		if repository == "" {
-			if sessionType == "job" && s.PlanName != "" {
+			if !isClaudeSession && s.PlanName != "" {
 				repository = s.PlanName
 			} else {
 				repository = "n/a"
@@ -737,8 +918,8 @@ func (m browseModel) View() string {
 
 		rows = append(rows, []string{
 			indicator,
-			truncateStr(sessionID, 20),
-			sessionType,
+			sessionIDStr,
+			sessionTypeStr,
 			statusStr,
 			truncateStr(repository, 25),
 			truncateStr(worktree, 20),
@@ -899,6 +1080,73 @@ func (m browseModel) viewDetails() string {
 
 	// Wrap in a box
 	return components.RenderBox("Session Details", content.String(), m.width)
+}
+
+func (m browseModel) viewFilterOptions() string {
+	t := theme.DefaultTheme
+	var content strings.Builder
+
+	content.WriteString(t.Header.Render("Filter Options"))
+	content.WriteString("\n\n")
+
+	// Build rows for the table
+	statusOptions := []string{"running", "idle", "completed", "interrupted", "failed", "error"}
+	typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
+
+	var rows [][]string
+
+	// Status filters section header
+	rows = append(rows, []string{t.Muted.Render("STATUS FILTERS"), ""})
+	for _, status := range statusOptions {
+		checkbox := "[ ]"
+		if m.statusFilters[status] {
+			checkbox = "[✓]"
+		}
+		statusText := status
+		if m.statusFilters[status] {
+			statusText = t.Success.Render(status)
+		}
+		rows = append(rows, []string{"  " + checkbox, statusText})
+	}
+
+	// Type filters section header
+	rows = append(rows, []string{"", ""}) // Empty row for spacing
+	rows = append(rows, []string{t.Muted.Render("TYPE FILTERS"), ""})
+	for _, typ := range typeOptions {
+		checkbox := "[ ]"
+		if m.typeFilters[typ] {
+			checkbox = "[✓]"
+		}
+		typeText := typ
+		if m.typeFilters[typ] {
+			typeText = t.Info.Render(typ)
+		}
+		rows = append(rows, []string{"  " + checkbox, typeText})
+	}
+
+	// Adjust cursor to account for header rows
+	// Row 0: STATUS FILTERS header (not selectable)
+	// Rows 1-6: status options (selectable, filterCursor 0-5)
+	// Row 7: empty spacing (not selectable)
+	// Row 8: TYPE FILTERS header (not selectable)
+	// Rows 9-15: type options (selectable, filterCursor 6-12)
+
+	// Map filterCursor to actual row index
+	actualCursor := m.filterCursor + 1 // +1 to skip STATUS FILTERS header
+	if m.filterCursor >= len(statusOptions) {
+		// It's a type filter - add extra offset for spacing and TYPE FILTERS header
+		actualCursor = m.filterCursor + 3
+	}
+
+	// Use SelectableTable to render with cursor
+	tableStr := gtable.SelectableTable([]string{"", ""}, rows, actualCursor)
+	content.WriteString(tableStr)
+
+	// Help
+	content.WriteString("\n\n")
+	content.WriteString(t.Muted.Render("j/k/arrows: navigate • space: toggle • f/esc: close"))
+
+	return components.RenderBox("Filters", content.String(), m.width)
 }
 
 func truncateStr(s string, maxLen int) string {
