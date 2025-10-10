@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
@@ -16,10 +15,8 @@ import (
 
 // Cache for flow jobs discovery to avoid expensive flow plan list calls
 var (
-	flowJobsCache      []*models.Session
-	flowJobsCacheTime  time.Time
-	flowJobsCacheMutex sync.RWMutex
-	flowJobsCacheTTL   = 1 * time.Minute // Cache for 1 minute
+	flowJobsCacheTTL  = 1 * time.Minute // Cache for 1 minute
+	flowJobsCachePath = filepath.Join(os.Getenv("HOME"), ".grove", "hooks", "flow_jobs_cache.json")
 )
 
 // SessionMetadata represents the metadata.json structure for file-based sessions
@@ -125,24 +122,22 @@ func DiscoverLiveClaudeSessions() ([]*models.Session, error) {
 	return sessions, nil
 }
 
+// flowJobsCacheData wraps the sessions with a timestamp for file-based caching
+type flowJobsCacheData struct {
+	Timestamp time.Time          `json:"timestamp"`
+	Sessions  []*models.Session `json:"sessions"`
+}
+
 // DiscoverLiveFlowJobs calls `flow plan list` to get an accurate list of all jobs and their statuses.
 func DiscoverLiveFlowJobs() ([]*models.Session, error) {
-	// Check cache first
-	flowJobsCacheMutex.RLock()
-	if time.Since(flowJobsCacheTime) < flowJobsCacheTTL {
-		cached := flowJobsCache
-		flowJobsCacheMutex.RUnlock()
-		return cached, nil
-	}
-	flowJobsCacheMutex.RUnlock()
-
-	// Cache miss or expired, acquire write lock
-	flowJobsCacheMutex.Lock()
-	defer flowJobsCacheMutex.Unlock()
-
-	// Double-check cache after acquiring write lock (another goroutine may have updated it)
-	if time.Since(flowJobsCacheTime) < flowJobsCacheTTL {
-		return flowJobsCache, nil
+	// Try to load from file cache
+	if cacheData, err := os.ReadFile(flowJobsCachePath); err == nil {
+		var cached flowJobsCacheData
+		if err := json.Unmarshal(cacheData, &cached); err == nil {
+			if time.Since(cached.Timestamp) < flowJobsCacheTTL {
+				return cached.Sessions, nil
+			}
+		}
 	}
 
 	// Use the `flow` command as the source of truth.
@@ -234,9 +229,17 @@ func DiscoverLiveFlowJobs() ([]*models.Session, error) {
 		}
 	}
 
-	// Update cache
-	flowJobsCache = sessions
-	flowJobsCacheTime = time.Now()
+	// Update file cache
+	cacheData := flowJobsCacheData{
+		Timestamp: time.Now(),
+		Sessions:  sessions,
+	}
+	if jsonData, err := json.Marshal(cacheData); err == nil {
+		// Ensure cache directory exists
+		os.MkdirAll(filepath.Dir(flowJobsCachePath), 0755)
+		// Write cache file (ignore errors - cache is best-effort)
+		os.WriteFile(flowJobsCachePath, jsonData, 0644)
+	}
 
 	return sessions, nil
 }
