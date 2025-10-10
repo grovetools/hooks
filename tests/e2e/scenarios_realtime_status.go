@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-tend/pkg/command"
@@ -12,6 +13,48 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
+
+// Helper function to find a job file by its title within a plan directory
+func findJobFileByTitle(planDir, title string) (string, error) {
+	files, err := filepath.Glob(filepath.Join(planDir, "*.md"))
+	if err != nil {
+		return "", err
+	}
+
+	searchPattern1 := fmt.Sprintf("title: %s", title)
+	searchPattern2 := fmt.Sprintf("title: \"%s\"", title)
+
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		contentStr := string(content)
+		// Search for title in frontmatter (with or without quotes)
+		if strings.Contains(contentStr, searchPattern1) || strings.Contains(contentStr, searchPattern2) {
+			return file, nil
+		}
+	}
+
+	// Enhanced error message for debugging
+	var filesChecked []string
+	for _, file := range files {
+		filesChecked = append(filesChecked, filepath.Base(file))
+	}
+	return "", fmt.Errorf("job file with title '%s' not found in %s (searched for '%s' or '%s', checked files: %v)",
+		title, planDir, searchPattern1, searchPattern2, filesChecked)
+}
+
+// Helper function to update the status in a job's frontmatter
+func updateJobStatusInFile(filePath, newStatus string) error {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	newContent := strings.Replace(string(content), "status: pending", fmt.Sprintf("status: %s", newStatus), 1)
+	return os.WriteFile(filePath, []byte(newContent), 0644)
+}
+
 
 // RealtimeStatusUpdateScenario tests that job statuses are updated in real-time
 // based on filesystem checks (lock files, PIDs) without waiting for cache expiration
@@ -57,71 +100,66 @@ flow:
 					return err
 				}
 
-				// Create a oneshot job with status=running (will be interrupted without lock file)
-				oneshotJob := `---
-id: test-oneshot
-title: Test Oneshot Job
-type: oneshot
-status: running
-updated_at: 2025-01-01T12:00:00-04:00
----
+				jobDefinitions := []struct {
+					title     string
+					jobType   string
+					setStatus string
+				}{
+					{"Test Oneshot Job", "oneshot", "running"},
+					{"Test Chat Job", "chat", "running"},
+					{"Test Interactive Agent Job", "interactive_agent", "running"},
+					{"Test Headless Agent Job", "headless_agent", "running"},
+					{"Test Completed Job", "oneshot", "completed"},
+				}
 
-Test oneshot job content
-`
-				fs.WriteString(filepath.Join(plansDir, "01-oneshot.md"), oneshotJob)
+				for _, jobDef := range jobDefinitions {
+					// Use flow plan add to create the job
+					addCmd := command.New("flow", "plan", "add", "test-plan",
+						"--title", jobDef.title,
+						"--type", jobDef.jobType,
+						"-p", fmt.Sprintf("Test content for %s", jobDef.title)).Dir(ctx.RootDir)
 
-				// Create a chat job with status=running (should stay running without lock file)
-				chatJob := `---
-id: test-chat
-title: Test Chat Job
-type: chat
-status: running
-updated_at: 2025-01-01T12:00:00-04:00
----
+					addResult := addCmd.Run()
+					ctx.ShowCommandOutput(addCmd.String(), addResult.Stdout, addResult.Stderr)
+					if addResult.Error != nil {
+						return fmt.Errorf("failed to add job '%s': %w", jobDef.title, addResult.Error)
+					}
 
-Test chat job content
-`
-				fs.WriteString(filepath.Join(plansDir, "02-chat.md"), chatJob)
+					// Sleep briefly to ensure filesystem is synced
+					time.Sleep(100 * time.Millisecond)
 
-				// Create an interactive_agent job (should stay running without lock file)
-				interactiveJob := `---
-id: test-interactive
-title: Test Interactive Agent Job
-type: interactive_agent
-status: running
-updated_at: 2025-01-01T12:00:00-04:00
----
+					// Debug: list all markdown files
+					files, globErr := filepath.Glob(filepath.Join(plansDir, "*.md"))
+					if globErr != nil {
+						return fmt.Errorf("glob error: %w", globErr)
+					}
+					var fileNames []string
+					for _, f := range files {
+						fileNames = append(fileNames, filepath.Base(f))
+					}
+					fmt.Fprintf(os.Stderr, "=== DEBUG: After adding '%s', found %d MD files: %v ===\n", jobDef.title, len(files), fileNames)
+					ctx.ShowCommandOutput("Debug", fmt.Sprintf("MD files after adding '%s': %v", jobDef.title, fileNames), "")
 
-Test interactive agent job content
-`
-				fs.WriteString(filepath.Join(plansDir, "03-interactive.md"), interactiveJob)
+					// Find the generated file
+					jobFile, err := findJobFileByTitle(plansDir, jobDef.title)
+					if err != nil {
+						// Debug: show content of files to understand the issue
+						for _, f := range files {
+							content, _ := os.ReadFile(f)
+							lines := strings.Split(string(content), "\n")
+							if len(lines) > 10 {
+								lines = lines[:10]
+							}
+							ctx.ShowCommandOutput("Debug file", f, strings.Join(lines, "\n"))
+						}
+						return fmt.Errorf("failed to find job file: %w", err)
+					}
 
-				// Create a headless_agent job (should be interrupted without lock file)
-				headlessJob := `---
-id: test-headless
-title: Test Headless Agent Job
-type: headless_agent
-status: running
-updated_at: 2025-01-01T12:00:00-04:00
----
-
-Test headless agent job content
-`
-				fs.WriteString(filepath.Join(plansDir, "04-headless.md"), headlessJob)
-
-				// Create a completed job (terminal state, should stay completed)
-				completedJob := `---
-id: test-completed
-title: Test Completed Job
-type: oneshot
-status: completed
-updated_at: 2025-01-01T12:00:00-04:00
-completed_at: 2025-01-01T12:05:00-04:00
----
-
-Test completed job content
-`
-				fs.WriteString(filepath.Join(plansDir, "05-completed.md"), completedJob)
+					// Manually update the status from 'pending' to the desired test state
+					if err := updateJobStatusInFile(jobFile, jobDef.setStatus); err != nil {
+						return fmt.Errorf("failed to update status for '%s': %w", jobDef.title, err)
+					}
+				}
 
 				return nil
 			}),
@@ -137,7 +175,10 @@ Test completed job content
 				cacheFile := filepath.Join(os.Getenv("HOME"), ".grove", "hooks", "flow_jobs_cache.json")
 				os.Remove(cacheFile)
 
-				cmd := command.New(hooksBinary, "sessions", "list", "--json", "--type", "job").Dir(ctx.RootDir)
+				cmd := command.New(hooksBinary, "sessions", "list", "--json", "--type", "job").
+					Dir(ctx.RootDir).
+					Env("GROVE_HOOKS_DISCOVERY_MODE=local").
+					Env("GROVE_DEBUG=1")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -153,28 +194,30 @@ Test completed job content
 
 				// Build status map
 				statusMap := make(map[string]string)
+				fmt.Fprintf(os.Stderr, "=== DEBUG: Found %d sessions ===\n", len(sessions))
 				for _, s := range sessions {
-					statusMap[s.ID] = s.Status
+					fmt.Fprintf(os.Stderr, "=== DEBUG: Session - ID: %s, JobTitle: '%s', Status: %s ===\n", s.ID, s.JobTitle, s.Status)
+					statusMap[s.JobTitle] = s.Status // Use JobTitle for mapping as ID is dynamic
 				}
 
 				// Verify expected statuses
 				expectedStatuses := map[string]string{
-					"test-oneshot":     "interrupted", // oneshot without lock file
-					"test-chat":        "running",     // chat jobs don't need lock files
-					"test-interactive": "running",     // interactive_agent jobs don't need lock files
-					"test-headless":    "interrupted", // headless_agent without lock file
-					"test-completed":   "completed",   // terminal states are respected
+					"Test Oneshot Job":           "interrupted", // oneshot without lock file
+					"Test Chat Job":              "running",     // chat jobs don't need lock files
+					"Test Interactive Agent Job": "running",     // interactive_agent jobs don't need lock files
+					"Test Headless Agent Job":    "interrupted", // headless_agent without lock file
+					"Test Completed Job":         "completed",   // terminal states are respected
 				}
 
-				for jobID, expectedStatus := range expectedStatuses {
-					actualStatus, found := statusMap[jobID]
+				for jobTitle, expectedStatus := range expectedStatuses {
+					actualStatus, found := statusMap[jobTitle]
 					if !found {
-						return fmt.Errorf("job %s not found in sessions list", jobID)
+						return fmt.Errorf("job '%s' not found in sessions list", jobTitle)
 					}
 					if actualStatus != expectedStatus {
-						return fmt.Errorf("job %s: expected status=%s, got status=%s", jobID, expectedStatus, actualStatus)
+						return fmt.Errorf("job '%s': expected status=%s, got status=%s", jobTitle, expectedStatus, actualStatus)
 					}
-					ctx.ShowCommandOutput("✓", fmt.Sprintf("Job %s correctly shows status: %s", jobID, actualStatus), "")
+					ctx.ShowCommandOutput("✓", fmt.Sprintf("Job '%s' correctly shows status: %s", jobTitle, actualStatus), "")
 				}
 
 				return nil
@@ -188,9 +231,15 @@ Test completed job content
 				currentPID := os.Getpid()
 				pidStr := fmt.Sprintf("%d", currentPID)
 
+				// Find the job files to create locks for
+				oneshotFile, err := findJobFileByTitle(plansDir, "Test Oneshot Job")
+				if err != nil { return err }
+				headlessFile, err := findJobFileByTitle(plansDir, "Test Headless Agent Job")
+				if err != nil { return err }
+
 				// Create lock files for oneshot and headless jobs
-				fs.WriteString(filepath.Join(plansDir, "01-oneshot.md.lock"), pidStr)
-				fs.WriteString(filepath.Join(plansDir, "04-headless.md.lock"), pidStr)
+				fs.WriteString(oneshotFile+".lock", pidStr)
+				fs.WriteString(headlessFile+".lock", pidStr)
 
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Created lock files with live PID: %d", currentPID), "")
 				return nil
@@ -206,7 +255,9 @@ Test completed job content
 				// NOTE: We do NOT clear the cache here - testing that real-time updates work even with cache
 				// The cache should still be valid from the previous step (< 1 minute old)
 
-				cmd := command.New(hooksBinary, "sessions", "list", "--json", "--type", "job").Dir(ctx.RootDir)
+				cmd := command.New(hooksBinary, "sessions", "list", "--json", "--type", "job").
+					Dir(ctx.RootDir).
+					Env("GROVE_HOOKS_DISCOVERY_MODE=local")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -223,27 +274,27 @@ Test completed job content
 				// Build status map
 				statusMap := make(map[string]string)
 				for _, s := range sessions {
-					statusMap[s.ID] = s.Status
+					statusMap[s.JobTitle] = s.Status
 				}
 
 				// Verify statuses updated to "running" now that lock files exist
 				expectedStatuses := map[string]string{
-					"test-oneshot":     "running",   // now has lock file with live PID
-					"test-chat":        "running",   // still running (no lock file needed)
-					"test-interactive": "running",   // still running (no lock file needed)
-					"test-headless":    "running",   // now has lock file with live PID
-					"test-completed":   "completed", // still completed (terminal state)
+					"Test Oneshot Job":           "running",   // now has lock file with live PID
+					"Test Chat Job":              "running",   // still running (no lock file needed)
+					"Test Interactive Agent Job": "running",   // still running (no lock file needed)
+					"Test Headless Agent Job":    "running",   // now has lock file with live PID
+					"Test Completed Job":         "completed", // still completed (terminal state)
 				}
 
-				for jobID, expectedStatus := range expectedStatuses {
-					actualStatus, found := statusMap[jobID]
+				for jobTitle, expectedStatus := range expectedStatuses {
+					actualStatus, found := statusMap[jobTitle]
 					if !found {
-						return fmt.Errorf("job %s not found in sessions list", jobID)
+						return fmt.Errorf("job '%s' not found in sessions list", jobTitle)
 					}
 					if actualStatus != expectedStatus {
-						return fmt.Errorf("job %s: expected status=%s, got status=%s (real-time update failed)", jobID, expectedStatus, actualStatus)
+						return fmt.Errorf("job '%s': expected status=%s, got status=%s (real-time update failed)", jobTitle, expectedStatus, actualStatus)
 					}
-					ctx.ShowCommandOutput("✓", fmt.Sprintf("Job %s status updated in real-time to: %s", jobID, actualStatus), "")
+					ctx.ShowCommandOutput("✓", fmt.Sprintf("Job '%s' status updated in real-time to: %s", jobTitle, actualStatus), "")
 				}
 
 				return nil
@@ -255,15 +306,22 @@ Test completed job content
 
 				// Use a PID that's very unlikely to exist
 				deadPID := "99999"
-				fs.WriteString(filepath.Join(plansDir, "01-oneshot.md.lock"), deadPID)
-				fs.WriteString(filepath.Join(plansDir, "04-headless.md.lock"), deadPID)
+				oneshotFile, err := findJobFileByTitle(plansDir, "Test Oneshot Job")
+				if err != nil { return err }
+				headlessFile, err := findJobFileByTitle(plansDir, "Test Headless Agent Job")
+				if err != nil { return err }
+
+				fs.WriteString(oneshotFile+".lock", deadPID)
+				fs.WriteString(headlessFile+".lock", deadPID)
 
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
 					return err
 				}
 
-				cmd := command.New(hooksBinary, "sessions", "list", "--json", "--type", "job").Dir(ctx.RootDir)
+				cmd := command.New(hooksBinary, "sessions", "list", "--json", "--type", "job").
+					Dir(ctx.RootDir).
+					Env("GROVE_HOOKS_DISCOVERY_MODE=local")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -280,15 +338,15 @@ Test completed job content
 				// Build status map
 				statusMap := make(map[string]string)
 				for _, s := range sessions {
-					statusMap[s.ID] = s.Status
+					statusMap[s.JobTitle] = s.Status
 				}
 
 				// Jobs with dead PIDs should be interrupted
-				if statusMap["test-oneshot"] != "interrupted" {
-					return fmt.Errorf("oneshot job with dead PID should be interrupted, got: %s", statusMap["test-oneshot"])
+				if statusMap["Test Oneshot Job"] != "interrupted" {
+					return fmt.Errorf("oneshot job with dead PID should be interrupted, got: %s", statusMap["Test Oneshot Job"])
 				}
-				if statusMap["test-headless"] != "interrupted" {
-					return fmt.Errorf("headless job with dead PID should be interrupted, got: %s", statusMap["test-headless"])
+				if statusMap["Test Headless Agent Job"] != "interrupted" {
+					return fmt.Errorf("headless job with dead PID should be interrupted, got: %s", statusMap["Test Headless Agent Job"])
 				}
 
 				ctx.ShowCommandOutput("✓", "Jobs with dead PIDs correctly marked as interrupted", "")
@@ -305,7 +363,9 @@ Test completed job content
 				// Run sessions list multiple times and ensure it's fast (< 1 second)
 				for i := 0; i < 3; i++ {
 					start := time.Now()
-					cmd := command.New(hooksBinary, "sessions", "list", "--type", "job").Dir(ctx.RootDir)
+					cmd := command.New(hooksBinary, "sessions", "list", "--type", "job").
+						Dir(ctx.RootDir).
+						Env("GROVE_HOOKS_DISCOVERY_MODE=local")
 					result := cmd.Run()
 					elapsed := time.Since(start)
 

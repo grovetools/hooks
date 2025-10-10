@@ -179,7 +179,14 @@ func startBackgroundRefresh() {
 
 // refreshFlowJobsCache fetches fresh data and updates the cache file
 func refreshFlowJobsCache() {
-	cmd := exec.Command("flow", "plan", "list", "--json", "--all-workspaces", "--include-finished", "--verbose")
+	cmdArgs := []string{"plan", "list", "--json", "--include-finished", "--verbose"}
+
+	// Conditionally add --all-workspaces unless in local discovery mode for testing
+	if os.Getenv("GROVE_HOOKS_DISCOVERY_MODE") != "local" {
+		cmdArgs = append(cmdArgs, "--all-workspaces")
+	}
+
+	cmd := exec.Command("flow", cmdArgs...)
 	output, err := cmd.Output()
 	if err != nil {
 		return // Silently fail for background refresh
@@ -290,7 +297,14 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 
 	// Use the `flow` command as the source of truth.
 	// Note: --verbose is required to include job details in the JSON output
-	cmd := exec.Command("flow", "plan", "list", "--json", "--all-workspaces", "--include-finished", "--verbose")
+	cmdArgs := []string{"plan", "list", "--json", "--include-finished", "--verbose"}
+
+	// Conditionally add --all-workspaces unless in local discovery mode for testing
+	if os.Getenv("GROVE_HOOKS_DISCOVERY_MODE") != "local" {
+		cmdArgs = append(cmdArgs, "--all-workspaces")
+	}
+
+	cmd := exec.Command("flow", cmdArgs...)
 	output, err := cmd.Output()
 	if err != nil {
 		// If `flow` command fails, we can't discover jobs. Return an empty list.
@@ -639,6 +653,8 @@ func parseJobFrontmatter(content string) jobInfo {
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
+		// Strip quotes if present
+		value = strings.Trim(value, `"`)
 
 		switch key {
 		case "id":
@@ -650,12 +666,12 @@ func parseJobFrontmatter(content string) jobInfo {
 		case "type":
 			info.Type = value
 		case "start_time": // Grove-flow uses this field
-			if t, err := time.Parse(time.RFC3339, strings.Trim(value, `"`)); err == nil {
+			if t, err := time.Parse(time.RFC3339, value); err == nil {
 				info.StartedAt = t
 			}
 		case "updated_at": // Fallback for older jobs
 			if info.StartedAt.IsZero() {
-				if t, err := time.Parse(time.RFC3339, strings.Trim(value, `"`)); err == nil {
+				if t, err := time.Parse(time.RFC3339, value); err == nil {
 					info.StartedAt = t
 				}
 			}
@@ -676,6 +692,11 @@ func getRealtimeJobStatus(jobFilePath string) (string, error) {
 	}
 	jobInfo := parseJobFrontmatter(string(content))
 
+	// Debug logging
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "DEBUG getRealtimeJobStatus: file=%s, status=%s, type=%s\n", jobFilePath, jobInfo.Status, jobInfo.Type)
+	}
+
 	// Terminal states are the source of truth from frontmatter
 	terminalStates := map[string]bool{
 		"completed":   true,
@@ -690,7 +711,13 @@ func getRealtimeJobStatus(jobFilePath string) (string, error) {
 	// For non-terminal states, we must verify liveness
 	if jobInfo.Status == "running" || jobInfo.Status == "pending_user" {
 		// Chat and interactive_agent jobs don't use lock files; 'running' in frontmatter is sufficient.
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "DEBUG getRealtimeJobStatus: checking type '%s' (len=%d) against 'chat' and 'interactive_agent'\n", jobInfo.Type, len(jobInfo.Type))
+		}
 		if jobInfo.Type == "chat" || jobInfo.Type == "interactive_agent" {
+			if os.Getenv("GROVE_DEBUG") != "" {
+				fmt.Fprintf(os.Stderr, "DEBUG getRealtimeJobStatus: type matches, returning running\n")
+			}
 			return "running", nil
 		}
 
@@ -724,11 +751,17 @@ func getRealtimeJobStatus(jobFilePath string) (string, error) {
 // updateSessionStatusFromFilesystem refreshes a job session's status based on its file path.
 func updateSessionStatusFromFilesystem(session *models.Session) {
 	if session.JobFilePath == "" {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "DEBUG updateSessionStatusFromFilesystem: skipping session %s - no JobFilePath\n", session.ID)
+		}
 		return // Not a job session with a file path.
 	}
 	if _, err := os.Stat(session.JobFilePath); os.IsNotExist(err) {
 		// If the file is gone, the job is likely gone too. Mark as interrupted.
 		session.Status = "interrupted"
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "DEBUG updateSessionStatusFromFilesystem: file %s not found, marking as interrupted\n", session.JobFilePath)
+		}
 		return
 	}
 
@@ -739,6 +772,9 @@ func updateSessionStatusFromFilesystem(session *models.Session) {
 		}
 		// Don't change status if we can't determine it
 		return
+	}
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "DEBUG updateSessionStatusFromFilesystem: updated %s from status (unknown-previous) to %s\n", session.ID, status)
 	}
 	session.Status = status
 }
