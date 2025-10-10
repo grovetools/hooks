@@ -247,6 +247,16 @@ func refreshFlowJobsCache() {
 				startTime = job.UpdatedAt
 			}
 
+			// If `flow plan list` returns a zero time, fall back to reading from the job file's frontmatter.
+			if startTime.IsZero() && job.FilePath != "" {
+				if content, err := os.ReadFile(job.FilePath); err == nil {
+					jobInfo := parseJobFrontmatter(string(content))
+					if !jobInfo.StartedAt.IsZero() {
+						startTime = jobInfo.StartedAt
+					}
+				}
+			}
+
 			// Populate EndedAt for terminal states
 			var endedAt *time.Time
 			if job.Status == "completed" || job.Status == "failed" || job.Status == "interrupted" {
@@ -373,6 +383,16 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 			startTime := job.StartTime
 			if startTime.IsZero() {
 				startTime = job.UpdatedAt
+			}
+
+			// If `flow plan list` returns a zero time, fall back to reading from the job file's frontmatter.
+			if startTime.IsZero() && job.FilePath != "" {
+				if content, err := os.ReadFile(job.FilePath); err == nil {
+					jobInfo := parseJobFrontmatter(string(content))
+					if !jobInfo.StartedAt.IsZero() {
+						startTime = jobInfo.StartedAt
+					}
+				}
 			}
 
 			// Populate EndedAt for terminal states
@@ -633,9 +653,8 @@ type jobInfo struct {
 // parseJobFrontmatter extracts ID, title, status, type, and start time from frontmatter.
 func parseJobFrontmatter(content string) jobInfo {
 	info := jobInfo{
-		Status:    "pending",
-		Type:      "oneshot", // Default to oneshot if not specified
-		StartedAt: time.Now(),
+		Status: "pending",
+		Type:   "oneshot", // Default to oneshot if not specified
 	}
 	lines := strings.Split(content, "\n")
 	inFrontmatter := false
@@ -718,9 +737,9 @@ func getRealtimeJobStatus(jobFilePath string) (string, error) {
 
 	// For non-terminal states, we must verify liveness
 	if jobInfo.Status == "running" || jobInfo.Status == "pending_user" {
-		// Chat and interactive_agent jobs don't use lock files; 'running' in frontmatter is sufficient.
+		// Chat and interactive_agent jobs don't use lock files; status in frontmatter is sufficient.
 		if jobInfo.Type == "chat" || jobInfo.Type == "interactive_agent" {
-			return "running", nil
+			return jobInfo.Status, nil
 		}
 
 		// For other job types (oneshot, headless_agent, etc.), check the lock file and PID

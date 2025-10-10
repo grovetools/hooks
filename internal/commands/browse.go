@@ -894,13 +894,19 @@ func (m browseModel) View() string {
 
 		// Format status with icon and elapsed time for active sessions
 		statusStyle := getStatusStyle(s.Status)
-		statusIcon := getStatusIcon(s.Status)
+		statusIcon := getStatusIcon(s.Status, s.Type)
 		var statusStr string
 
 		// Add elapsed time for active sessions in muted color
 		if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
-			elapsed := formatDuration(time.Since(s.StartedAt))
-			statusStr = statusStyle.Render(statusIcon+" "+s.Status) + " " + t.Muted.Render(fmt.Sprintf("(%s)", elapsed))
+			var elapsedStr string
+			if !s.StartedAt.IsZero() {
+				elapsed := formatDuration(time.Since(s.StartedAt))
+				elapsedStr = fmt.Sprintf("(%s)", elapsed)
+			} else {
+				elapsedStr = "(unknown)"
+			}
+			statusStr = statusStyle.Render(statusIcon+" "+s.Status) + " " + t.Muted.Render(elapsedStr)
 		} else {
 			statusStr = statusStyle.Render(statusIcon + " " + s.Status)
 		}
@@ -922,13 +928,17 @@ func (m browseModel) View() string {
 
 		// Format start time - use relative time for recent sessions, absolute for older ones
 		var startedStr string
-		timeSinceStart := time.Since(s.StartedAt)
-		if timeSinceStart < 24*time.Hour {
-			// Recent: show relative time
-			startedStr = formatDuration(timeSinceStart) + " ago"
+		if s.StartedAt.IsZero() {
+			startedStr = "n/a"
 		} else {
-			// Older: show absolute date
-			startedStr = s.StartedAt.Format("Jan 2 15:04")
+			timeSinceStart := time.Since(s.StartedAt)
+			if timeSinceStart < 24*time.Hour {
+				// Recent: show relative time
+				startedStr = formatDuration(timeSinceStart) + " ago"
+			} else {
+				// Older: show absolute date
+				startedStr = s.StartedAt.Format("Jan 2 15:04")
+			}
 		}
 
 		rows = append(rows, []string{
@@ -1006,7 +1016,7 @@ func getStatusStyle(status string) lipgloss.Style {
 	}
 }
 
-func getStatusIcon(status string) string {
+func getStatusIcon(status string, sessionType string) string {
 	switch status {
 	case "completed":
 		return "●" // Solid dot
@@ -1015,6 +1025,9 @@ func getStatusIcon(status string) string {
 	case "idle":
 		return "⏸" // Pause symbol
 	case "pending_user":
+		if sessionType == "chat" {
+			return "⏸" // Use same icon as idle for chat jobs awaiting user input
+		}
 		return "○" // Hollow circle
 	case "failed", "error":
 		return "✗" // X mark
