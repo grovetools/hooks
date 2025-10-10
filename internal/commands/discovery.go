@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -115,61 +116,94 @@ func DiscoverLiveClaudeSessions() ([]*models.Session, error) {
 	return sessions, nil
 }
 
-// DiscoverLiveFlowJobs scans for grove-flow plans and returns running jobs as sessions
-// This allows unified display of both Claude sessions and grove-flow jobs
+// DiscoverLiveFlowJobs calls `flow plan list` to get an accurate list of all jobs and their statuses.
 func DiscoverLiveFlowJobs() ([]*models.Session, error) {
-	var sessions []*models.Session
-
-	// Common locations to search for plans
-	planDirs := []string{
-		expandPath("~/Documents/nb/repos"),
-		expandPath("~/Code/nb/repos"),
-		expandPath("~/Code"),
+	// Use the `flow` command as the source of truth.
+	// Note: --verbose is required to include job details in the JSON output
+	cmd := exec.Command("flow", "plan", "list", "--json", "--all-workspaces", "--include-finished", "--verbose")
+	output, err := cmd.Output()
+	if err != nil {
+		// If `flow` command fails, we can't discover jobs. Return an empty list.
+		// This is not a fatal error for grove-hooks.
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "Warning: could not execute 'flow plan list': %v\n", err)
+		}
+		return []*models.Session{}, nil
 	}
 
-	for _, baseDir := range planDirs {
-		if _, err := os.Stat(baseDir); os.IsNotExist(err) {
-			continue
+	// Define structs to parse the JSON output from `flow plan list`.
+	type Job struct {
+		ID        string    `json:"id"`
+		Title     string    `json:"title"`
+		Status    string    `json:"status"`
+		Type      string    `json:"type"`
+		Worktree  string    `json:"worktree,omitempty"`
+		Filename  string    `json:"filename,omitempty"`
+		FilePath  string    `json:"file_path,omitempty"`
+		StartTime time.Time `json:"start_time,omitempty"`
+		UpdatedAt time.Time `json:"updated_at,omitempty"`
+	}
+	type PlanSummary struct {
+		Title         string `json:"title"`
+		Path          string `json:"path"`
+		Jobs          []*Job `json:"jobs,omitempty"`
+		WorkspaceName string `json:"workspace_name,omitempty"`
+	}
+
+	var planSummaries []PlanSummary
+	if err := json.Unmarshal(output, &planSummaries); err != nil {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "Warning: failed to parse JSON from 'flow plan list': %v\n", err)
 		}
+		return []*models.Session{}, nil
+	}
 
-		// Walk the directory tree looking for plan directories
-		err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil // Skip errors
+	var sessions []*models.Session
+	// Track seen job file paths to avoid duplicates from multiple workspace discoveries
+	seenJobs := make(map[string]bool)
+
+	for _, plan := range planSummaries {
+		for _, job := range plan.Jobs {
+			// Skip jobs that aren't in a "live" state for the session list.
+			if job.Status != "running" && job.Status != "interrupted" && job.Status != "pending_user" {
+				continue
 			}
 
-			// Look for "plans" directories
-			if !info.IsDir() || info.Name() != "plans" {
-				return nil
-			}
-
-			// Check subdirectories of the plans directory
-			planEntries, err := os.ReadDir(path)
-			if err != nil {
-				return nil
-			}
-
-			for _, planEntry := range planEntries {
-				if !planEntry.IsDir() {
+			// Deduplicate jobs by file path (same job may be discovered from main workspace and worktree)
+			if job.FilePath != "" {
+				if seenJobs[job.FilePath] {
 					continue
 				}
-
-				planDir := filepath.Join(path, planEntry.Name())
-				planSessions, err := discoverJobsInPlan(planDir)
-				if err != nil {
-					// Skip this plan if there's an error
-					continue
-				}
-
-				sessions = append(sessions, planSessions...)
+				seenJobs[job.FilePath] = true
 			}
 
-			return filepath.SkipDir // Don't descend into plans directories
-		})
+			// For display purposes, group 'pending_user' into 'running'.
+			displayStatus := job.Status
+			if displayStatus == "pending_user" {
+				displayStatus = "running"
+			}
 
-		if err != nil {
-			// Continue with other base directories
-			continue
+			// Use UpdatedAt if StartTime is zero
+			startTime := job.StartTime
+			if startTime.IsZero() {
+				startTime = job.UpdatedAt
+			}
+
+			session := &models.Session{
+				ID:               job.ID,
+				Type:             "job", // Use "job" for flow jobs
+				Status:           displayStatus,
+				Repo:             plan.WorkspaceName,
+				Branch:           job.Worktree,
+				WorkingDirectory: plan.Path,
+				User:             os.Getenv("USER"),
+				StartedAt:        startTime,
+				LastActivity:     startTime, // Use StartTime as a proxy for LastActivity.
+				PlanName:         plan.Title,
+				JobTitle:         job.Title,
+				JobFilePath:      job.FilePath,
+			}
+			sessions = append(sessions, session)
 		}
 	}
 
@@ -223,55 +257,62 @@ func discoverJobsInPlan(planDir string) ([]*models.Session, error) {
 
 		filePath := filepath.Join(planDir, filename)
 
-		// Read the frontmatter to check status
+		// Read the frontmatter to check status and type
 		content, err := os.ReadFile(filePath)
 		if err != nil {
 			continue
 		}
+		jobInfo := parseJobFrontmatter(string(content))
 
-		// Parse frontmatter to get status
-		status := parseJobStatus(string(content))
-		if status != "running" {
+		// Skip jobs that are not in a potentially "live" state.
+		// `pending_user` is a live state for chat jobs.
+		if jobInfo.Status != "running" && jobInfo.Status != "pending_user" {
 			continue
 		}
 
-		// Check for lock file
-		lockFile := filePath + ".lock"
-		pidContent, err := os.ReadFile(lockFile)
-		if err != nil {
-			// No lock file, but status is running - mark as interrupted
-			status = "interrupted"
-		} else {
-			// Check if PID is alive
-			var pid int
-			if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err == nil {
-				if !process.IsProcessAlive(pid) {
-					status = "interrupted"
-				}
-			} else {
-				status = "interrupted"
-			}
-		}
+		finalStatus := jobInfo.Status
 
-		// Parse job metadata
-		jobID, jobTitle, startedAt := parseJobMetadata(string(content))
-		if jobID == "" {
-			jobID = strings.TrimSuffix(filename, ".md")
+		// Liveness check now depends on the job type.
+		if jobInfo.Type == "chat" {
+			// For chat jobs, 'running' or 'pending_user' means it's active.
+			// No lock file is created for them, so we consider it live.
+			// For display purposes in the list, we'll call it 'running'.
+			finalStatus = "running"
+		} else {
+			// For all other job types (e.g., 'oneshot'), we enforce the lock file check.
+			lockFile := filePath + ".lock"
+			pidContent, err := os.ReadFile(lockFile)
+			if err != nil {
+				// No lock file for a non-chat job means it's interrupted.
+				finalStatus = "interrupted"
+			} else {
+				// Lock file exists, now check if the PID is alive.
+				var pid int
+				if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err == nil {
+					if !process.IsProcessAlive(pid) {
+						finalStatus = "interrupted" // PID is dead.
+					} else {
+						finalStatus = "running" // Lock file and live PID, it's running.
+					}
+				} else {
+					finalStatus = "interrupted" // Invalid PID in lock file.
+				}
+			}
 		}
 
 		// Create session object for this job
 		session := &models.Session{
-			ID:               jobID,
-			Type:             "oneshot_job",
-			Status:           status,
+			ID:               jobInfo.ID,
+			Type:             "oneshot_job", // The session model uses this generic type for all jobs.
+			Status:           finalStatus,   // This now holds the correctly determined status.
 			Repo:             repo,
 			Branch:           branch,
 			WorkingDirectory: planDir,
 			User:             os.Getenv("USER"),
-			StartedAt:        startedAt,
-			LastActivity:     startedAt,
+			StartedAt:        jobInfo.StartedAt,
+			LastActivity:     jobInfo.StartedAt,
 			PlanName:         planName,
-			JobTitle:         jobTitle,
+			JobTitle:         jobInfo.Title,
 		}
 
 		sessions = append(sessions, session)
@@ -280,36 +321,22 @@ func discoverJobsInPlan(planDir string) ([]*models.Session, error) {
 	return sessions, nil
 }
 
-// parseJobStatus extracts the status from job frontmatter
-func parseJobStatus(content string) string {
-	// Look for status: line in frontmatter
-	lines := strings.Split(content, "\n")
-	inFrontmatter := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "---" {
-			if !inFrontmatter {
-				inFrontmatter = true
-				continue
-			} else {
-				break
-			}
-		}
-
-		if inFrontmatter && strings.HasPrefix(trimmed, "status:") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
-			}
-		}
-	}
-
-	return "pending"
+// jobInfo holds metadata parsed from a job's frontmatter.
+type jobInfo struct {
+	ID        string
+	Title     string
+	Status    string
+	Type      string
+	StartedAt time.Time
 }
 
-// parseJobMetadata extracts ID, title, and started_at from frontmatter
-func parseJobMetadata(content string) (id, title string, startedAt time.Time) {
+// parseJobFrontmatter extracts ID, title, status, type, and start time from frontmatter.
+func parseJobFrontmatter(content string) jobInfo {
+	info := jobInfo{
+		Status:    "pending",
+		Type:      "oneshot", // Default to oneshot if not specified
+		StartedAt: time.Now(),
+	}
 	lines := strings.Split(content, "\n")
 	inFrontmatter := false
 
@@ -328,32 +355,39 @@ func parseJobMetadata(content string) (id, title string, startedAt time.Time) {
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, "id:") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) == 2 {
-				id = strings.TrimSpace(parts[1])
+		parts := strings.SplitN(trimmed, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		switch key {
+		case "id":
+			info.ID = value
+		case "title":
+			info.Title = value
+		case "status":
+			info.Status = value
+		case "type":
+			info.Type = value
+		case "start_time": // Grove-flow uses this field
+			if t, err := time.Parse(time.RFC3339, strings.Trim(value, `"`)); err == nil {
+				info.StartedAt = t
 			}
-		} else if strings.HasPrefix(trimmed, "title:") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) == 2 {
-				title = strings.TrimSpace(parts[1])
-			}
-		} else if strings.HasPrefix(trimmed, "updated_at:") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) == 2 {
-				timeStr := strings.Trim(strings.TrimSpace(parts[1]), `"`)
-				if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
-					startedAt = t
+		case "updated_at": // Fallback for older jobs
+			if info.StartedAt.IsZero() {
+				if t, err := time.Parse(time.RFC3339, strings.Trim(value, `"`)); err == nil {
+					info.StartedAt = t
 				}
 			}
 		}
 	}
-
-	if startedAt.IsZero() {
-		startedAt = time.Now()
+	if info.ID == "" {
+		// Fallback if no ID is present.
+		info.ID = info.Title
 	}
-
-	return
+	return info
 }
 
 // markInterruptedJobsInPlan scans a single plan directory and marks jobs with status: running as interrupted
@@ -393,13 +427,18 @@ func markInterruptedJobsInPlan(planDir string, dryRun bool) (int, error) {
 
 		contentStr := string(content)
 
-		// Parse frontmatter to check status
-		status := parseJobStatus(contentStr)
-		if status != "running" {
+		// Parse frontmatter to check status and type
+		jobInfo := parseJobFrontmatter(contentStr)
+		if jobInfo.Status != "running" {
 			continue
 		}
 
-		// Check for lock file
+		// Skip chat jobs - they don't use lock files, so running status is valid
+		if jobInfo.Type == "chat" {
+			continue
+		}
+
+		// For non-chat jobs, check for lock file
 		lockFile := filePath + ".lock"
 		shouldMark := false
 
