@@ -7,10 +7,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/process"
+)
+
+// Cache for flow jobs discovery to avoid expensive flow plan list calls
+var (
+	flowJobsCache      []*models.Session
+	flowJobsCacheTime  time.Time
+	flowJobsCacheMutex sync.RWMutex
+	flowJobsCacheTTL   = 2 * time.Second // Cache for 2 seconds
 )
 
 // SessionMetadata represents the metadata.json structure for file-based sessions
@@ -118,6 +127,24 @@ func DiscoverLiveClaudeSessions() ([]*models.Session, error) {
 
 // DiscoverLiveFlowJobs calls `flow plan list` to get an accurate list of all jobs and their statuses.
 func DiscoverLiveFlowJobs() ([]*models.Session, error) {
+	// Check cache first
+	flowJobsCacheMutex.RLock()
+	if time.Since(flowJobsCacheTime) < flowJobsCacheTTL {
+		cached := flowJobsCache
+		flowJobsCacheMutex.RUnlock()
+		return cached, nil
+	}
+	flowJobsCacheMutex.RUnlock()
+
+	// Cache miss or expired, acquire write lock
+	flowJobsCacheMutex.Lock()
+	defer flowJobsCacheMutex.Unlock()
+
+	// Double-check cache after acquiring write lock (another goroutine may have updated it)
+	if time.Since(flowJobsCacheTime) < flowJobsCacheTTL {
+		return flowJobsCache, nil
+	}
+
 	// Use the `flow` command as the source of truth.
 	// Note: --verbose is required to include job details in the JSON output
 	cmd := exec.Command("flow", "plan", "list", "--json", "--all-workspaces", "--include-finished", "--verbose")
@@ -206,6 +233,10 @@ func DiscoverLiveFlowJobs() ([]*models.Session, error) {
 			sessions = append(sessions, session)
 		}
 	}
+
+	// Update cache
+	flowJobsCache = sessions
+	flowJobsCacheTime = time.Now()
 
 	return sessions, nil
 }
