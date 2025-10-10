@@ -177,8 +177,7 @@ flow:
 
 				cmd := command.New(hooksBinary, "sessions", "list", "--json", "--type", "job").
 					Dir(ctx.RootDir).
-					Env("GROVE_HOOKS_DISCOVERY_MODE=local").
-					Env("GROVE_DEBUG=1")
+					Env("GROVE_HOOKS_DISCOVERY_MODE=local")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
