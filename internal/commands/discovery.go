@@ -518,19 +518,19 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 		sessions = filtered
 	}
 
-	// Sort sessions: running/pending_user first, then idle, then others by last_activity desc
+	// Sort sessions: running first, then idle/pending_user, then others by last_activity desc
 	sort.Slice(sessions, func(i, j int) bool {
 		iPriority := 3
-		if sessions[i].Status == "running" || sessions[i].Status == "pending_user" {
+		if sessions[i].Status == "running" {
 			iPriority = 1
-		} else if sessions[i].Status == "idle" {
+		} else if sessions[i].Status == "idle" || sessions[i].Status == "pending_user" {
 			iPriority = 2
 		}
 
 		jPriority := 3
-		if sessions[j].Status == "running" || sessions[j].Status == "pending_user" {
+		if sessions[j].Status == "running" {
 			jPriority = 1
-		} else if sessions[j].Status == "idle" {
+		} else if sessions[j].Status == "idle" || sessions[j].Status == "pending_user" {
 			jPriority = 2
 		}
 
