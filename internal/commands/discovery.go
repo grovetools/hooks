@@ -19,7 +19,7 @@ var (
 	flowJobsCache      []*models.Session
 	flowJobsCacheTime  time.Time
 	flowJobsCacheMutex sync.RWMutex
-	flowJobsCacheTTL   = 2 * time.Second // Cache for 2 seconds
+	flowJobsCacheTTL   = 1 * time.Minute // Cache for 1 minute
 )
 
 // SessionMetadata represents the metadata.json structure for file-based sessions
