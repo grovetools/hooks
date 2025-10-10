@@ -11,6 +11,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-hooks/internal/config"
 	"github.com/mattsolo1/grove-hooks/internal/git"
 	"github.com/mattsolo1/grove-hooks/internal/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
@@ -34,6 +35,7 @@ type HookContext struct {
 	RawInput  []byte
 	Storage   interfaces.SessionStorer
 	StartTime time.Time
+	Config    *config.NotificationsConfig
 }
 
 // NewHookContext creates a new hook context with local storage
@@ -56,11 +58,15 @@ func NewHookContext() (*HookContext, error) {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
+	// Load configuration
+	loadedCfg := config.Load()
+
 	return &HookContext{
 		Input:     baseInput,
 		RawInput:  inputData,
 		Storage:   storage,
 		StartTime: time.Now(),
+		Config:    loadedCfg,
 	}, nil
 }
 

@@ -42,7 +42,7 @@ func RunNotificationHook() {
 	}
 
 	// Send system notification if appropriate
-	if shouldSendSystemNotification(data) {
+	if shouldSendSystemNotification(ctx, data) {
 		if sendSystemNotification(data) {
 			data.SystemNotificationSent = true
 		}

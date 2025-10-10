@@ -27,13 +27,22 @@ func (e *HookBlockingError) Error() string {
 
 // Helper functions
 
-func shouldSendSystemNotification(data NotificationInput) bool {
-	// Send for errors and warnings
-	return data.Level == "error" || data.Level == "warning"
+func shouldSendSystemNotification(ctx *HookContext, data NotificationInput) bool {
+	// Check if the notification level is in the configured levels
+	for _, enabledLevel := range ctx.Config.System.Levels {
+		if data.Level == enabledLevel {
+			return true
+		}
+	}
+	return false
 }
 
 func sendSystemNotification(data NotificationInput) bool {
 	err := notifications.SendSystem("Claude Code", data.Message, data.Level)
+	if err != nil {
+		// Log error for debugging
+		log.Printf("failed to send system notification: %v", err)
+	}
 	return err == nil
 }
 
@@ -98,11 +107,95 @@ func buildResultSummary(data PostToolUseInput) map[string]any {
 }
 
 func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {
-	// For now, ntfy notifications are disabled since we removed the config loading
-	// This functionality can be re-enabled by implementing a different config mechanism
-	_ = ctx
-	_ = data
-	_ = status
+	cfg := ctx.Config.Ntfy
+	if !cfg.Enabled || cfg.Topic == "" {
+		return
+	}
+
+	// Get session details for context
+	sessionData, err := ctx.Storage.GetSession(data.SessionID)
+	var repo, branch, projectName, sessionType, jobTitle, planName string
+	var isWorktree bool
+
+	if err == nil && sessionData != nil {
+		if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
+			repo = extSession.Repo
+			branch = extSession.Branch
+			projectName = extSession.ProjectName
+			isWorktree = extSession.IsWorktree
+			sessionType = extSession.Type
+			jobTitle = extSession.JobTitle
+			planName = extSession.PlanName
+		} else if session, ok := sessionData.(*models.Session); ok {
+			repo = session.Repo
+			branch = session.Branch
+		}
+	}
+
+	// Construct title based on session type
+	var title string
+	isJob := sessionType == "oneshot_job" || sessionType == "agent_job" || sessionType == "interactive_agent" || sessionType == "chat"
+
+	if isJob && data.SessionID != "" {
+		// For jobs, use the job name (session ID) as the title
+		title = fmt.Sprintf("%s %s", data.SessionID, status)
+	} else if isJob {
+		title = fmt.Sprintf("Job %s", status)
+	} else {
+		title = fmt.Sprintf("Session %s", status)
+	}
+
+	// Build message with repo/worktree context
+	var messageParts []string
+
+	// Add job type for jobs
+	if isJob && sessionType != "" {
+		messageParts = append(messageParts, fmt.Sprintf("🔷 %s", sessionType))
+	}
+
+	// Add job title if different from session ID
+	if jobTitle != "" && jobTitle != data.SessionID {
+		messageParts = append(messageParts, fmt.Sprintf("📋 %s", jobTitle))
+	}
+
+	// Add plan name for jobs
+	if planName != "" {
+		messageParts = append(messageParts, fmt.Sprintf("📂 Plan: %s", planName))
+	}
+
+	// Add project/worktree info
+	if projectName != "" {
+		if isWorktree {
+			messageParts = append(messageParts, fmt.Sprintf("📁 %s (worktree)", projectName))
+		} else {
+			messageParts = append(messageParts, fmt.Sprintf("📁 %s", projectName))
+		}
+	} else if repo != "" {
+		messageParts = append(messageParts, fmt.Sprintf("📁 %s", repo))
+	}
+
+	// Add branch info
+	if branch != "" {
+		messageParts = append(messageParts, fmt.Sprintf("🌿 %s", branch))
+	}
+
+	// Add duration
+	if data.DurationMs > 0 {
+		durationSec := data.DurationMs / 1000
+		messageParts = append(messageParts, fmt.Sprintf("⏱️  %ds", durationSec))
+	}
+
+	// Add exit reason if present
+	if data.ExitReason != "" {
+		messageParts = append(messageParts, fmt.Sprintf("Status: %s", data.ExitReason))
+	}
+
+	message := strings.Join(messageParts, "\n")
+
+	// Send ntfy notification
+	if err := notifications.SendNtfy(cfg.URL, cfg.Topic, title, message, "default", nil); err != nil {
+		log.Printf("Failed to send ntfy notification: %v", err)
+	}
 }
 
 func determineTaskType(task string) string {
