@@ -12,6 +12,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/process"
+	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 )
 
@@ -62,7 +63,7 @@ type SessionMetadata struct {
 
 // DiscoverLiveClaudeSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
 // A session is considered live if its PID is still alive
-func DiscoverLiveClaudeSessions() ([]*models.Session, error) {
+func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Session, error) {
 	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
 
 	// Check if directory exists
@@ -123,6 +124,22 @@ func DiscoverLiveClaudeSessions() ([]*models.Session, error) {
 			status = "interrupted"
 			now := time.Now()
 			endedAt = &now
+		} else {
+			// Process is alive, check DB for 'idle' state
+			dbSessionData, err := storage.GetSession(sessionID)
+			// If the session is found in the DB, check its status
+			if err == nil {
+				var dbStatus string
+				if extSession, ok := dbSessionData.(*disk.ExtendedSession); ok {
+					dbStatus = extSession.Status
+				} else if session, ok := dbSessionData.(*models.Session); ok {
+					dbStatus = session.Status
+				}
+
+				if dbStatus == "idle" {
+					status = "idle" // Override default "running" status
+				}
+			}
 		}
 
 		// Create session object
@@ -224,9 +241,6 @@ func refreshFlowJobsCache() {
 			}
 
 			displayStatus := job.Status
-			if displayStatus == "pending_user" {
-				displayStatus = "running"
-			}
 
 			startTime := job.StartTime
 			if startTime.IsZero() {
@@ -353,11 +367,7 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 				seenJobs[job.FilePath] = true
 			}
 
-			// For display purposes, group 'pending_user' into 'running'.
 			displayStatus := job.Status
-			if displayStatus == "pending_user" {
-				displayStatus = "running"
-			}
 
 			// Use UpdatedAt if StartTime is zero
 			startTime := job.StartTime
@@ -417,7 +427,7 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 // GetAllSessions fetches sessions from all sources, merges them, and sorts them.
 func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*models.Session, error) {
 	// Discover live Claude sessions from filesystem (fast - just reads local files)
-	liveClaudeSessions, err := DiscoverLiveClaudeSessions()
+	liveClaudeSessions, err := DiscoverLiveClaudeSessions(storage)
 	if err != nil {
 		// Log error but continue
 		if os.Getenv("GROVE_DEBUG") != "" {
@@ -477,17 +487,17 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 		sessions = filtered
 	}
 
-	// Sort sessions: running first, then idle, then others by started_at desc
+	// Sort sessions: running/pending_user first, then idle, then others by started_at desc
 	sort.Slice(sessions, func(i, j int) bool {
 		iPriority := 3
-		if sessions[i].Status == "running" {
+		if sessions[i].Status == "running" || sessions[i].Status == "pending_user" {
 			iPriority = 1
 		} else if sessions[i].Status == "idle" {
 			iPriority = 2
 		}
 
 		jPriority := 3
-		if sessions[j].Status == "running" {
+		if sessions[j].Status == "running" || sessions[j].Status == "pending_user" {
 			jPriority = 1
 		} else if sessions[j].Status == "idle" {
 			jPriority = 2

@@ -38,12 +38,13 @@ var browseFiltersPath = expandPath("~/.grove/hooks/browse_filters.json")
 func loadFilterPreferences() BrowseFilterPreferences {
 	prefs := BrowseFilterPreferences{
 		StatusFilters: map[string]bool{
-			"running":     true,
-			"idle":        true,
-			"completed":   true,
-			"interrupted": true,
-			"failed":      true,
-			"error":       true,
+			"running":      true,
+			"idle":         true,
+			"pending_user": true,
+			"completed":    true,
+			"interrupted":  true,
+			"failed":       true,
+			"error":        true,
 		},
 		TypeFilters: map[string]bool{
 			"claude_code":       true,
@@ -392,6 +393,10 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.help.Toggle()
 				return m, nil
 			}
+			if m.showFilterView {
+				m.showFilterView = false
+				return m, nil
+			}
 			if m.showDetails {
 				m.showDetails = false
 				return m, nil
@@ -429,7 +434,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle filter view keys
 		if m.showFilterView {
-			statusOptions := []string{"running", "idle", "completed", "interrupted", "failed", "error"}
+			statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error"}
 			typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
 			totalOptions := len(statusOptions) + len(typeOptions)
 
@@ -832,7 +837,7 @@ func (m browseModel) View() string {
 	b.WriteString("\n")
 
 	// Build table data with viewport scrolling (matching sessions list format)
-	headers := []string{"", "SESSION ID", "TYPE", "STATUS", "REPOSITORY", "WORKTREE", "STARTED", "ELAPSED"}
+	headers := []string{"", "SESSION ID", "TYPE", "STATUS", "REPOSITORY", "WORKTREE", "STARTED"}
 	var rows [][]string
 
 	// Calculate visible range
@@ -887,19 +892,18 @@ func (m browseModel) View() string {
 			worktree = "n/a"
 		}
 
-		// Calculate elapsed time
-		var elapsed string
-		if s.Status == "running" || s.Status == "idle" {
-			elapsed = formatDuration(time.Since(s.StartedAt))
-		} else if s.EndedAt != nil && !s.EndedAt.IsZero() {
-			elapsed = formatDuration(s.EndedAt.Sub(s.StartedAt))
-		} else {
-			elapsed = "n/a"
-		}
-
-		// Format status with color
+		// Format status with icon and elapsed time for active sessions
 		statusStyle := getStatusStyle(s.Status)
-		statusStr := statusStyle.Render(s.Status)
+		statusIcon := getStatusIcon(s.Status)
+		var statusStr string
+
+		// Add elapsed time for active sessions in muted color
+		if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
+			elapsed := formatDuration(time.Since(s.StartedAt))
+			statusStr = statusStyle.Render(statusIcon+" "+s.Status) + " " + t.Muted.Render(fmt.Sprintf("(%s)", elapsed))
+		} else {
+			statusStr = statusStyle.Render(statusIcon + " " + s.Status)
+		}
 
 		// Selection and cursor indicator
 		var indicator string
@@ -916,15 +920,25 @@ func (m browseModel) View() string {
 			indicator = "   "
 		}
 
+		// Format start time - use relative time for recent sessions, absolute for older ones
+		var startedStr string
+		timeSinceStart := time.Since(s.StartedAt)
+		if timeSinceStart < 24*time.Hour {
+			// Recent: show relative time
+			startedStr = formatDuration(timeSinceStart) + " ago"
+		} else {
+			// Older: show absolute date
+			startedStr = s.StartedAt.Format("Jan 2 15:04")
+		}
+
 		rows = append(rows, []string{
-			indicator,
-			sessionIDStr,
-			sessionTypeStr,
-			statusStr,
-			truncateStr(repository, 25),
-			truncateStr(worktree, 20),
-			s.StartedAt.Format("2006-01-02 15:04"),
-			elapsed,
+			padStr(indicator, 4),                      // Indicator column
+			padStr(sessionIDStr, 32),                  // Session ID (wider for job names)
+			padStr(sessionTypeStr, 18),                // Type
+			padStr(statusStr, 20),                     // Status with elapsed time
+			padStr(truncateStr(repository, 25), 25),   // Repository
+			padStr(truncateStr(worktree, 20), 20),     // Worktree
+			padStr(startedStr, 12),                    // Started
 		})
 	}
 
@@ -981,7 +995,7 @@ func getStatusStyle(status string) lipgloss.Style {
 	switch status {
 	case "running":
 		return t.Success
-	case "idle":
+	case "idle", "pending_user":
 		return t.Warning
 	case "completed":
 		return t.Info
@@ -989,6 +1003,25 @@ func getStatusStyle(status string) lipgloss.Style {
 		return t.Error
 	default:
 		return t.Muted
+	}
+}
+
+func getStatusIcon(status string) string {
+	switch status {
+	case "completed":
+		return "●" // Solid dot
+	case "running":
+		return "◐" // Half-filled circle
+	case "idle":
+		return "⏸" // Pause symbol
+	case "pending_user":
+		return "○" // Hollow circle
+	case "failed", "error":
+		return "✗" // X mark
+	case "interrupted":
+		return "⊗" // Circled X
+	default:
+		return "○" // Hollow circle for unknown
 	}
 }
 
@@ -1090,7 +1123,7 @@ func (m browseModel) viewFilterOptions() string {
 	content.WriteString("\n\n")
 
 	// Build rows for the table
-	statusOptions := []string{"running", "idle", "completed", "interrupted", "failed", "error"}
+	statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error"}
 	typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
 
 	var rows [][]string
@@ -1156,6 +1189,16 @@ func truncateStr(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
+// padStr pads a string to a fixed width, accounting for ANSI color codes
+func padStr(s string, width int) string {
+	// Use lipgloss to handle ANSI codes properly when measuring width
+	visibleLen := lipgloss.Width(s)
+	if visibleLen >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-visibleLen)
+}
+
 func formatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	h := d / time.Hour
@@ -1165,8 +1208,13 @@ func formatDuration(d time.Duration) string {
 	s := d / time.Second
 
 	if h > 0 {
-		return fmt.Sprintf("%dh%dm%ds", h, m, s)
+		// For hours, omit seconds
+		return fmt.Sprintf("%dh%dm", h, m)
+	} else if m >= 10 {
+		// For 10+ minutes, omit seconds
+		return fmt.Sprintf("%dm", m)
 	} else if m > 0 {
+		// For under 10 minutes, show seconds
 		return fmt.Sprintf("%dm%ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
