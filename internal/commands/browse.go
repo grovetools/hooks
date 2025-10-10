@@ -900,12 +900,18 @@ func (m browseModel) View() string {
 		// Add elapsed time for active sessions in muted color
 		if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
 			var elapsedStr string
-			if !s.StartedAt.IsZero() {
+
+			// Use LastActivity if available, otherwise fall back to StartedAt
+			if !s.LastActivity.IsZero() {
+				elapsed := formatDuration(time.Since(s.LastActivity))
+				elapsedStr = fmt.Sprintf("(%s)", elapsed)
+			} else if !s.StartedAt.IsZero() {
 				elapsed := formatDuration(time.Since(s.StartedAt))
 				elapsedStr = fmt.Sprintf("(%s)", elapsed)
 			} else {
 				elapsedStr = "(unknown)"
 			}
+
 			statusStr = statusStyle.Render(statusIcon+" "+s.Status) + " " + t.Muted.Render(elapsedStr)
 		} else {
 			statusStr = statusStyle.Render(statusIcon + " " + s.Status)

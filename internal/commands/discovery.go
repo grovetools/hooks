@@ -117,27 +117,38 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 			continue
 		}
 
-		// Determine status based on liveness
+		// Determine status and last activity based on liveness
 		status := "running"
 		var endedAt *time.Time
+		lastActivity := metadata.StartedAt // Default to StartedAt
+
 		if !isAlive {
 			status = "interrupted"
 			now := time.Now()
 			endedAt = &now
+			lastActivity = now
 		} else {
-			// Process is alive, check DB for 'idle' state
+			// Process is alive, enrich with DB data if available
 			dbSessionData, err := storage.GetSession(sessionID)
-			// If the session is found in the DB, check its status
 			if err == nil {
 				var dbStatus string
+				var dbLastActivity time.Time
+
+				// Extract status and last activity from either ExtendedSession or Session
 				if extSession, ok := dbSessionData.(*disk.ExtendedSession); ok {
 					dbStatus = extSession.Status
+					dbLastActivity = extSession.LastActivity
 				} else if session, ok := dbSessionData.(*models.Session); ok {
 					dbStatus = session.Status
+					dbLastActivity = session.LastActivity
 				}
 
 				if dbStatus == "idle" {
 					status = "idle" // Override default "running" status
+				}
+
+				if !dbLastActivity.IsZero() {
+					lastActivity = dbLastActivity // Use DB value
 				}
 			}
 		}
@@ -153,7 +164,7 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 			User:             metadata.User,
 			Status:           status,
 			StartedAt:        metadata.StartedAt,
-			LastActivity:     metadata.StartedAt, // Use started time as last activity
+			LastActivity:     lastActivity, // Use the determined timestamp
 			EndedAt:          endedAt,
 			IsTest:           false,
 		}
@@ -507,7 +518,7 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 		sessions = filtered
 	}
 
-	// Sort sessions: running/pending_user first, then idle, then others by started_at desc
+	// Sort sessions: running/pending_user first, then idle, then others by last_activity desc
 	sort.Slice(sessions, func(i, j int) bool {
 		iPriority := 3
 		if sessions[i].Status == "running" || sessions[i].Status == "pending_user" {
@@ -527,7 +538,16 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 			return iPriority < jPriority
 		}
 
-		return sessions[i].StartedAt.After(sessions[j].StartedAt)
+		// Sort by LastActivity (most recent first), fall back to StartedAt if LastActivity is not set
+		iTime := sessions[i].LastActivity
+		if iTime.IsZero() {
+			iTime = sessions[i].StartedAt
+		}
+		jTime := sessions[j].LastActivity
+		if jTime.IsZero() {
+			jTime = sessions[j].StartedAt
+		}
+		return iTime.After(jTime)
 	})
 
 	return sessions, nil
