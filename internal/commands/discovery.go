@@ -59,6 +59,10 @@ type SessionMetadata struct {
 	ProjectName         string    `json:"project_name,omitempty"`
 	IsWorktree          bool      `json:"is_worktree,omitempty"`
 	ParentEcosystemPath string    `json:"parent_ecosystem_path,omitempty"`
+	Type                string    `json:"type,omitempty"`
+	JobTitle            string    `json:"job_title,omitempty"`
+	PlanName            string    `json:"plan_name,omitempty"`
+	JobFilePath         string    `json:"job_file_path,omitempty"`
 }
 
 // DiscoverLiveClaudeSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
@@ -167,6 +171,10 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 			LastActivity:     lastActivity, // Use the determined timestamp
 			EndedAt:          endedAt,
 			IsTest:           false,
+			Type:             metadata.Type,
+			JobTitle:         metadata.JobTitle,
+			PlanName:         metadata.PlanName,
+			JobFilePath:      metadata.JobFilePath,
 		}
 
 		sessions = append(sessions, session)
@@ -244,7 +252,14 @@ func refreshFlowJobsCache() {
 
 	for _, plan := range planSummaries {
 		for _, job := range plan.Jobs {
-			if job.FilePath != "" {
+			// Deduplicate by job ID (most reliable for flow jobs across workspaces)
+			if job.ID != "" {
+				if seenJobs[job.ID] {
+					continue
+				}
+				seenJobs[job.ID] = true
+			} else if job.FilePath != "" {
+				// If no ID, fall back to file path
 				if seenJobs[job.FilePath] {
 					continue
 				}
@@ -375,13 +390,20 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 	}
 
 	var sessions []*models.Session
-	// Track seen job file paths to avoid duplicates from multiple workspace discoveries
+	// Track seen jobs to avoid duplicates from multiple workspace discoveries
+	// We deduplicate by ID primarily (since file paths can vary), then fall back to file path
 	seenJobs := make(map[string]bool)
 
 	for _, plan := range planSummaries {
 		for _, job := range plan.Jobs {
-			// Deduplicate jobs by file path (same job may be discovered from main workspace and worktree)
-			if job.FilePath != "" {
+			// Deduplicate by job ID (most reliable for flow jobs across workspaces)
+			if job.ID != "" {
+				if seenJobs[job.ID] {
+					continue
+				}
+				seenJobs[job.ID] = true
+			} else if job.FilePath != "" {
+				// If no ID, fall back to file path
 				if seenJobs[job.FilePath] {
 					continue
 				}
@@ -483,28 +505,36 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 	}
 
 	// Merge all sources, prioritizing live sessions
-	seenIDs := make(map[string]bool)
-	sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(flowJobs)+len(dbSessions))
+	sessionsMap := make(map[string]*models.Session)
 
-	// Add live Claude sessions first
-	for _, session := range liveClaudeSessions {
-		sessions = append(sessions, session)
-		seenIDs[session.ID] = true
-	}
-
-	// Add flow jobs (includes both live and completed)
-	for _, session := range flowJobs {
-		if !seenIDs[session.ID] {
-			sessions = append(sessions, session)
-			seenIDs[session.ID] = true
-		}
-	}
-
-	// Add DB sessions that aren't already in live/flow sessions
+	// Add DB sessions first as a baseline
 	for _, session := range dbSessions {
-		if !seenIDs[session.ID] {
-			sessions = append(sessions, session)
+		sessionsMap[session.ID] = session
+	}
+
+	// Add/update with flow jobs, which are more authoritative for job-related metadata
+	for _, session := range flowJobs {
+		sessionsMap[session.ID] = session
+	}
+
+	// Add/update with live Claude sessions, which provide the most current "live" status
+	for _, session := range liveClaudeSessions {
+		// If a session with this ID already exists (from flow jobs),
+		// update its status to reflect the live process.
+		if existing, ok := sessionsMap[session.ID]; ok {
+			existing.Status = session.Status
+			existing.PID = session.PID
+			existing.LastActivity = session.LastActivity
+		} else {
+			// This is a standalone claude session, not from a flow job
+			sessionsMap[session.ID] = session
 		}
+	}
+
+	// Convert map back to slice
+	sessions := make([]*models.Session, 0, len(sessionsMap))
+	for _, session := range sessionsMap {
+		sessions = append(sessions, session)
 	}
 
 	// Filter by hideCompleted if requested

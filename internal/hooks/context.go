@@ -187,6 +187,10 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		ProjectName          string    `json:"project_name,omitempty"`
 		IsWorktree           bool      `json:"is_worktree,omitempty"`
 		ParentEcosystemPath  string    `json:"parent_ecosystem_path,omitempty"`
+		Type                 string    `json:"type,omitempty"`
+		JobTitle             string    `json:"job_title,omitempty"`
+		PlanName             string    `json:"plan_name,omitempty"`
+		JobFilePath          string    `json:"job_file_path,omitempty"`
 	}{
 		SessionID:        sessionID,
 		PID:              pid,
@@ -197,6 +201,15 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		User:             username,
 		StartedAt:        now,
 		TranscriptPath:   transcriptPath,
+	}
+
+	// Check for grove-flow integration environment variables
+	if flowJobID := os.Getenv("GROVE_FLOW_JOB_ID"); flowJobID != "" {
+		metadata.SessionID = flowJobID // Use the job ID as the session ID for unification
+		metadata.Type = "interactive_agent"
+		metadata.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
+		metadata.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
+		metadata.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
 	}
 
 	// Populate workspace context fields if available
@@ -250,6 +263,15 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 			LastActivity:     now,
 			IsTest:           false,
 		},
+	}
+
+	// Check for grove-flow integration environment variables
+	if flowJobID := os.Getenv("GROVE_FLOW_JOB_ID"); flowJobID != "" {
+		session.ID = flowJobID // Use the job ID as the session ID for unification
+		session.Type = "interactive_agent"
+		session.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
+		session.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
+		session.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
 	}
 
 	// Populate workspace context fields if available

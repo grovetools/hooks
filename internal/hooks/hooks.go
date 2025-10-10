@@ -218,6 +218,7 @@ func RunStopHook() {
 	// Get session details to obtain working directory and type
 	var sessionType string = "claude_session" // default
 	var workingDir string
+	var jobFilePath string
 
 	// Get session data from storage directly to access type information
 	sessionData, err := ctx.Storage.GetSession(data.SessionID)
@@ -230,8 +231,22 @@ func RunStopHook() {
 				sessionType = extSession.Type
 			}
 			workingDir = extSession.WorkingDirectory
+			jobFilePath = extSession.JobFilePath
 		} else if session, ok := sessionData.(*models.Session); ok {
 			workingDir = session.WorkingDirectory
+		}
+
+		// If this session is linked to a grove-flow job, automatically complete it.
+		if jobFilePath != "" {
+			log.Printf("Session is linked to flow job: %s. Marking as complete.", jobFilePath)
+			cmd := exec.Command("flow", "plan", "complete", jobFilePath)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				// This isn't a fatal error for the hook itself, so just log it.
+				// The command might fail if the job is already complete, which is fine.
+				log.Printf("Failed to auto-complete flow job (this may be expected): %v\nOutput: %s", err, string(output))
+			} else {
+				log.Printf("Successfully marked flow job as complete.")
+			}
 		}
 
 		// Execute repository-specific hook commands if we have a working directory
