@@ -36,6 +36,9 @@ func NewBrowseCmd() *cobra.Command {
 		Short:   "Browse sessions interactively",
 		Long:    `Launch an interactive terminal UI to browse all sessions (Claude sessions and grove-flow jobs). Navigate with arrow keys, search by typing, and select sessions to view details.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Enable background cache refresh for the TUI (long-running)
+			EnableBackgroundRefresh()
+
 			// Create storage for session cleanup
 			storage, err := disk.NewSQLiteStore()
 			if err != nil {

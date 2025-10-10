@@ -16,8 +16,17 @@ import (
 // Cache for flow jobs discovery to avoid expensive flow plan list calls
 var (
 	flowJobsCacheTTL  = 1 * time.Minute // Cache for 1 minute
-	flowJobsCachePath = filepath.Join(os.Getenv("HOME"), ".grove", "hooks", "flow_jobs_cache.json")
+	flowJobsCachePath = expandPath("~/.grove/hooks/flow_jobs_cache.json")
+	// Background refresh disabled by default (CLI commands exit too quickly).
+	// Can be enabled for long-running commands like `browse` TUI.
+	flowJobsBackgroundRefresh = false
+	flowJobsRefreshStarted    bool
 )
+
+// EnableBackgroundRefresh enables periodic cache updates in the background
+func EnableBackgroundRefresh() {
+	flowJobsBackgroundRefresh = true
+}
 
 // SessionMetadata represents the metadata.json structure for file-based sessions
 type SessionMetadata struct {
@@ -128,8 +137,121 @@ type flowJobsCacheData struct {
 	Sessions  []*models.Session `json:"sessions"`
 }
 
+// startBackgroundRefresh starts a goroutine that periodically refreshes the flow jobs cache
+func startBackgroundRefresh() {
+	if flowJobsRefreshStarted || !flowJobsBackgroundRefresh {
+		return
+	}
+	flowJobsRefreshStarted = true
+
+	go func() {
+		// Initial delay to not block startup
+		time.Sleep(100 * time.Millisecond)
+
+		// Refresh immediately on startup
+		refreshFlowJobsCache()
+
+		// Then refresh every 30 seconds
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			refreshFlowJobsCache()
+		}
+	}()
+}
+
+// refreshFlowJobsCache fetches fresh data and updates the cache file
+func refreshFlowJobsCache() {
+	cmd := exec.Command("flow", "plan", "list", "--json", "--all-workspaces", "--include-finished", "--verbose")
+	output, err := cmd.Output()
+	if err != nil {
+		return // Silently fail for background refresh
+	}
+
+	type Job struct {
+		ID        string    `json:"id"`
+		Title     string    `json:"title"`
+		Status    string    `json:"status"`
+		Type      string    `json:"type"`
+		Worktree  string    `json:"worktree,omitempty"`
+		Filename  string    `json:"filename,omitempty"`
+		FilePath  string    `json:"file_path,omitempty"`
+		StartTime time.Time `json:"start_time,omitempty"`
+		UpdatedAt time.Time `json:"updated_at,omitempty"`
+	}
+	type PlanSummary struct {
+		Title         string `json:"title"`
+		Path          string `json:"path"`
+		Jobs          []*Job `json:"jobs,omitempty"`
+		WorkspaceName string `json:"workspace_name,omitempty"`
+	}
+
+	var planSummaries []PlanSummary
+	if err := json.Unmarshal(output, &planSummaries); err != nil {
+		return
+	}
+
+	var sessions []*models.Session
+	seenJobs := make(map[string]bool)
+
+	for _, plan := range planSummaries {
+		for _, job := range plan.Jobs {
+			if job.Status != "running" && job.Status != "interrupted" && job.Status != "pending_user" {
+				continue
+			}
+
+			if job.FilePath != "" {
+				if seenJobs[job.FilePath] {
+					continue
+				}
+				seenJobs[job.FilePath] = true
+			}
+
+			displayStatus := job.Status
+			if displayStatus == "pending_user" {
+				displayStatus = "running"
+			}
+
+			startTime := job.StartTime
+			if startTime.IsZero() {
+				startTime = job.UpdatedAt
+			}
+
+			session := &models.Session{
+				ID:               job.ID,
+				Type:             "job",
+				Status:           displayStatus,
+				Repo:             plan.WorkspaceName,
+				Branch:           job.Worktree,
+				WorkingDirectory: plan.Path,
+				User:             os.Getenv("USER"),
+				StartedAt:        startTime,
+				LastActivity:     startTime,
+				PlanName:         plan.Title,
+				JobTitle:         job.Title,
+				JobFilePath:      job.FilePath,
+			}
+			sessions = append(sessions, session)
+		}
+	}
+
+	// Update cache file
+	cacheData := flowJobsCacheData{
+		Timestamp: time.Now(),
+		Sessions:  sessions,
+	}
+	if jsonData, err := json.Marshal(cacheData); err == nil {
+		os.MkdirAll(filepath.Dir(flowJobsCachePath), 0755)
+		os.WriteFile(flowJobsCachePath, jsonData, 0644)
+	}
+}
+
 // DiscoverLiveFlowJobs calls `flow plan list` to get an accurate list of all jobs and their statuses.
 func DiscoverLiveFlowJobs() ([]*models.Session, error) {
+	// Start background refresh if enabled (only starts once)
+	startBackgroundRefresh()
+
 	// Try to load from file cache
 	if cacheData, err := os.ReadFile(flowJobsCachePath); err == nil {
 		var cached flowJobsCacheData
