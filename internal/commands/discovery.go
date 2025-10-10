@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/process"
+	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 )
 
 // Cache for flow jobs discovery to avoid expensive flow plan list calls
@@ -275,6 +277,12 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		var cached flowJobsCacheData
 		if err := json.Unmarshal(cacheData, &cached); err == nil {
 			if time.Since(cached.Timestamp) < flowJobsCacheTTL {
+				// Update real-time status for cached sessions before returning
+				for _, session := range cached.Sessions {
+					if session.Type == "job" {
+						updateSessionStatusFromFilesystem(session)
+					}
+				}
 				return cached.Sessions, nil
 			}
 		}
@@ -384,6 +392,102 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		os.WriteFile(flowJobsCachePath, jsonData, 0644)
 	}
 
+	// After getting sessions from cache or command, update their status in real-time
+	for _, session := range sessions {
+		if session.Type == "job" {
+			updateSessionStatusFromFilesystem(session)
+		}
+	}
+
+	return sessions, nil
+}
+
+// GetAllSessions fetches sessions from all sources, merges them, and sorts them.
+func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*models.Session, error) {
+	// Discover live Claude sessions from filesystem (fast - just reads local files)
+	liveClaudeSessions, err := DiscoverLiveClaudeSessions()
+	if err != nil {
+		// Log error but continue
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "Warning: failed to discover live Claude sessions: %v\n", err)
+		}
+		liveClaudeSessions = []*models.Session{}
+	}
+
+	// Discover flow jobs (now fast, as it uses cache + filesystem checks)
+	flowJobs, err := DiscoverFlowJobs()
+	if err != nil {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "Warning: failed to discover flow jobs: %v\n", err)
+		}
+		flowJobs = []*models.Session{}
+	}
+
+	// Get archived sessions from database
+	dbSessions, err := storage.GetAllSessions()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sessions: %w", err)
+	}
+
+	// Merge all sources, prioritizing live sessions
+	seenIDs := make(map[string]bool)
+	sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(flowJobs)+len(dbSessions))
+
+	// Add live Claude sessions first
+	for _, session := range liveClaudeSessions {
+		sessions = append(sessions, session)
+		seenIDs[session.ID] = true
+	}
+
+	// Add flow jobs (includes both live and completed)
+	for _, session := range flowJobs {
+		if !seenIDs[session.ID] {
+			sessions = append(sessions, session)
+			seenIDs[session.ID] = true
+		}
+	}
+
+	// Add DB sessions that aren't already in live/flow sessions
+	for _, session := range dbSessions {
+		if !seenIDs[session.ID] {
+			sessions = append(sessions, session)
+		}
+	}
+
+	// Filter by hideCompleted if requested
+	if hideCompleted {
+		var filtered []*models.Session
+		for _, s := range sessions {
+			if s.Status != "completed" && s.Status != "failed" && s.Status != "error" {
+				filtered = append(filtered, s)
+			}
+		}
+		sessions = filtered
+	}
+
+	// Sort sessions: running first, then idle, then others by started_at desc
+	sort.Slice(sessions, func(i, j int) bool {
+		iPriority := 3
+		if sessions[i].Status == "running" {
+			iPriority = 1
+		} else if sessions[i].Status == "idle" {
+			iPriority = 2
+		}
+
+		jPriority := 3
+		if sessions[j].Status == "running" {
+			jPriority = 1
+		} else if sessions[j].Status == "idle" {
+			jPriority = 2
+		}
+
+		if iPriority != jPriority {
+			return iPriority < jPriority
+		}
+
+		return sessions[i].StartedAt.After(sessions[j].StartedAt)
+	})
+
 	return sessions, nil
 }
 
@@ -449,31 +553,28 @@ func discoverJobsInPlan(planDir string) ([]*models.Session, error) {
 
 		finalStatus := jobInfo.Status
 
-		// Liveness check now depends on the job type.
-		if jobInfo.Type == "chat" {
-			// For chat jobs, 'running' or 'pending_user' means it's active.
-			// No lock file is created for them, so we consider it live.
-			// For display purposes in the list, we'll call it 'running'.
-			finalStatus = "running"
-		} else {
-			// For all other job types (e.g., 'oneshot'), we enforce the lock file check.
-			lockFile := filePath + ".lock"
-			pidContent, err := os.ReadFile(lockFile)
-			if err != nil {
-				// No lock file for a non-chat job means it's interrupted.
-				finalStatus = "interrupted"
+		// Check lock file for all job types
+		lockFile := filePath + ".lock"
+		pidContent, err := os.ReadFile(lockFile)
+		if err != nil {
+			// For interactive_agent jobs, lock file may not exist immediately after start
+			if jobInfo.Type == "interactive_agent" {
+				finalStatus = "running"
 			} else {
-				// Lock file exists, now check if the PID is alive.
-				var pid int
-				if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err == nil {
-					if !process.IsProcessAlive(pid) {
-						finalStatus = "interrupted" // PID is dead.
-					} else {
-						finalStatus = "running" // Lock file and live PID, it's running.
-					}
+				// No lock file means the job is interrupted
+				finalStatus = "interrupted"
+			}
+		} else {
+			// Lock file exists, check if PID is alive
+			var pid int
+			if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err == nil {
+				if !process.IsProcessAlive(pid) {
+					finalStatus = "interrupted" // PID is dead.
 				} else {
-					finalStatus = "interrupted" // Invalid PID in lock file.
+					finalStatus = "running" // Lock file and live PID, it's running.
 				}
+			} else {
+				finalStatus = "interrupted" // Invalid PID in lock file.
 			}
 		}
 
@@ -567,6 +668,81 @@ func parseJobFrontmatter(content string) jobInfo {
 	return info
 }
 
+// getRealtimeJobStatus checks the filesystem to determine the true, current status of a job.
+func getRealtimeJobStatus(jobFilePath string) (string, error) {
+	content, err := os.ReadFile(jobFilePath)
+	if err != nil {
+		return "unknown", fmt.Errorf("failed to read job file %s: %w", jobFilePath, err)
+	}
+	jobInfo := parseJobFrontmatter(string(content))
+
+	// Terminal states are the source of truth from frontmatter
+	terminalStates := map[string]bool{
+		"completed":   true,
+		"failed":      true,
+		"interrupted": true,
+		"error":       true,
+	}
+	if terminalStates[jobInfo.Status] {
+		return jobInfo.Status, nil
+	}
+
+	// For non-terminal states, we must verify liveness
+	if jobInfo.Status == "running" || jobInfo.Status == "pending_user" {
+		// Chat and interactive_agent jobs don't use lock files; 'running' in frontmatter is sufficient.
+		if jobInfo.Type == "chat" || jobInfo.Type == "interactive_agent" {
+			return "running", nil
+		}
+
+		// For other job types (oneshot, headless_agent, etc.), check the lock file and PID
+		lockFile := jobFilePath + ".lock"
+		pidContent, err := os.ReadFile(lockFile)
+		if err != nil {
+			// No lock file for a running job means it's interrupted.
+			return "interrupted", nil
+		}
+
+		var pid int
+		if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err != nil {
+			// Invalid PID in lock file.
+			return "interrupted", nil
+		}
+
+		if !process.IsProcessAlive(pid) {
+			// PID is dead.
+			return "interrupted", nil
+		}
+
+		// Lock file exists and PID is alive.
+		return "running", nil
+	}
+
+	// Fallback to the status in the frontmatter.
+	return jobInfo.Status, nil
+}
+
+// updateSessionStatusFromFilesystem refreshes a job session's status based on its file path.
+func updateSessionStatusFromFilesystem(session *models.Session) {
+	if session.JobFilePath == "" {
+		return // Not a job session with a file path.
+	}
+	if _, err := os.Stat(session.JobFilePath); os.IsNotExist(err) {
+		// If the file is gone, the job is likely gone too. Mark as interrupted.
+		session.Status = "interrupted"
+		return
+	}
+
+	status, err := getRealtimeJobStatus(session.JobFilePath)
+	if err != nil {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "Warning: could not get realtime status for %s: %v\n", session.JobFilePath, err)
+		}
+		// Don't change status if we can't determine it
+		return
+	}
+	session.Status = status
+}
+
 // markInterruptedJobsInPlan scans a single plan directory and marks jobs with status: running as interrupted
 // if their lock file is missing or PID is dead. Returns the number of jobs updated.
 func markInterruptedJobsInPlan(planDir string, dryRun bool) (int, error) {
@@ -610,12 +786,12 @@ func markInterruptedJobsInPlan(planDir string, dryRun bool) (int, error) {
 			continue
 		}
 
-		// Skip chat jobs - they don't use lock files, so running status is valid
-		if jobInfo.Type == "chat" {
+		// Skip interactive_agent jobs - they may not have lock files immediately after start
+		if jobInfo.Type == "interactive_agent" {
 			continue
 		}
 
-		// For non-chat jobs, check for lock file
+		// For other jobs, check for lock file
 		lockFile := filePath + ".lock"
 		shouldMark := false
 

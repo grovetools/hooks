@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -49,92 +48,11 @@ func NewBrowseCmd() *cobra.Command {
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
 
-			// Try to get cached flow jobs first (fast path)
-			flowJobs, _ := GetCachedFlowJobs()
-
-			// Discover live Claude sessions from filesystem (fast - just reads local files)
-			liveClaudeSessions, err := DiscoverLiveClaudeSessions()
+			// Fetch all sessions using the centralized discovery function
+			sessions, err := GetAllSessions(storage, hideCompleted)
 			if err != nil {
-				// Log error but continue
-				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "Warning: failed to discover live Claude sessions: %v\n", err)
-				}
-				liveClaudeSessions = []*models.Session{}
+				return fmt.Errorf("failed to get all sessions: %w", err)
 			}
-
-			// If no cached flow jobs, do a synchronous fetch once
-			if len(flowJobs) == 0 {
-				flowJobs, err = DiscoverFlowJobs()
-				if err != nil {
-					if os.Getenv("GROVE_DEBUG") != "" {
-						fmt.Fprintf(os.Stderr, "Warning: failed to discover flow jobs: %v\n", err)
-					}
-					flowJobs = []*models.Session{}
-				}
-			}
-
-			// Get archived sessions from database
-			dbSessions, err := storage.GetAllSessions()
-			if err != nil {
-				return fmt.Errorf("failed to get sessions: %w", err)
-			}
-
-			// Merge all sources, prioritizing live sessions
-			seenIDs := make(map[string]bool)
-			sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(flowJobs)+len(dbSessions))
-
-			// Add live Claude sessions first
-			for _, session := range liveClaudeSessions {
-				sessions = append(sessions, session)
-				seenIDs[session.ID] = true
-			}
-
-			// Add flow jobs (includes both live and completed)
-			for _, session := range flowJobs {
-				sessions = append(sessions, session)
-				seenIDs[session.ID] = true
-			}
-
-			// Add DB sessions that aren't already in live sessions
-			for _, session := range dbSessions {
-				if !seenIDs[session.ID] {
-					sessions = append(sessions, session)
-				}
-			}
-
-			// Filter by hideCompleted if requested
-			if hideCompleted {
-				var filtered []*models.Session
-				for _, s := range sessions {
-					if s.Status != "completed" && s.Status != "failed" && s.Status != "error" {
-						filtered = append(filtered, s)
-					}
-				}
-				sessions = filtered
-			}
-
-			// Sort sessions: running first, then idle, then others by started_at desc
-			sort.Slice(sessions, func(i, j int) bool {
-				iPriority := 3
-				if sessions[i].Status == "running" {
-					iPriority = 1
-				} else if sessions[i].Status == "idle" {
-					iPriority = 2
-				}
-
-				jPriority := 3
-				if sessions[j].Status == "running" {
-					jPriority = 1
-				} else if sessions[j].Status == "idle" {
-					jPriority = 2
-				}
-
-				if iPriority != jPriority {
-					return iPriority < jPriority
-				}
-
-				return sessions[i].StartedAt.After(sessions[j].StartedAt)
-			})
 
 			if len(sessions) == 0 {
 				fmt.Println("No sessions found")
@@ -142,7 +60,7 @@ func NewBrowseCmd() *cobra.Command {
 			}
 
 			// Create the interactive model
-			m := newBrowseModel(sessions, storage)
+			m := newBrowseModel(sessions, storage, hideCompleted)
 
 			// Run the interactive program
 			p := tea.NewProgram(m, tea.WithAltScreen())
@@ -261,9 +179,10 @@ type browseModel struct {
 	keys            browseKeyMap
 	help            help.Model
 	statusMessage   string // For showing kill/error messages
+	hideCompleted   bool   // Store the initial --active flag
 }
 
-func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer) browseModel {
+func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer, hideCompleted bool) browseModel {
 	// Create text input for filtering
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter by session ID, repo, branch, or working directory..."
@@ -281,18 +200,19 @@ func newBrowseModel(sessions []*models.Session, storage interfaces.SessionStorer
 	keys := newBrowseKeyMap()
 
 	return browseModel{
-		sessions:     sessions,
-		filtered:     sessions,
-		filterInput:  ti,
-		cursor:       0,
-		scrollOffset: 0,
-		statusFilter: "",
-		showDetails:  false,
-		selectedIDs:  make(map[string]bool),
-		storage:      storage,
-		lastRefresh:  time.Now(),
-		keys:         keys,
-		help:         help.New(keys),
+		sessions:      sessions,
+		filtered:      sessions,
+		filterInput:   ti,
+		cursor:        0,
+		scrollOffset:  0,
+		statusFilter:  "",
+		showDetails:   false,
+		selectedIDs:   make(map[string]bool),
+		storage:       storage,
+		lastRefresh:   time.Now(),
+		keys:          keys,
+		help:          help.New(keys),
+		hideCompleted: hideCompleted,
 	}
 }
 
@@ -302,7 +222,7 @@ type tickMsg time.Time
 func (m browseModel) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
-		tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		}),
 	)
@@ -313,9 +233,46 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tickMsg:
-		// For sessions, we don't need auto-refresh since sessions are discovered once
-		// Just continue ticking for potential future use
-		return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		// Preserve cursor position
+		var selectedID string
+		if m.cursor >= 0 && m.cursor < len(m.filtered) {
+			selectedID = m.filtered[m.cursor].ID
+		}
+
+		// Get fresh data
+		newSessions, err := GetAllSessions(m.storage, m.hideCompleted)
+		if err != nil {
+			m.statusMessage = fmt.Sprintf("Error refreshing: %v", err)
+		} else {
+			m.sessions = newSessions
+			m.updateFiltered() // Re-apply text and status filters
+		}
+
+		// Restore cursor position
+		if selectedID != "" {
+			newCursor := -1
+			for i, s := range m.filtered {
+				if s.ID == selectedID {
+					newCursor = i
+					break
+				}
+			}
+			if newCursor != -1 {
+				m.cursor = newCursor
+			} else {
+				// ID disappeared, reset cursor if out of bounds
+				if m.cursor >= len(m.filtered) {
+					if len(m.filtered) > 0 {
+						m.cursor = len(m.filtered) - 1
+					} else {
+						m.cursor = 0
+					}
+				}
+			}
+		}
+
+		// Schedule next tick
+		return m, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		})
 

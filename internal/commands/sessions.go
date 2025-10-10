@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -59,55 +58,10 @@ func newSessionsListCmd() *cobra.Command {
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
 
-			// Discover live Claude sessions from filesystem
-			liveClaudeSessions, err := DiscoverLiveClaudeSessions()
+			// Fetch all sessions using the centralized discovery function
+			sessions, err := GetAllSessions(storage, hideCompleted)
 			if err != nil {
-				// Log error but continue
-				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "Warning: failed to discover live Claude sessions: %v\n", err)
-				}
-				liveClaudeSessions = []*models.Session{}
-			}
-
-			// Discover grove-flow jobs (including historical)
-			flowJobs, err := DiscoverFlowJobs()
-			if err != nil {
-				// Log error but continue
-				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "Warning: failed to discover flow jobs: %v\n", err)
-				}
-				flowJobs = []*models.Session{}
-			}
-
-			// Get archived sessions from database
-			dbSessions, err := storage.GetAllSessions()
-			if err != nil {
-				return fmt.Errorf("failed to get sessions: %w", err)
-			}
-
-			// Merge all sources, prioritizing live sessions
-			// Create a map to track which session IDs we've seen from live sessions
-			seenIDs := make(map[string]bool)
-			sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(flowJobs)+len(dbSessions))
-
-			// Add live Claude sessions first
-			for _, session := range liveClaudeSessions {
-				sessions = append(sessions, session)
-				seenIDs[session.ID] = true
-			}
-
-			// Add flow jobs (includes both live and completed)
-			for _, session := range flowJobs {
-				sessions = append(sessions, session)
-				seenIDs[session.ID] = true
-			}
-
-			// Add DB sessions that aren't already in live sessions
-			// (these are completed/archived sessions)
-			for _, session := range dbSessions {
-				if !seenIDs[session.ID] {
-					sessions = append(sessions, session)
-				}
+				return fmt.Errorf("failed to get all sessions: %w", err)
 			}
 
 			// Filter by status if requested
@@ -153,42 +107,7 @@ func newSessionsListCmd() *cobra.Command {
 				sessions = filtered
 			}
 
-			// Hide completed sessions if requested
-			if hideCompleted {
-				var filtered []*models.Session
-				for _, s := range sessions {
-					if s.Status != "completed" && s.Status != "failed" && s.Status != "error" {
-						filtered = append(filtered, s)
-					}
-				}
-				sessions = filtered
-			}
-
-			// Sort sessions: running first, then idle, then others by started_at desc
-			sort.Slice(sessions, func(i, j int) bool {
-				// Define status priority: running=1, idle=2, others=3
-				iPriority := 3
-				if sessions[i].Status == "running" {
-					iPriority = 1
-				} else if sessions[i].Status == "idle" {
-					iPriority = 2
-				}
-
-				jPriority := 3
-				if sessions[j].Status == "running" {
-					jPriority = 1
-				} else if sessions[j].Status == "idle" {
-					jPriority = 2
-				}
-
-				// Sort by priority first
-				if iPriority != jPriority {
-					return iPriority < jPriority
-				}
-
-				// Within same status group, sort by most recent first
-				return sessions[i].StartedAt.After(sessions[j].StartedAt)
-			})
+			// Sorting and filtering by 'hideCompleted' is now handled by GetAllSessions.
 
 			// Apply limit
 			if limit > 0 && len(sessions) > limit {
