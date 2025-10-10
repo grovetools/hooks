@@ -28,6 +28,20 @@ func EnableBackgroundRefresh() {
 	flowJobsBackgroundRefresh = true
 }
 
+// GetCachedFlowJobs returns cached flow jobs without triggering a refresh.
+// Returns empty slice if cache doesn't exist or is expired.
+func GetCachedFlowJobs() ([]*models.Session, error) {
+	if cacheData, err := os.ReadFile(flowJobsCachePath); err == nil {
+		var cached flowJobsCacheData
+		if err := json.Unmarshal(cacheData, &cached); err == nil {
+			// Return cached data even if slightly expired - better to show stale data
+			// than wait 4 seconds. Background refresh will update it.
+			return cached.Sessions, nil
+		}
+	}
+	return []*models.Session{}, nil
+}
+
 // SessionMetadata represents the metadata.json structure for file-based sessions
 type SessionMetadata struct {
 	SessionID           string    `json:"session_id"`

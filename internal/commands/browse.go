@@ -49,7 +49,10 @@ func NewBrowseCmd() *cobra.Command {
 			// Clean up dead sessions first
 			_, _ = CleanupDeadSessions(storage)
 
-			// Discover live Claude sessions from filesystem
+			// Try to get cached flow jobs first (fast path)
+			liveFlowJobs, _ := GetCachedFlowJobs()
+
+			// Discover live Claude sessions from filesystem (fast - just reads local files)
 			liveClaudeSessions, err := DiscoverLiveClaudeSessions()
 			if err != nil {
 				// Log error but continue
@@ -59,14 +62,15 @@ func NewBrowseCmd() *cobra.Command {
 				liveClaudeSessions = []*models.Session{}
 			}
 
-			// Discover live grove-flow jobs from plan directories
-			liveFlowJobs, err := DiscoverLiveFlowJobs()
-			if err != nil {
-				// Log error but continue
-				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "Warning: failed to discover live flow jobs: %v\n", err)
+			// If no cached flow jobs, do a synchronous fetch once
+			if len(liveFlowJobs) == 0 {
+				liveFlowJobs, err = DiscoverLiveFlowJobs()
+				if err != nil {
+					if os.Getenv("GROVE_DEBUG") != "" {
+						fmt.Fprintf(os.Stderr, "Warning: failed to discover live flow jobs: %v\n", err)
+					}
+					liveFlowJobs = []*models.Session{}
 				}
-				liveFlowJobs = []*models.Session{}
 			}
 
 			// Get archived sessions from database
