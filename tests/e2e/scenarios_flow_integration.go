@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/command"
@@ -81,8 +82,8 @@ flow:
 				return result.Error
 			}),
 
-			// Step 3: Run the plan, ensuring it uses the test grove-hooks binary
-			harness.NewStep("Run the flow plan", func(ctx *harness.Context) error {
+			// Step 3: Run the plan and verify running state mid-execution
+			harness.NewStep("Run the flow plan and verify running state", func(ctx *harness.Context) error {
 				// Find the grove-hooks binary we just built
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
@@ -99,16 +100,26 @@ flow:
 					return fmt.Errorf("failed to create symlink for grove-hooks: %w", err)
 				}
 
-				// Also need a mock llm binary for the oneshot job to run
-				// This script needs to output valid JSON that grove-flow expects
-				llmScript := `#!/bin/bash
+				// Create signal files for synchronization
+				llmStartedSignal := filepath.Join(ctx.RootDir, "llm_started.signal")
+				llmContinueSignal := filepath.Join(ctx.RootDir, "llm_continue.signal")
+
+				// Create a synchronized mock LLM that pauses to allow us to check the running state
+				llmScript := fmt.Sprintf(`#!/bin/bash
+# Signal that we've started (job is now 'running')
+touch %s
+
+# Wait for the test to signal us to continue
+while [ ! -f %s ]; do sleep 0.1; done
+
+# Output the response
 cat <<EOF
 {
   "content": "Mock LLM response for oneshot job completed successfully.",
   "status": "success"
 }
 EOF
-`
+`, llmStartedSignal, llmContinueSignal)
 				llmPath := filepath.Join(tempBinDir, "llm")
 				fs.WriteString(llmPath, llmScript)
 				os.Chmod(llmPath, 0755)
@@ -117,82 +128,122 @@ EOF
 				originalPath := os.Getenv("PATH")
 				testPath := fmt.Sprintf("%s:%s", tempBinDir, originalPath)
 
-				// The test database path is already set via env var from SetupTestDatabase
-				// Now run the plan with debug output to see what's happening
-				cmd := command.New("flow", "plan", "run", "integration-test-plan", "--yes", "-v").
+				// Run the plan in the background
+				cmd := command.New("flow", "plan", "run", "integration-test-plan", "--yes").
 					Dir(ctx.RootDir).
 					Env(fmt.Sprintf("PATH=%s", testPath))
-
-				result := cmd.Run()
-				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
-				// Even if flow returns an error, let's continue to see what was tracked
-				if result.Error != nil {
-					ctx.ShowCommandOutput("Note", "Flow command failed but continuing to check database", "")
+				process, err := cmd.StartInBackground()
+				if err != nil {
+					return fmt.Errorf("failed to start 'flow plan run' in background: %w", err)
 				}
-				
-				return nil // Don't fail here, let's see what was tracked
+				ctx.ShowCommandOutput("Info", fmt.Sprintf("Started 'flow plan run' in background (PID: %d)", process.Pid), "")
+
+				// Wait for the mock LLM to start (job is now running)
+				err = assert.WaitForFile(llmStartedSignal, 10*time.Second)
+				if err != nil {
+					output, _ := process.GetOutput()
+					ctx.ShowCommandOutput(fmt.Sprintf("flow (PID: %d) output", process.Pid), output.Stdout, output.Stderr)
+					return fmt.Errorf("timed out waiting for mock LLM to start: %w", err)
+				}
+				ctx.ShowCommandOutput("Info", "Mock LLM has started. Job is now in 'running' state.", "")
+
+				// *** CRITICAL CHECK 1: Verify .lock file exists for the running job ***
+				jobFilePath := filepath.Join(ctx.RootDir, "plans", "integration-test-plan", "01-simple-oneshot-job.md")
+				ctx.Set("job_file_path", jobFilePath)
+				lockFilePath := jobFilePath + ".lock"
+				if _, err := os.Stat(lockFilePath); os.IsNotExist(err) {
+					return fmt.Errorf("expected lock file to exist for running job, but it was not found at %s", lockFilePath)
+				}
+				ctx.ShowCommandOutput("Success", "Lock file found for running job.", lockFilePath)
+
+				// *** CRITICAL CHECK 2: Verify 'grove-hooks' sees the job as 'running' ***
+				hooksCmd := command.New(hooksBinary, "sessions", "list", "--json")
+				result := hooksCmd.Run()
+				ctx.ShowCommandOutput(hooksCmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return fmt.Errorf("failed to list sessions while job is running: %w", result.Error)
+				}
+				var sessions []TestExtendedSessionForIntegration
+				if err := json.Unmarshal([]byte(result.Stdout), &sessions); err != nil {
+					return fmt.Errorf("failed to parse sessions JSON while job is running: %w", err)
+				}
+				var jobSession *TestExtendedSessionForIntegration
+				for i := range sessions {
+					if sessions[i].Type == "oneshot_job" && sessions[i].JobTitle == "Simple Oneshot Job" {
+						jobSession = &sessions[i]
+						break
+					}
+				}
+				if jobSession == nil {
+					return fmt.Errorf("job was not found in sessions list while running. Found: %+v", sessions)
+				}
+				if err := assert.Equal("running", jobSession.Status, "Job status in hooks should be 'running' mid-execution"); err != nil {
+					return err
+				}
+				ctx.ShowCommandOutput("Success", "grove-hooks correctly identifies job status as 'running'.", "")
+
+				// Now, signal the mock LLM to continue
+				fs.WriteString(llmContinueSignal, "continue")
+				ctx.ShowCommandOutput("Info", "Signaled mock LLM to continue.", "")
+
+				// Wait for the flow process to complete
+				exitCode, err := process.Wait(30 * time.Second)
+				if err != nil {
+					output, _ := process.GetOutput()
+					ctx.ShowCommandOutput(fmt.Sprintf("flow (PID: %d) output", process.Pid), output.Stdout, output.Stderr)
+					return fmt.Errorf("error waiting for flow process to exit: %w", err)
+				}
+				if err := assert.Equal(0, exitCode, "'flow plan run' should exit successfully"); err != nil {
+					output, _ := process.GetOutput()
+					ctx.ShowCommandOutput(fmt.Sprintf("flow (PID: %d) output", process.Pid), output.Stdout, output.Stderr)
+					return err
+				}
+				ctx.ShowCommandOutput("Info", "'flow plan run' completed successfully.", "")
+
+				return nil
 			}),
 
-			// Step 4: Verify the job was tracked correctly by grove-hooks
-			harness.NewStep("Verify job was tracked in the test database", func(ctx *harness.Context) error {
+			// Step 4: Verify final job status is 'completed'
+			harness.NewStep("Verify final job status is 'completed'", func(ctx *harness.Context) error {
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
 					return err
 				}
 
-				// The test DB path is still set in the environment
 				cmd := command.New(hooksBinary, "sessions", "list", "--json")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-
 				if result.Error != nil {
 					return result.Error
 				}
 
 				var sessions []TestExtendedSessionForIntegration
 				if err := json.Unmarshal([]byte(result.Stdout), &sessions); err != nil {
-					return fmt.Errorf("failed to parse sessions JSON: %w. Output was: %s", err, result.Stdout)
+					return fmt.Errorf("failed to parse final sessions JSON: %w", err)
 				}
 
-				if len(sessions) == 0 {
-					return fmt.Errorf("no sessions found in database")
-				}
-
-				// Find the oneshot job session
 				var jobSession *TestExtendedSessionForIntegration
 				for i := range sessions {
-					if sessions[i].Type == "oneshot_job" {
+					if sessions[i].Type == "oneshot_job" && sessions[i].JobTitle == "Simple Oneshot Job" {
 						jobSession = &sessions[i]
 						break
 					}
 				}
-
 				if jobSession == nil {
-					return fmt.Errorf("no oneshot_job session found. Sessions: %+v", sessions)
+					return fmt.Errorf("job was not found in final sessions list")
 				}
 
-				// Log what we found for debugging
-				ctx.ShowCommandOutput("Debug", fmt.Sprintf("Found job session: %+v", jobSession), "")
-
-				if err := assert.Equal("oneshot_job", jobSession.Type, "session type should be oneshot_job"); err != nil {
+				if err := assert.Equal("completed", jobSession.Status, "Final job status should be 'completed'"); err != nil {
 					return err
 				}
-				
-				// Accept either running or completed status since flow might not have finished
-				if jobSession.Status != "completed" && jobSession.Status != "running" {
-					return fmt.Errorf("unexpected status: %s (expected completed or running)", jobSession.Status)
-				}
-				
+				ctx.ShowCommandOutput("Success", "grove-hooks correctly shows final job status as 'completed'.", "")
+
 				if err := assert.Equal("integration-test-plan", jobSession.PlanName, "plan name mismatch"); err != nil {
 					return err
 				}
 				if err := assert.Equal("Simple Oneshot Job", jobSession.JobTitle, "job title mismatch"); err != nil {
 					return err
 				}
-
-				// Store session for next steps
-				ctx.Set("job_session", jobSession)
 
 				return nil
 			}),

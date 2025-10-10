@@ -211,10 +211,6 @@ func refreshFlowJobsCache() {
 
 	for _, plan := range planSummaries {
 		for _, job := range plan.Jobs {
-			if job.Status != "running" && job.Status != "interrupted" && job.Status != "pending_user" {
-				continue
-			}
-
 			if job.FilePath != "" {
 				if seenJobs[job.FilePath] {
 					continue
@@ -232,6 +228,13 @@ func refreshFlowJobsCache() {
 				startTime = job.UpdatedAt
 			}
 
+			// Populate EndedAt for terminal states
+			var endedAt *time.Time
+			if job.Status == "completed" || job.Status == "failed" || job.Status == "interrupted" {
+				endTime := job.UpdatedAt
+				endedAt = &endTime
+			}
+
 			session := &models.Session{
 				ID:               job.ID,
 				Type:             "job",
@@ -241,7 +244,8 @@ func refreshFlowJobsCache() {
 				WorkingDirectory: plan.Path,
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
-				LastActivity:     startTime,
+				LastActivity:     job.UpdatedAt,
+				EndedAt:          endedAt,
 				PlanName:         plan.Title,
 				JobTitle:         job.Title,
 				JobFilePath:      job.FilePath,
@@ -261,8 +265,8 @@ func refreshFlowJobsCache() {
 	}
 }
 
-// DiscoverLiveFlowJobs calls `flow plan list` to get an accurate list of all jobs and their statuses.
-func DiscoverLiveFlowJobs() ([]*models.Session, error) {
+// DiscoverFlowJobs calls `flow plan list` to get an accurate list of all jobs and their statuses.
+func DiscoverFlowJobs() ([]*models.Session, error) {
 	// Start background refresh if enabled (only starts once)
 	startBackgroundRefresh()
 
@@ -322,11 +326,6 @@ func DiscoverLiveFlowJobs() ([]*models.Session, error) {
 
 	for _, plan := range planSummaries {
 		for _, job := range plan.Jobs {
-			// Skip jobs that aren't in a "live" state for the session list.
-			if job.Status != "running" && job.Status != "interrupted" && job.Status != "pending_user" {
-				continue
-			}
-
 			// Deduplicate jobs by file path (same job may be discovered from main workspace and worktree)
 			if job.FilePath != "" {
 				if seenJobs[job.FilePath] {
@@ -347,6 +346,13 @@ func DiscoverLiveFlowJobs() ([]*models.Session, error) {
 				startTime = job.UpdatedAt
 			}
 
+			// Populate EndedAt for terminal states
+			var endedAt *time.Time
+			if job.Status == "completed" || job.Status == "failed" || job.Status == "interrupted" {
+				endTime := job.UpdatedAt
+				endedAt = &endTime
+			}
+
 			session := &models.Session{
 				ID:               job.ID,
 				Type:             "job", // Use "job" for flow jobs
@@ -356,7 +362,8 @@ func DiscoverLiveFlowJobs() ([]*models.Session, error) {
 				WorkingDirectory: plan.Path,
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
-				LastActivity:     startTime, // Use StartTime as a proxy for LastActivity.
+				LastActivity:     job.UpdatedAt,
+				EndedAt:          endedAt,
 				PlanName:         plan.Title,
 				JobTitle:         job.Title,
 				JobFilePath:      job.FilePath,

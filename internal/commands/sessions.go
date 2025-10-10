@@ -69,14 +69,14 @@ func newSessionsListCmd() *cobra.Command {
 				liveClaudeSessions = []*models.Session{}
 			}
 
-			// Discover live grove-flow jobs from plan directories
-			liveFlowJobs, err := DiscoverLiveFlowJobs()
+			// Discover grove-flow jobs (including historical)
+			flowJobs, err := DiscoverFlowJobs()
 			if err != nil {
 				// Log error but continue
 				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "Warning: failed to discover live flow jobs: %v\n", err)
+					fmt.Fprintf(os.Stderr, "Warning: failed to discover flow jobs: %v\n", err)
 				}
-				liveFlowJobs = []*models.Session{}
+				flowJobs = []*models.Session{}
 			}
 
 			// Get archived sessions from database
@@ -88,7 +88,7 @@ func newSessionsListCmd() *cobra.Command {
 			// Merge all sources, prioritizing live sessions
 			// Create a map to track which session IDs we've seen from live sessions
 			seenIDs := make(map[string]bool)
-			sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(liveFlowJobs)+len(dbSessions))
+			sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(flowJobs)+len(dbSessions))
 
 			// Add live Claude sessions first
 			for _, session := range liveClaudeSessions {
@@ -96,8 +96,8 @@ func newSessionsListCmd() *cobra.Command {
 				seenIDs[session.ID] = true
 			}
 
-			// Add live flow jobs
-			for _, session := range liveFlowJobs {
+			// Add flow jobs (includes both live and completed)
+			for _, session := range flowJobs {
 				sessions = append(sessions, session)
 				seenIDs[session.ID] = true
 			}

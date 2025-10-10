@@ -50,7 +50,7 @@ func NewBrowseCmd() *cobra.Command {
 			_, _ = CleanupDeadSessions(storage)
 
 			// Try to get cached flow jobs first (fast path)
-			liveFlowJobs, _ := GetCachedFlowJobs()
+			flowJobs, _ := GetCachedFlowJobs()
 
 			// Discover live Claude sessions from filesystem (fast - just reads local files)
 			liveClaudeSessions, err := DiscoverLiveClaudeSessions()
@@ -63,13 +63,13 @@ func NewBrowseCmd() *cobra.Command {
 			}
 
 			// If no cached flow jobs, do a synchronous fetch once
-			if len(liveFlowJobs) == 0 {
-				liveFlowJobs, err = DiscoverLiveFlowJobs()
+			if len(flowJobs) == 0 {
+				flowJobs, err = DiscoverFlowJobs()
 				if err != nil {
 					if os.Getenv("GROVE_DEBUG") != "" {
-						fmt.Fprintf(os.Stderr, "Warning: failed to discover live flow jobs: %v\n", err)
+						fmt.Fprintf(os.Stderr, "Warning: failed to discover flow jobs: %v\n", err)
 					}
-					liveFlowJobs = []*models.Session{}
+					flowJobs = []*models.Session{}
 				}
 			}
 
@@ -81,7 +81,7 @@ func NewBrowseCmd() *cobra.Command {
 
 			// Merge all sources, prioritizing live sessions
 			seenIDs := make(map[string]bool)
-			sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(liveFlowJobs)+len(dbSessions))
+			sessions := make([]*models.Session, 0, len(liveClaudeSessions)+len(flowJobs)+len(dbSessions))
 
 			// Add live Claude sessions first
 			for _, session := range liveClaudeSessions {
@@ -89,8 +89,8 @@ func NewBrowseCmd() *cobra.Command {
 				seenIDs[session.ID] = true
 			}
 
-			// Add live flow jobs
-			for _, session := range liveFlowJobs {
+			// Add flow jobs (includes both live and completed)
+			for _, session := range flowJobs {
 				sessions = append(sessions, session)
 				seenIDs[session.ID] = true
 			}
