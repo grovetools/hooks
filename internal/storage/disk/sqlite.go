@@ -184,6 +184,7 @@ func (s *SQLiteStore) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN project_name TEXT",
 		"ALTER TABLE sessions ADD COLUMN is_worktree BOOLEAN DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN parent_ecosystem_path TEXT",
+		"ALTER TABLE sessions ADD COLUMN worktree_root_path TEXT",
 	}
 
 	// Execute each ALTER statement separately to tolerate existing columns
@@ -244,11 +245,11 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 
 	query := `
 	INSERT INTO sessions (
-		id, type, pid, repo, branch, tmux_key, working_directory, user,
+		id, type, pid, repo, branch, tmux_key, working_directory, worktree_root_path, user,
 		status, started_at, last_activity, is_test, tool_stats, session_summary,
 		plan_name, plan_directory, job_title, job_file_path,
 		project_name, is_worktree, parent_ecosystem_path
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		status = excluded.status,
 		last_activity = excluded.last_activity,
@@ -257,6 +258,7 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 		project_name = excluded.project_name,
 		is_worktree = excluded.is_worktree,
 		parent_ecosystem_path = excluded.parent_ecosystem_path,
+		worktree_root_path = excluded.worktree_root_path,
 		updated_at = CURRENT_TIMESTAMP,
 		started_at = CASE
 			WHEN excluded.status = 'running' THEN excluded.started_at
@@ -274,7 +276,7 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 
 	_, err := s.db.Exec(query,
 		baseSession.ID, sessionType, baseSession.PID, baseSession.Repo, baseSession.Branch, baseSession.TmuxKey,
-		baseSession.WorkingDirectory, baseSession.User, baseSession.Status, baseSession.StartedAt,
+		baseSession.WorkingDirectory, baseSession.WorktreeRootPath, baseSession.User, baseSession.Status, baseSession.StartedAt,
 		baseSession.LastActivity, baseSession.IsTest, toolStatsJSON, sessionSummaryJSON,
 		planName, planDirectory, jobTitle, jobFilePath,
 		projectName, isWorktree, parentEcosystemPath,
@@ -286,7 +288,8 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 // GetSession retrieves a session by ID
 func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 	query := `
-	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory,
+		COALESCE(worktree_root_path, ''), user,
 		status, started_at, ended_at, last_activity, is_test,
 		tool_stats, session_summary,
 		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
@@ -301,7 +304,7 @@ func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 
 	err := s.db.QueryRow(query, sessionID).Scan(
 		&session.ID, &session.Type, &session.PID, &session.Repo, &session.Branch,
-		&session.TmuxKey, &session.WorkingDirectory, &session.User,
+		&session.TmuxKey, &session.WorkingDirectory, &session.WorktreeRootPath, &session.User,
 		&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
 		&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
 		&session.PlanName, &session.PlanDirectory,
@@ -344,7 +347,8 @@ func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 // GetAllExtendedSessions retrieves all sessions as ExtendedSession objects
 func (s *SQLiteStore) GetAllExtendedSessions() ([]*ExtendedSession, error) {
 	query := `
-	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory,
+		COALESCE(worktree_root_path, ''), user,
 		status, started_at, ended_at, last_activity, is_test,
 		tool_stats, session_summary,
 		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
@@ -369,7 +373,7 @@ func (s *SQLiteStore) GetAllExtendedSessions() ([]*ExtendedSession, error) {
 
 		err := rows.Scan(
 			&session.ID, &session.Type, &session.PID, &session.Repo, &session.Branch,
-			&session.TmuxKey, &session.WorkingDirectory, &session.User,
+			&session.TmuxKey, &session.WorkingDirectory, &session.WorktreeRootPath, &session.User,
 			&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
 			&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
 			&session.PlanName, &session.PlanDirectory,
@@ -414,7 +418,8 @@ func (s *SQLiteStore) GetAllExtendedSessions() ([]*ExtendedSession, error) {
 // GetAllSessions retrieves all sessions
 func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 	query := `
-	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory,
+		COALESCE(worktree_root_path, ''), user,
 		status, started_at, ended_at, last_activity, is_test,
 		tool_stats, session_summary,
 		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
@@ -442,7 +447,7 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 
 		err := rows.Scan(
 			&session.ID, &sessionType, &session.PID, &session.Repo, &session.Branch,
-			&session.TmuxKey, &session.WorkingDirectory, &session.User,
+			&session.TmuxKey, &session.WorkingDirectory, &session.WorktreeRootPath, &session.User,
 			&session.Status, &session.StartedAt, &endedAt, &session.LastActivity,
 			&session.IsTest, &toolStatsJSON, &sessionSummaryJSON,
 			&session.PlanName, &session.PlanDirectory,

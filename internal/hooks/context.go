@@ -6,14 +6,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-hooks/internal/config"
 	"github.com/mattsolo1/grove-hooks/internal/git"
-	"github.com/mattsolo1/grove-hooks/internal/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-tmux/pkg/tmux"
@@ -160,7 +161,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	}
 
 	// Get Claude PID
-	pid := process.GetClaudePID()
+	pid := getClaudePID()
 
 	// Create the session directory structure
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
@@ -181,6 +182,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		Branch               string    `json:"branch,omitempty"`
 		TmuxKey              string    `json:"tmux_key,omitempty"`
 		WorkingDirectory     string    `json:"working_directory"`
+		WorktreeRootPath     string    `json:"worktree_root_path,omitempty"`
 		User                 string    `json:"user"`
 		StartedAt            time.Time `json:"started_at"`
 		TranscriptPath       string    `json:"transcript_path,omitempty"`
@@ -217,6 +219,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		metadata.ProjectName = projInfo.Name
 		metadata.IsWorktree = projInfo.IsWorktree
 		metadata.ParentEcosystemPath = projInfo.ParentEcosystemPath
+		metadata.WorktreeRootPath = projInfo.WorktreeRootPath
 
 		// For ecosystem worktrees, use the parent ecosystem name as the repo
 		// This ensures consistency with flow job discovery which uses the parent workspace
@@ -265,6 +268,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 			Branch:           gitBranch,
 			TmuxKey:          tmuxKey,
 			WorkingDirectory: workingDir,
+			WorktreeRootPath: "", // Will be populated from projInfo below
 			User:             username,
 			Status:           "running",
 			StartedAt:        now,
@@ -287,9 +291,33 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		session.ProjectName = projInfo.Name
 		session.IsWorktree = projInfo.IsWorktree
 		session.ParentEcosystemPath = projInfo.ParentEcosystemPath
+		session.WorktreeRootPath = projInfo.WorktreeRootPath
 	}
 
 	return hc.Storage.EnsureSessionExists(session)
+}
+
+// getClaudePID attempts to find the Claude process PID from the environment.
+// It first checks for a CLAUDE_PID environment variable, falling back to the
+// parent process ID of the current hook.
+func getClaudePID() int {
+	// First check if CLAUDE_PID is set in environment
+	if pidStr := os.Getenv("CLAUDE_PID"); pidStr != "" {
+		if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
+			if os.Getenv("GROVE_DEBUG") != "" {
+				fmt.Printf("Using CLAUDE_PID from env: %d\n", pid)
+			}
+			return pid
+		}
+	}
+
+	// For now, use parent PID as a simple approach
+	// In the future, we could use more sophisticated process tree walking
+	ppid := os.Getppid()
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Printf("Using parent PID: %d (current PID: %d)\n", ppid, os.Getpid())
+	}
+	return ppid
 }
 
 // GetSession retrieves a session from local storage

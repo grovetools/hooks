@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-hooks/internal/process"
+	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 )
@@ -53,6 +53,7 @@ type SessionMetadata struct {
 	Branch              string    `json:"branch,omitempty"`
 	TmuxKey             string    `json:"tmux_key,omitempty"`
 	WorkingDirectory    string    `json:"working_directory"`
+	WorktreeRootPath    string    `json:"worktree_root_path,omitempty"`
 	User                string    `json:"user"`
 	StartedAt           time.Time `json:"started_at"`
 	TranscriptPath      string    `json:"transcript_path,omitempty"`
@@ -201,6 +202,7 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 			Branch:           metadata.Branch,
 			TmuxKey:          metadata.TmuxKey,
 			WorkingDirectory: metadata.WorkingDirectory,
+			WorktreeRootPath: metadata.WorktreeRootPath,
 			User:             metadata.User,
 			Status:           status,
 			StartedAt:        metadata.StartedAt,
@@ -276,6 +278,7 @@ func refreshFlowJobsCache() {
 		Path          string `json:"path"`
 		Jobs          []*Job `json:"jobs,omitempty"`
 		WorkspaceName string `json:"workspace_name,omitempty"`
+		WorkspacePath string `json:"workspace_path,omitempty"`
 	}
 
 	var planSummaries []PlanSummary
@@ -326,13 +329,20 @@ func refreshFlowJobsCache() {
 				endedAt = &endTime
 			}
 
+			// Construct the worktree path if this job has a worktree
+			worktreePath := plan.WorkspacePath
+			if job.Worktree != "" && plan.WorkspacePath != "" {
+				worktreePath = filepath.Join(plan.WorkspacePath, ".grove-worktrees", job.Worktree)
+			}
+
 			session := &models.Session{
 				ID:               job.ID,
 				Type:             job.Type, // Use specific job type (e.g. chat, interactive_agent, oneshot)
 				Status:           displayStatus,
 				Repo:             plan.WorkspaceName,
 				Branch:           job.Worktree,
-				WorkingDirectory: plan.Path,
+				WorkingDirectory: plan.Path,     // This is the plan directory path
+				WorktreeRootPath: worktreePath,  // This is the correct workspace/worktree path
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
 				LastActivity:     job.UpdatedAt,
@@ -415,6 +425,7 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		Path          string `json:"path"`
 		Jobs          []*Job `json:"jobs,omitempty"`
 		WorkspaceName string `json:"workspace_name,omitempty"`
+		WorkspacePath string `json:"workspace_path,omitempty"`
 	}
 
 	var planSummaries []PlanSummary
@@ -471,13 +482,20 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 				endedAt = &endTime
 			}
 
+			// Construct the worktree path if this job has a worktree
+			worktreePath := plan.WorkspacePath
+			if job.Worktree != "" && plan.WorkspacePath != "" {
+				worktreePath = filepath.Join(plan.WorkspacePath, ".grove-worktrees", job.Worktree)
+			}
+
 			session := &models.Session{
 				ID:               job.ID,
 				Type:             job.Type, // Use specific job type (e.g. chat, interactive_agent, oneshot)
 				Status:           displayStatus,
 				Repo:             plan.WorkspaceName,
 				Branch:           job.Worktree,
-				WorkingDirectory: plan.Path,
+				WorkingDirectory: plan.Path,     // This is the plan directory path
+				WorktreeRootPath: worktreePath,  // This is the correct workspace/worktree path
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
 				LastActivity:     job.UpdatedAt,

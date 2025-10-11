@@ -60,11 +60,6 @@ func NewCleanupCmd() *cobra.Command {
 	return cmd
 }
 
-// isProcessAlive is now a wrapper around the grove-core utility.
-func isProcessAlive(pid int) bool {
-	return process.IsProcessAlive(pid)
-}
-
 // CleanupDeadSessions checks all running/idle sessions and marks dead ones as completed
 // Uses default 30 minute inactivity threshold
 func CleanupDeadSessions(storage interfaces.SessionStorer) (int, error) {
@@ -167,7 +162,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 		// For running/idle sessions, check if still active
 		if session.Status == "running" || session.Status == "idle" {
 			// First check if process is dead (quick check)
-			if session.PID > 0 && !isProcessAlive(session.PID) {
+			if session.PID > 0 && !process.IsProcessAlive(session.PID) {
 				// Mark session as interrupted
 				if err := storage.UpdateSessionStatus(session.ID, "interrupted"); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
