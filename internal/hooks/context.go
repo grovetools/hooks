@@ -217,6 +217,14 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		metadata.ProjectName = projInfo.Name
 		metadata.IsWorktree = projInfo.IsWorktree
 		metadata.ParentEcosystemPath = projInfo.ParentEcosystemPath
+
+		// For ecosystem worktrees, use the parent ecosystem name as the repo
+		// This ensures consistency with flow job discovery which uses the parent workspace
+		if projInfo.IsWorktree && projInfo.IsEcosystem && projInfo.ParentEcosystemPath != "" {
+			// Extract the parent ecosystem name from the path
+			parentName := filepath.Base(projInfo.ParentEcosystemPath)
+			metadata.Repo = parentName
+		}
 	}
 
 	// Write metadata.json
