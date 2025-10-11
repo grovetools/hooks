@@ -87,8 +87,9 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 			continue
 		}
 
-		sessionID := entry.Name()
-		sessionDir := filepath.Join(groveSessionsDir, sessionID)
+		// Use directory name to locate the session files
+		dirName := entry.Name()
+		sessionDir := filepath.Join(groveSessionsDir, dirName)
 		pidFile := filepath.Join(sessionDir, "pid.lock")
 		metadataFile := filepath.Join(sessionDir, "metadata.json")
 
@@ -120,6 +121,10 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 			// Skip if metadata is invalid
 			continue
 		}
+
+		// Use the session ID from metadata, not the directory name
+		// This ensures consistency with flow jobs and database entries
+		sessionID := metadata.SessionID
 
 		// Determine status and last activity based on liveness
 		status := "running"
@@ -522,7 +527,11 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 		// If a session with this ID already exists (from flow jobs),
 		// update its status to reflect the live process.
 		if existing, ok := sessionsMap[session.ID]; ok {
-			existing.Status = session.Status
+			// Don't override terminal states from flow jobs
+			// Flow jobs are authoritative for completed/failed/interrupted states
+			if existing.Status != "completed" && existing.Status != "failed" && existing.Status != "interrupted" {
+				existing.Status = session.Status
+			}
 			existing.PID = session.PID
 			existing.LastActivity = session.LastActivity
 		} else {
