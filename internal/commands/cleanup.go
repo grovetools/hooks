@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -98,7 +100,41 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 								fmt.Printf("Found stale interactive session: %s (PID: %d)\n", sessionID, pid)
 							}
 
-							// Remove the directory
+							// Check if this is a flow job by reading metadata
+							metadataFile := filepath.Join(sessionDir, "metadata.json")
+							if metadataContent, err := os.ReadFile(metadataFile); err == nil {
+								var metadata SessionMetadata
+								if err := json.Unmarshal(metadataContent, &metadata); err == nil {
+									// Check if it's a flow job
+									if (metadata.Type == "interactive_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {
+										// This is a flow job - trigger auto-completion
+										if os.Getenv("GROVE_DEBUG") != "" {
+											fmt.Printf("Triggering auto-completion for dead flow job: %s\n", metadata.JobFilePath)
+										}
+										go func(jobPath, sessDir string) {
+											cmd := exec.Command("flow", "plan", "complete", jobPath)
+											if os.Getenv("GROVE_DEBUG") != "" {
+												output, err := cmd.CombinedOutput()
+												if err != nil {
+													fmt.Fprintf(os.Stderr, "Debug: Auto-completion of dead flow job %s failed: %v\nOutput: %s\n", jobPath, err, string(output))
+												} else {
+													fmt.Fprintf(os.Stderr, "Debug: Auto-completed dead flow job %s\n", jobPath)
+												}
+											} else {
+												cmd.Run()
+											}
+											// After completion, wait a bit then clean up the session directory
+											// This gives time for any retries or manual completions to read the metadata
+											time.Sleep(10 * time.Second)
+											os.RemoveAll(sessDir)
+										}(metadata.JobFilePath, sessionDir)
+										cleaned++
+										continue // Skip the removal below
+									}
+								}
+							}
+
+							// Not a flow job, or couldn't read metadata - remove the directory
 							if err := os.RemoveAll(sessionDir); err == nil {
 								cleaned++
 								if os.Getenv("GROVE_DEBUG") != "" {

@@ -132,6 +132,37 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 		lastActivity := metadata.StartedAt // Default to StartedAt
 
 		if !isAlive {
+			// Process is dead. Check if this is a flow job that should be auto-completed.
+			if (metadata.Type == "interactive_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {
+				// This is a dead flow job. Delegate to 'flow plan complete' in the background
+				// to avoid blocking the session list command.
+				// Note: We keep the session directory so that flow plan complete can read the metadata
+				// to close the tmux window. The directory will be cleaned up after completion.
+				go func(jobPath, sessDir string) {
+					cmd := exec.Command("flow", "plan", "complete", jobPath)
+					// We can log errors for debugging but don't need to block on them.
+					// This is a best-effort, self-healing mechanism.
+					if os.Getenv("GROVE_DEBUG") != "" {
+						output, err := cmd.CombinedOutput()
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "Debug: Auto-completion of dead flow job %s failed: %v\nOutput: %s\n", jobPath, err, string(output))
+						} else {
+							fmt.Fprintf(os.Stderr, "Debug: Auto-completed dead flow job %s\n", jobPath)
+						}
+					} else {
+						cmd.Run()
+					}
+					// After completion, wait a bit then clean up the session directory
+					// This gives time for any retries or manual completions to read the metadata
+					time.Sleep(10 * time.Second)
+					os.RemoveAll(sessDir)
+				}(metadata.JobFilePath, sessionDir)
+			} else {
+				// This is a standard Claude session that died unexpectedly. Clean up its directory.
+				go os.RemoveAll(sessionDir)
+			}
+
+			// For the current view, show the session as interrupted. It will be updated on the next refresh.
 			status = "interrupted"
 			now := time.Now()
 			endedAt = &now

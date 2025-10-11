@@ -827,11 +827,10 @@ func (m browseModel) View() string {
 	var b strings.Builder
 
 	// Compact header with optional filter input
-	headerLine := t.Header.Render("Grove Sessions Browser") + "  "
+	headerLine := ""
 	if m.searchActive {
 		headerLine += t.Muted.Render(m.filterInput.View()) + "  "
 	}
-	headerLine += t.Success.Render("●")
 
 	b.WriteString(headerLine)
 	b.WriteString("\n")
@@ -948,13 +947,13 @@ func (m browseModel) View() string {
 		}
 
 		rows = append(rows, []string{
-			padStr(indicator, 4),                      // Indicator column
-			padStr(sessionIDStr, 32),                  // Session ID (wider for job names)
-			padStr(sessionTypeStr, 18),                // Type
-			padStr(statusStr, 20),                     // Status with elapsed time
-			padStr(truncateStr(repository, 25), 25),   // Repository
-			padStr(truncateStr(worktree, 20), 20),     // Worktree
-			padStr(startedStr, 12),                    // Started
+			padStr(indicator, 4),                    // Indicator column
+			padStr(sessionIDStr, 32),                // Session ID (wider for job names)
+			padStr(sessionTypeStr, 18),              // Type
+			padStr(statusStr, 20),                   // Status with elapsed time
+			padStr(truncateStr(repository, 25), 25), // Repository
+			padStr(truncateStr(worktree, 20), 20),   // Worktree
+			padStr(startedStr, 12),                  // Started
 		})
 	}
 
@@ -1276,4 +1275,3 @@ func openInFileManager(path string) {
 		cmd.Start()
 	}
 }
-
