@@ -125,7 +125,7 @@ func runInstall(targetDir string) error {
 		},
 		"PostToolUse": {
 			{
-				Matcher: ".*",
+				Matcher: "(Edit|Write|MultiEdit|Bash|Read)",
 				Hooks: []Hook{
 					{
 						Type:    "command",
