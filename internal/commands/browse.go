@@ -45,6 +45,9 @@ func loadFilterPreferences() BrowseFilterPreferences {
 			"interrupted":  true,
 			"failed":       true,
 			"error":        true,
+			"hold":         true,
+			"todo":         true,
+			"abandoned":    false, // Default to not show abandoned
 		},
 		TypeFilters: map[string]bool{
 			"claude_code":       true,
@@ -434,7 +437,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle filter view keys
 		if m.showFilterView {
-			statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error"}
+			statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error", "hold", "todo", "abandoned"}
 			typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
 			totalOptions := len(statusOptions) + len(typeOptions)
 
@@ -1014,6 +1017,12 @@ func getStatusStyle(status string) lipgloss.Style {
 		return t.Warning
 	case "completed":
 		return t.Info
+	case "todo":
+		return t.Muted
+	case "hold":
+		return t.Warning
+	case "abandoned":
+		return t.Faint
 	case "failed", "error":
 		return t.Error
 	default:
@@ -1038,6 +1047,12 @@ func getStatusIcon(status string, sessionType string) string {
 		return "✗" // X mark
 	case "interrupted":
 		return "⊗" // Circled X
+	case "hold":
+		return "⏸"
+	case "todo":
+		return "○" // same as pending
+	case "abandoned":
+		return "⊗" // same as interrupted
 	default:
 		return "○" // Hollow circle for unknown
 	}
@@ -1141,7 +1156,7 @@ func (m browseModel) viewFilterOptions() string {
 	content.WriteString("\n\n")
 
 	// Build rows for the table
-	statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error"}
+	statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error", "hold", "todo", "abandoned"}
 	typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
 
 	var rows [][]string

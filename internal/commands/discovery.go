@@ -833,13 +833,17 @@ func getRealtimeJobStatus(jobFilePath string) (string, error) {
 	jobInfo := parseJobFrontmatter(string(content))
 
 	// Terminal states are the source of truth from frontmatter
-	terminalStates := map[string]bool{
+	nonLiveStates := map[string]bool{
 		"completed":   true,
 		"failed":      true,
 		"interrupted": true,
 		"error":       true,
+		"abandoned":   true,
+		"hold":        true,
+		"todo":        true,
+		"pending":     true,
 	}
-	if terminalStates[jobInfo.Status] {
+	if nonLiveStates[jobInfo.Status] {
 		return jobInfo.Status, nil
 	}
 
