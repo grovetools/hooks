@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/tui/browse"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -116,8 +118,14 @@ func NewBrowseCmd() *cobra.Command {
 			// Load filter preferences
 			prefs := loadFilterPreferences()
 
-			// Discover workspaces (empty for now, can be enhanced later)
-			var workspaces []*workspace.WorkspaceNode
+			// Discover workspaces
+			logger := logrus.New()
+			logger.SetOutput(io.Discard) // Suppress logs in the TUI
+			workspaces, err := workspace.GetProjects(logger)
+			if err != nil {
+				// If workspace discovery fails, continue with empty workspaces
+				workspaces = []*workspace.WorkspaceNode{}
+			}
 
 			// Create the interactive model using the extracted browse package
 			m := browse.NewModel(

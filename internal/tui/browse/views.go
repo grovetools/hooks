@@ -197,15 +197,19 @@ func (m Model) viewTree() string {
 		// Render visible rows
 		for i := startIdx; i < endIdx; i++ {
 			node := m.displayNodes[i]
-			var line string
+			var line strings.Builder
 
-			// Cursor
+			// 1. Render cursor
 			if i == m.cursor {
-				line += "▶ "
+				line.WriteString("▶ ")
 			} else {
-				line += "  "
+				line.WriteString("  ")
 			}
 
+			// 2. Render the unified prefix
+			line.WriteString(node.prefix)
+
+			// 3. Render the node's content
 			if node.isSession {
 				s := node.session
 				statusIcon := getStatusIcon(s.Status, s.Type)
@@ -221,21 +225,27 @@ func (m Model) viewTree() string {
 
 				statusStyle := getStatusStyle(s.Status)
 
-				// Indentation for session
-				line += strings.Repeat("  ", node.workspace.GetDepth()+1) + "└─ "
-
-				line += fmt.Sprintf("%s %s (%s, %s)",
+				line.WriteString(fmt.Sprintf("%s %s (%s, %s)",
 					statusIcon,
 					utils.TruncateStr(sessionID, 40),
 					sessionType,
 					statusStyle.Render(s.Status),
-				)
+				))
 			} else {
 				ws := node.workspace
-				// Use pre-calculated prefix from grove-core
-				line += ws.TreePrefix + ws.Name
+				// Style workspace name based on its type
+				var nameStyle lipgloss.Style
+				if ws.IsWorktree() {
+					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Blue)
+				} else if ws.IsEcosystem() {
+					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Cyan).Bold(true)
+				} else {
+					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Cyan)
+				}
+				line.WriteString(nameStyle.Render(ws.Name))
 			}
-			b.WriteString(line + "\n")
+
+			b.WriteString(line.String() + "\n")
 		}
 	}
 

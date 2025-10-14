@@ -48,8 +48,8 @@ type displayNode struct {
 	session   *models.Session
 
 	// Pre-calculated for rendering
-	lineText string
-	depth    int
+	prefix string // Tree structure prefix (e.g., "│   ├─ ")
+	depth  int
 }
 
 // Model is the model for the interactive session browser
@@ -505,11 +505,66 @@ func (m *Model) buildDisplayTree() {
 	filterText := strings.ToLower(m.filterInput.Value())
 
 	workspaceSessionMap := make(map[string][]*models.Session)
+	var unmatchedSessions []*models.Session
+
 	for _, session := range m.filteredSessions {
-		// Find parent workspace for session
-		parentWorkspace := m.workspaceProvider.FindByPath(session.WorkingDirectory)
-		if parentWorkspace != nil {
-			workspaceSessionMap[parentWorkspace.Path] = append(workspaceSessionMap[parentWorkspace.Path], session)
+		// Find the most specific workspace that contains this session
+		var bestMatch *workspace.WorkspaceNode
+		bestMatchDepth := -1
+
+		for _, ws := range m.workspaces {
+			// Check if session's working directory is within this workspace
+			if strings.HasPrefix(session.WorkingDirectory+"/", ws.Path+"/") || session.WorkingDirectory == ws.Path {
+				depth := ws.GetDepth()
+				if depth > bestMatchDepth {
+					bestMatch = ws
+					bestMatchDepth = depth
+				}
+			}
+		}
+
+		// For flow plan sessions that didn't match by working directory,
+		// try to match based on repo metadata
+		if bestMatch == nil && session.JobFilePath != "" {
+			// Extract repo name from job file path
+			// Example: /Users/.../repos/grove-hooks/main/plans/... -> grove-hooks
+			parts := strings.Split(session.JobFilePath, "/")
+			for i, part := range parts {
+				if part == "repos" && i+1 < len(parts) {
+					repoName := parts[i+1]
+					// Find workspace matching this repo name and session's repo field (ecosystem/worktree)
+					for _, ws := range m.workspaces {
+						if ws.Name == repoName {
+							// Check if this workspace is in the correct ecosystem/worktree
+							if session.Repo != "" {
+								// The workspace should be under the ecosystem/worktree specified in session.Repo
+								if strings.Contains(ws.Path, session.Repo) {
+									depth := ws.GetDepth()
+									if depth > bestMatchDepth {
+										bestMatch = ws
+										bestMatchDepth = depth
+									}
+								}
+							} else {
+								// No repo specified, just match by name
+								depth := ws.GetDepth()
+								if depth > bestMatchDepth {
+									bestMatch = ws
+									bestMatchDepth = depth
+								}
+							}
+						}
+					}
+					break
+				}
+			}
+		}
+
+		if bestMatch != nil {
+			workspaceSessionMap[bestMatch.Path] = append(workspaceSessionMap[bestMatch.Path], session)
+		} else {
+			// Track sessions that don't match any workspace
+			unmatchedSessions = append(unmatchedSessions, session)
 		}
 	}
 
@@ -537,17 +592,62 @@ func (m *Model) buildDisplayTree() {
 		}
 	}
 
-	// Build the final list
+	// Build the final list - workspaces are already in hierarchical order from GetProjects()
 	for _, ws := range m.workspaces {
-		if workspacesToShow[ws.Path] || filterText == "" {
-			nodes = append(nodes, &displayNode{isSession: false, workspace: ws})
+		if workspacesToShow[ws.Path] {
+			// Add workspace node with its pre-calculated TreePrefix
+			nodes = append(nodes, &displayNode{
+				isSession: false,
+				workspace: ws,
+				prefix:    ws.TreePrefix, // Use the pre-calculated prefix
+			})
+
+			// Add sessions under this workspace
 			if sessions, ok := workspaceSessionMap[ws.Path]; ok {
-				for _, s := range sessions {
-					nodes = append(nodes, &displayNode{isSession: true, session: s, workspace: ws})
+				for i, s := range sessions {
+					isLastSession := i == len(sessions)-1
+
+					// Calculate session prefix by inheriting from parent workspace
+					var sessionPrefixBuilder strings.Builder
+
+					// Inherit indentation from parent workspace
+					indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
+					indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+					sessionPrefixBuilder.WriteString(indentPrefix)
+
+					// Add extra indent level
+					if ws.GetDepth() > 0 || ws.TreePrefix != "" {
+						sessionPrefixBuilder.WriteString("  ")
+					}
+
+					// Add connector
+					if isLastSession {
+						sessionPrefixBuilder.WriteString("└─ ")
+					} else {
+						sessionPrefixBuilder.WriteString("├─ ")
+					}
+
+					nodes = append(nodes, &displayNode{
+						isSession: true,
+						session:   s,
+						workspace: ws,
+						prefix:    sessionPrefixBuilder.String(), // Assign calculated prefix
+					})
 				}
 			}
 		}
 	}
+
+	// Add unmatched sessions at the end
+	for _, s := range unmatchedSessions {
+		nodes = append(nodes, &displayNode{
+			isSession: true,
+			session:   s,
+			workspace: nil,
+			prefix:    "", // Unmatched sessions appear at the root
+		})
+	}
+
 	m.displayNodes = nodes
 }
 
