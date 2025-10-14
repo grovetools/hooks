@@ -13,8 +13,10 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-hooks/internal/config"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
+	"github.com/mattsolo1/grove-notifications"
 )
 
 // Cache for flow jobs discovery to avoid expensive flow plan list calls
@@ -1015,4 +1017,123 @@ func markInterruptedJobsInPlan(planDir string, dryRun bool) (int, error) {
 	}
 
 	return updated, nil
+}
+
+// DispatchStateChangeNotifications compares old and new sessions and sends notifications for relevant state changes
+func DispatchStateChangeNotifications(oldSessions, newSessions []*models.Session) {
+	// Build a map of old session states for quick lookup
+	oldStatusMap := make(map[string]string)
+	for _, s := range oldSessions {
+		oldStatusMap[s.ID] = s.Status
+	}
+
+	// Check each new session for relevant state changes
+	for _, newSession := range newSessions {
+		oldStatus, wasTracked := oldStatusMap[newSession.ID]
+		if !wasTracked {
+			// This is a new session, not a state change
+			continue
+		}
+
+		// Rule: Notify when a chat job transitions from running to pending_user
+		if newSession.Type == "chat" && newSession.Status == "pending_user" && oldStatus == "running" {
+			sendJobReadyNotification(newSession)
+		}
+
+		// Rule: Notify when an interactive_agent job transitions from running to idle
+		if newSession.Type == "interactive_agent" && newSession.Status == "idle" && oldStatus == "running" {
+			sendJobReadyNotification(newSession)
+		}
+
+		// Rule: Notify when a oneshot job completes
+		if newSession.Type == "oneshot" && newSession.Status == "completed" && oldStatus == "running" {
+			sendJobReadyNotification(newSession)
+		}
+
+		// Future notification rules can be added here
+		// For example:
+		// - Job failures: oldStatus == "running" && newSession.Status == "failed"
+	}
+}
+
+// sendJobReadyNotification sends a notification that a job is ready for user input
+func sendJobReadyNotification(session *models.Session) {
+	// Load config to check notification settings
+	cfg := config.Load()
+
+	// Build title from session info based on job type
+	var title string
+	if session.Type == "chat" {
+		title = fmt.Sprintf("💬 Chat Ready: %s", session.JobTitle)
+		if session.JobTitle == "" && session.PlanName != "" {
+			title = fmt.Sprintf("💬 Chat Ready: %s", session.PlanName)
+		} else if session.JobTitle == "" {
+			title = "💬 Chat Ready"
+		}
+	} else if session.Type == "interactive_agent" {
+		title = fmt.Sprintf("🤖 Agent Idle: %s", session.JobTitle)
+		if session.JobTitle == "" && session.PlanName != "" {
+			title = fmt.Sprintf("🤖 Agent Idle: %s", session.PlanName)
+		} else if session.JobTitle == "" {
+			title = "🤖 Agent Idle"
+		}
+	} else if session.Type == "oneshot" {
+		title = fmt.Sprintf("✅ Oneshot Complete: %s", session.JobTitle)
+		if session.JobTitle == "" && session.PlanName != "" {
+			title = fmt.Sprintf("✅ Oneshot Complete: %s", session.PlanName)
+		} else if session.JobTitle == "" {
+			title = "✅ Oneshot Complete"
+		}
+	} else {
+		title = fmt.Sprintf("Job Ready: %s", session.JobTitle)
+		if session.JobTitle == "" {
+			title = "Job Ready"
+		}
+	}
+
+	// Build detailed message with session context
+	var messageParts []string
+
+	// Add session ID
+	if session.ID != "" {
+		messageParts = append(messageParts, fmt.Sprintf("ID: %s", session.ID))
+	}
+
+	// Add job type
+	if session.Type != "" {
+		messageParts = append(messageParts, fmt.Sprintf("Type: %s", session.Type))
+	}
+
+	// Add repository and worktree/branch
+	if session.Repo != "" {
+		if session.Branch != "" {
+			messageParts = append(messageParts, fmt.Sprintf("Worktree: %s/%s", session.Repo, session.Branch))
+		} else {
+			messageParts = append(messageParts, fmt.Sprintf("Repo: %s", session.Repo))
+		}
+	}
+
+	// Add plan name if different from job title
+	if session.PlanName != "" && session.PlanName != session.JobTitle {
+		messageParts = append(messageParts, fmt.Sprintf("Plan: %s", session.PlanName))
+	}
+
+	message := strings.Join(messageParts, "\n")
+
+	// Send ntfy notification if configured
+	if cfg.Ntfy.Enabled && cfg.Ntfy.Topic != "" {
+		_ = notifications.SendNtfy(
+			cfg.Ntfy.URL,
+			cfg.Ntfy.Topic,
+			title,
+			message,
+			"default",
+			nil,
+		)
+	}
+
+	// Also send system notification if configured
+	if len(cfg.System.Levels) > 0 {
+		_ = notifications.SendSystem(title, message, "info")
+	}
 }
