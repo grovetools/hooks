@@ -1,7 +1,6 @@
 package browse
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +9,7 @@ import (
 	"github.com/mattsolo1/grove-core/tui/components"
 	gtable "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-hooks/commands"
+	"github.com/mattsolo1/grove-hooks/internal/utils"
 )
 
 func (m Model) View() string {
@@ -67,10 +66,10 @@ func (m Model) viewTable() string {
 
 		var sessionIDStr, sessionTypeStr string
 		if isClaudeSession {
-			sessionIDStr = lipgloss.NewStyle().Foreground(t.Colors.Blue).Render(commands.TruncateStr(sessionID, 30))
+			sessionIDStr = lipgloss.NewStyle().Foreground(t.Colors.Blue).Render(utils.TruncateStr(sessionID, 30))
 			sessionTypeStr = lipgloss.NewStyle().Foreground(t.Colors.Blue).Render(sessionType)
 		} else {
-			sessionIDStr = lipgloss.NewStyle().Foreground(t.Colors.Violet).Render(commands.TruncateStr(sessionID, 30))
+			sessionIDStr = lipgloss.NewStyle().Foreground(t.Colors.Violet).Render(utils.TruncateStr(sessionID, 30))
 			sessionTypeStr = lipgloss.NewStyle().Foreground(t.Colors.Violet).Render(sessionType)
 		}
 
@@ -93,10 +92,10 @@ func (m Model) viewTable() string {
 		if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
 			var elapsedStr string
 			if !s.LastActivity.IsZero() {
-				elapsed := commands.FormatDuration(time.Since(s.LastActivity))
+				elapsed := utils.FormatDuration(time.Since(s.LastActivity))
 				elapsedStr = fmt.Sprintf("(%s)", elapsed)
 			} else if !s.StartedAt.IsZero() {
-				elapsed := commands.FormatDuration(time.Since(s.StartedAt))
+				elapsed := utils.FormatDuration(time.Since(s.StartedAt))
 				elapsedStr = fmt.Sprintf("(%s)", elapsed)
 			} else {
 				elapsedStr = "(unknown)"
@@ -121,19 +120,19 @@ func (m Model) viewTable() string {
 			startedStr = "n/a"
 		} else {
 			if time.Since(s.StartedAt) < 24*time.Hour {
-				startedStr = commands.FormatDuration(time.Since(s.StartedAt)) + " ago"
+				startedStr = utils.FormatDuration(time.Since(s.StartedAt)) + " ago"
 			} else {
 				startedStr = s.StartedAt.Format("Jan 2 15:04")
 			}
 		}
 		rows = append(rows, []string{
-			commands.PadStr(indicator, 4),
-			commands.PadStr(sessionIDStr, 32),
-			commands.PadStr(sessionTypeStr, 18),
-			commands.PadStr(statusStr, 20),
-			commands.PadStr(commands.TruncateStr(repository, 25), 25),
-			commands.PadStr(commands.TruncateStr(worktree, 20), 20),
-			commands.PadStr(startedStr, 12),
+			utils.PadStr(indicator, 4),
+			utils.PadStr(sessionIDStr, 32),
+			utils.PadStr(sessionTypeStr, 18),
+			utils.PadStr(statusStr, 20),
+			utils.PadStr(utils.TruncateStr(repository, 25), 25),
+			utils.PadStr(utils.TruncateStr(worktree, 20), 20),
+			utils.PadStr(startedStr, 12),
 		})
 	}
 
@@ -227,7 +226,7 @@ func (m Model) viewTree() string {
 
 				line += fmt.Sprintf("%s %s (%s, %s)",
 					statusIcon,
-					commands.TruncateStr(sessionID, 40),
+					utils.TruncateStr(sessionID, 40),
 					sessionType,
 					statusStyle.Render(s.Status),
 				)

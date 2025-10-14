@@ -15,9 +15,24 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-hooks/commands"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
+	"github.com/mattsolo1/grove-hooks/internal/utils"
 )
+
+// FilterPreferences stores the user's filter preferences
+type FilterPreferences struct {
+	StatusFilters map[string]bool `json:"status_filters"`
+	TypeFilters   map[string]bool `json:"type_filters"`
+}
+
+// GetAllSessionsFunc is the function type for getting all sessions
+type GetAllSessionsFunc func(storage interfaces.SessionStorer, hideCompleted bool) ([]*models.Session, error)
+
+// DispatchNotificationsFunc is the function type for dispatching state change notifications
+type DispatchNotificationsFunc func(oldSessions, newSessions []*models.Session)
+
+// SaveFilterPreferencesFunc is the function type for saving filter preferences
+type SaveFilterPreferencesFunc func(prefs FilterPreferences) error
 
 type viewMode int
 
@@ -67,9 +82,23 @@ type Model struct {
 	typeFilters      map[string]bool
 	searchActive     bool // Whether search input is active
 	viewMode         viewMode
+
+	// Function dependencies (to avoid import cycles)
+	getAllSessions         GetAllSessionsFunc
+	dispatchNotifications  DispatchNotificationsFunc
+	saveFilterPreferences  SaveFilterPreferencesFunc
 }
 
-func NewModel(sessions []*models.Session, workspaces []*workspace.WorkspaceNode, storage interfaces.SessionStorer, hideCompleted bool, filterPrefs commands.BrowseFilterPreferences) Model {
+func NewModel(
+	sessions []*models.Session,
+	workspaces []*workspace.WorkspaceNode,
+	storage interfaces.SessionStorer,
+	hideCompleted bool,
+	filterPrefs FilterPreferences,
+	getAllSessions GetAllSessionsFunc,
+	dispatchNotifications DispatchNotificationsFunc,
+	saveFilterPreferences SaveFilterPreferencesFunc,
+) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter by session ID, repo, branch, or working directory..."
 	ti.CharLimit = 256
@@ -83,19 +112,22 @@ func NewModel(sessions []*models.Session, workspaces []*workspace.WorkspaceNode,
 	keys := NewKeyMap()
 
 	model := Model{
-		sessions:         sessions,
-		workspaces:       workspaces,
-		filteredSessions: sessions,
-		filterInput:      ti,
-		selectedIDs:      make(map[string]bool),
-		storage:          storage,
-		lastRefresh:      time.Now(),
-		keys:             keys,
-		help:             help.New(keys),
-		hideCompleted:    hideCompleted,
-		statusFilters:    filterPrefs.StatusFilters,
-		typeFilters:      filterPrefs.TypeFilters,
-		viewMode:         tableView,
+		sessions:              sessions,
+		workspaces:            workspaces,
+		filteredSessions:      sessions,
+		filterInput:           ti,
+		selectedIDs:           make(map[string]bool),
+		storage:               storage,
+		lastRefresh:           time.Now(),
+		keys:                  keys,
+		help:                  help.New(keys),
+		hideCompleted:         hideCompleted,
+		statusFilters:         filterPrefs.StatusFilters,
+		typeFilters:           filterPrefs.TypeFilters,
+		viewMode:              tableView,
+		getAllSessions:        getAllSessions,
+		dispatchNotifications: dispatchNotifications,
+		saveFilterPreferences: saveFilterPreferences,
 	}
 
 	// Build a proper provider if we have workspaces
@@ -106,10 +138,8 @@ func NewModel(sessions []*models.Session, workspaces []*workspace.WorkspaceNode,
 		seen := make(map[string]bool)
 		for _, node := range workspaces {
 			// Only add root projects (not worktrees)
-			if !seen[node.Path] && node.Kind != workspace.StandaloneProjectWorktree &&
-			   node.Kind != workspace.EcosystemWorktree &&
-			   node.Kind != workspace.EcosystemSubProjectWorktree &&
-			   node.Kind != workspace.EcosystemWorktreeSubProjectWorktree {
+			// Check if this is a root node (not a worktree)
+			if !seen[node.Path] {
 				projects = append(projects, workspace.Project{Name: node.Name, Path: node.Path})
 				seen[node.Path] = true
 			}
@@ -152,12 +182,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		newSessions, err := commands.GetAllSessions(m.storage, m.hideCompleted)
+		newSessions, err := m.getAllSessions(m.storage, m.hideCompleted)
 		if err != nil {
 			m.statusMessage = fmt.Sprintf("Error refreshing: %v", err)
 		} else {
 			if len(m.previousSessions) > 0 {
-				go commands.DispatchStateChangeNotifications(m.previousSessions, newSessions)
+				go m.dispatchNotifications(m.previousSessions, newSessions)
 			}
 			m.previousSessions = m.sessions
 			m.sessions = newSessions
@@ -351,7 +381,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if key.Matches(msg, m.keys.CopyID) {
 			if session := m.getCurrentSession(); session != nil {
-				commands.CopyToClipboard(session.ID)
+				utils.CopyToClipboard(session.ID)
 			}
 		} else if key.Matches(msg, m.keys.OpenDir) {
 			var pathToOpen string
@@ -368,11 +398,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if pathToOpen != "" {
-				commands.OpenInFileManager(pathToOpen)
+				utils.OpenInFileManager(pathToOpen)
 			}
 		} else if key.Matches(msg, m.keys.ExportJSON) {
 			if session := m.getCurrentSession(); session != nil {
-				commands.ExportSessionToJSON(session)
+				utils.ExportSessionToJSON(session)
 			}
 		} else if key.Matches(msg, m.keys.Select) {
 			if session := m.getCurrentSession(); session != nil && !m.showDetails {
@@ -406,7 +436,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if key.Matches(msg, m.keys.Kill) {
 			if session := m.getCurrentSession(); session != nil && !m.showDetails {
 				if session.Type == "" || session.Type == "claude_session" {
-					groveSessionsDir := commands.ExpandPath("~/.grove/hooks/sessions")
+					groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
 					sessionDir := filepath.Join(groveSessionsDir, session.ID)
 					pidFile := filepath.Join(sessionDir, "pid.lock")
 					pidContent, err := os.ReadFile(pidFile)
@@ -575,15 +605,20 @@ func (m Model) updateFilterView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
 	totalOptions := len(statusOptions) + len(typeOptions)
 
-	if key.Matches(msg, m.keys.Up) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	if key.Matches(keyMsg, m.keys.Up) {
 		if m.filterCursor > 0 {
 			m.filterCursor--
 		}
-	} else if key.Matches(msg, m.keys.Down) {
+	} else if key.Matches(keyMsg, m.keys.Down) {
 		if m.filterCursor < totalOptions-1 {
 			m.filterCursor++
 		}
-	} else if key.Matches(msg, m.keys.Select) || msg.(tea.KeyMsg).String() == " " {
+	} else if key.Matches(keyMsg, m.keys.Select) || keyMsg.String() == " " {
 		if m.filterCursor < len(statusOptions) {
 			status := statusOptions[m.filterCursor]
 			m.statusFilters[status] = !m.statusFilters[status]
@@ -592,14 +627,19 @@ func (m Model) updateFilterView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			typ := typeOptions[typeIdx]
 			m.typeFilters[typ] = !m.typeFilters[typ]
 		}
-		prefs := commands.BrowseFilterPreferences{
+		prefs := FilterPreferences{
 			StatusFilters: m.statusFilters,
 			TypeFilters:   m.typeFilters,
 		}
-		commands.SaveFilterPreferences(prefs)
+		m.saveFilterPreferences(prefs)
 		m.updateFilteredAndDisplayNodes()
 		m.cursor = 0
 		m.scrollOffset = 0
 	}
 	return m, nil
+}
+
+// SelectedSession returns the currently selected session (if any)
+func (m Model) SelectedSession() *models.Session {
+	return m.selectedSession
 }

@@ -72,7 +72,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	cleaned := 0
 
 	// 1. Clean up stale interactive Claude session directories
-	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	groveSessionsDir := ExpandPath("~/.grove/hooks/sessions")
 	if _, err := os.Stat(groveSessionsDir); err == nil {
 		entries, err := os.ReadDir(groveSessionsDir)
 		if err == nil {
@@ -217,8 +217,8 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	return cleaned, nil
 }
 
-// expandPath expands ~ to home directory, respecting XDG_DATA_HOME for .grove paths
-func expandPath(path string) string {
+// ExpandPath expands ~ to home directory, respecting XDG_DATA_HOME for .grove paths
+func ExpandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		expandedPath := path[2:]
 

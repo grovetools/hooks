@@ -13,6 +13,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
+	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -497,9 +498,9 @@ This updates the job frontmatter files directly.`,
 
 			// Common locations to search for plans
 			planDirs := []string{
-				expandPath("~/Documents/nb/repos"),
-				expandPath("~/Code/nb/repos"),
-				expandPath("~/Code"),
+				utils.ExpandPath("~/Documents/nb/repos"),
+				utils.ExpandPath("~/Code/nb/repos"),
+				utils.ExpandPath("~/Code"),
 			}
 
 			for _, baseDir := range planDirs {
@@ -578,7 +579,7 @@ WARNING: This will terminate the Claude process immediately.`,
 			sessionID := args[0]
 
 			// First, try to find the session in the filesystem
-			groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+			groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
 			sessionDir := filepath.Join(groveSessionsDir, sessionID)
 			pidFile := filepath.Join(sessionDir, "pid.lock")
 

@@ -16,13 +16,14 @@ import (
 	"github.com/mattsolo1/grove-hooks/internal/config"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
+	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/mattsolo1/grove-notifications"
 )
 
 // Cache for flow jobs discovery to avoid expensive flow plan list calls
 var (
 	flowJobsCacheTTL  = 1 * time.Minute // Cache for 1 minute
-	flowJobsCachePath = expandPath("~/.grove/hooks/flow_jobs_cache.json")
+	flowJobsCachePath = utils.ExpandPath("~/.grove/hooks/flow_jobs_cache.json")
 	// Background refresh disabled by default (CLI commands exit too quickly).
 	// Can be enabled for long-running commands like `browse` TUI.
 	flowJobsBackgroundRefresh = false
@@ -72,7 +73,7 @@ type SessionMetadata struct {
 // DiscoverLiveClaudeSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
 // A session is considered live if its PID is still alive
 func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Session, error) {
-	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
 
 	// Check if directory exists
 	if _, err := os.Stat(groveSessionsDir); os.IsNotExist(err) {
