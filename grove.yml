@@ -5,4 +5,4 @@ binary:
   path: ./bin/grove-hooks
 
 context:
-  default_rules_path: .cx-rules
+  default_rules_path: .cx/dev-no-tests.rules

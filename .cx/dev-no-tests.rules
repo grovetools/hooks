@@ -1,19 +1,12 @@
 # Development rules: Code only, no tests
 
-# Include all Go source files
 **/*.go
-
-# Main/build/config files
-main.go
 Makefile
 go.mod
 grove.yml
-!go.sum
 
-# Exclude test files
+!go.sum
 !tests/**
 !test/**
 !**/*_test.go
-
-# Exclude docs
 !docs
