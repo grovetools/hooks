@@ -11,3 +11,11 @@ Makefile
 # Exclude vendor dependencies
 !vendor/**
 !*.sum
+
+*.go
+*.yml
+*.mod
+Makefile
+!*.md
+!*.json
+!*.sum

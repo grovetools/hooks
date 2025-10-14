@@ -12,6 +12,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/process"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 )
@@ -202,7 +203,6 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 			Branch:           metadata.Branch,
 			TmuxKey:          metadata.TmuxKey,
 			WorkingDirectory: metadata.WorkingDirectory,
-			WorktreeRootPath: metadata.WorktreeRootPath,
 			User:             metadata.User,
 			Status:           status,
 			StartedAt:        metadata.StartedAt,
@@ -290,6 +290,12 @@ func refreshFlowJobsCache() {
 	seenJobs := make(map[string]bool)
 
 	for _, plan := range planSummaries {
+		// Get workspace info for this plan
+		var projInfo *workspace.WorkspaceNode
+		if plan.WorkspacePath != "" {
+			projInfo, _ = workspace.GetProjectByPath(plan.WorkspacePath)
+		}
+
 		for _, job := range plan.Jobs {
 			// Deduplicate by job ID (most reliable for flow jobs across workspaces)
 			if job.ID != "" {
@@ -329,20 +335,26 @@ func refreshFlowJobsCache() {
 				endedAt = &endTime
 			}
 
-			// Construct the worktree path if this job has a worktree
-			worktreePath := plan.WorkspacePath
-			if job.Worktree != "" && plan.WorkspacePath != "" {
-				worktreePath = filepath.Join(plan.WorkspacePath, ".grove-worktrees", job.Worktree)
+
+			// Determine repo name using ProjectInfo if available
+			repoName := plan.WorkspaceName
+			if projInfo != nil {
+				if projInfo.IsWorktree() && projInfo.ParentEcosystemPath != "" {
+					// For ecosystem worktrees, use parent ecosystem name
+					repoName = filepath.Base(projInfo.ParentEcosystemPath)
+				} else {
+					// For primary workspaces, use project name
+					repoName = projInfo.Name
+				}
 			}
 
 			session := &models.Session{
 				ID:               job.ID,
 				Type:             job.Type, // Use specific job type (e.g. chat, interactive_agent, oneshot)
 				Status:           displayStatus,
-				Repo:             plan.WorkspaceName,
+				Repo:             repoName,
 				Branch:           job.Worktree,
 				WorkingDirectory: plan.Path,     // This is the plan directory path
-				WorktreeRootPath: worktreePath,  // This is the correct workspace/worktree path
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
 				LastActivity:     job.UpdatedAt,
@@ -442,6 +454,12 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 	seenJobs := make(map[string]bool)
 
 	for _, plan := range planSummaries {
+		// Get workspace info for this plan
+		var projInfo *workspace.WorkspaceNode
+		if plan.WorkspacePath != "" {
+			projInfo, _ = workspace.GetProjectByPath(plan.WorkspacePath)
+		}
+
 		for _, job := range plan.Jobs {
 			// Deduplicate by job ID (most reliable for flow jobs across workspaces)
 			if job.ID != "" {
@@ -482,20 +500,26 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 				endedAt = &endTime
 			}
 
-			// Construct the worktree path if this job has a worktree
-			worktreePath := plan.WorkspacePath
-			if job.Worktree != "" && plan.WorkspacePath != "" {
-				worktreePath = filepath.Join(plan.WorkspacePath, ".grove-worktrees", job.Worktree)
+
+			// Determine repo name using ProjectInfo if available
+			repoName := plan.WorkspaceName
+			if projInfo != nil {
+				if projInfo.IsWorktree() && projInfo.ParentEcosystemPath != "" {
+					// For ecosystem worktrees, use parent ecosystem name
+					repoName = filepath.Base(projInfo.ParentEcosystemPath)
+				} else {
+					// For primary workspaces, use project name
+					repoName = projInfo.Name
+				}
 			}
 
 			session := &models.Session{
 				ID:               job.ID,
 				Type:             job.Type, // Use specific job type (e.g. chat, interactive_agent, oneshot)
 				Status:           displayStatus,
-				Repo:             plan.WorkspaceName,
+				Repo:             repoName,
 				Branch:           job.Worktree,
 				WorkingDirectory: plan.Path,     // This is the plan directory path
-				WorktreeRootPath: worktreePath,  // This is the correct workspace/worktree path
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
 				LastActivity:     job.UpdatedAt,

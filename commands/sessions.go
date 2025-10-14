@@ -194,7 +194,7 @@ func newSessionsListCmd() *cobra.Command {
 
 				started := s.StartedAt.Format("2006-01-02 15:04:05")
 
-				// Format context based on session type
+				// Format context based on session type with enhanced worktree information
 				context := ""
 				sessionType := s.Type
 				if sessionType == "" || sessionType == "claude_session" {
@@ -202,23 +202,27 @@ func newSessionsListCmd() *cobra.Command {
 				}
 				if s.Type == "oneshot_job" {
 					sessionType = "job"
-					// For jobs, show repo/branch like Claude sessions
+					// For jobs, show repo/branch with worktree indicator
 					if s.Repo != "" && s.Branch != "" {
-						context = fmt.Sprintf("%s/%s", s.Repo, s.Branch)
+						if s.Branch == "main" || s.Branch == "master" {
+							context = s.Repo
+						} else {
+							context = fmt.Sprintf("%s (wt:%s)", s.Repo, s.Branch)
+						}
 						// Optionally append title if it fits
 						if s.JobTitle != "" && len(context)+len(s.JobTitle)+3 <= 30 {
-							context = fmt.Sprintf("%s (%s)", context, s.JobTitle)
+							context = fmt.Sprintf("%s:%s", context, s.JobTitle)
 						}
 					} else if s.Repo != "" {
 						context = s.Repo
 						if s.JobTitle != "" && len(context)+len(s.JobTitle)+3 <= 30 {
-							context = fmt.Sprintf("%s (%s)", context, s.JobTitle)
+							context = fmt.Sprintf("%s:%s", context, s.JobTitle)
 						}
 					} else if s.PlanName != "" {
 						// Show plan name when no repo info
 						context = s.PlanName
 						if s.JobTitle != "" && len(context)+len(s.JobTitle)+3 <= 30 {
-							context = fmt.Sprintf("%s (%s)", context, s.JobTitle)
+							context = fmt.Sprintf("%s:%s", context, s.JobTitle)
 						}
 					} else if s.JobTitle != "" {
 						// Fallback to title alone
@@ -227,9 +231,13 @@ func newSessionsListCmd() *cobra.Command {
 						context = "oneshot"
 					}
 				} else {
-					// Claude session
+					// Claude session - show worktree indicator
 					if s.Repo != "" && s.Branch != "" {
-						context = fmt.Sprintf("%s/%s", s.Repo, s.Branch)
+						if s.Branch == "main" || s.Branch == "master" {
+							context = s.Repo
+						} else {
+							context = fmt.Sprintf("%s (wt:%s)", s.Repo, s.Branch)
+						}
 					} else if s.Repo != "" {
 						context = s.Repo
 					} else {

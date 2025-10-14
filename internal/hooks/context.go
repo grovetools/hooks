@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-hooks/internal/config"
-	"github.com/mattsolo1/grove-hooks/internal/git"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-tmux/pkg/tmux"
@@ -95,6 +95,20 @@ func (hc *HookContext) LogEvent(eventType models.EventType, data map[string]any)
 	return hc.Storage.LogEvent(hc.Input.SessionID, event)
 }
 
+// getCurrentBranch returns the current git branch name for the given directory
+func getCurrentBranch(workingDir string) string {
+	cmd := exec.Command("git", "-C", workingDir, "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	branch := strings.TrimSpace(string(output))
+	if branch == "" {
+		return "unknown"
+	}
+	return branch
+}
+
 // EnsureSessionExists creates a session if it doesn't exist
 func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath string) error {
 	// Create ~/.grove/hooks/sessions directory if it doesn't exist
@@ -132,10 +146,31 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		workingDir = "."
 	}
 
-	// Get git info using the centralized utility
-	gitInfo := git.GetInfo(workingDir)
-	repo := gitInfo.Repository
-	gitBranch := gitInfo.Branch
+	// Get project info using grove-core workspace package
+	projInfo, err := workspace.GetProjectByPath(workingDir)
+	if err != nil {
+		// Log the error but continue, as this is for enrichment
+		// Note: We don't have a logger here, so we'll just continue silently
+	}
+
+	// Determine repo name from WorkspaceNode
+	repo := ""
+	if projInfo != nil {
+		if projInfo.IsWorktree() && projInfo.ParentEcosystemPath != "" {
+			// For ecosystem worktrees, use the parent ecosystem name
+			repo = filepath.Base(projInfo.ParentEcosystemPath)
+		} else {
+			// For primary workspaces, use the project name
+			repo = projInfo.Name
+		}
+	}
+	if repo == "" {
+		// Fallback to directory name
+		repo = filepath.Base(workingDir)
+	}
+
+	// Get current git branch
+	gitBranch := getCurrentBranch(workingDir)
 
 	// Get user info
 	username := os.Getenv("USER")
@@ -151,13 +186,6 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	tmuxMgr, err := tmux.NewManager(configDir)
 	if err == nil && tmuxMgr != nil {
 		tmuxKey = tmuxMgr.DetectTmuxKeyForPath(workingDir)
-	}
-
-	// Get project info using grove-core workspace package
-	projInfo, err := workspace.GetProjectByPath(workingDir)
-	if err != nil {
-		// Log the error but continue, as this is for enrichment
-		// Note: We don't have a logger here, so we'll just continue silently
 	}
 
 	// Get Claude PID
@@ -182,7 +210,6 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		Branch               string    `json:"branch,omitempty"`
 		TmuxKey              string    `json:"tmux_key,omitempty"`
 		WorkingDirectory     string    `json:"working_directory"`
-		WorktreeRootPath     string    `json:"worktree_root_path,omitempty"`
 		User                 string    `json:"user"`
 		StartedAt            time.Time `json:"started_at"`
 		TranscriptPath       string    `json:"transcript_path,omitempty"`
@@ -217,17 +244,8 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	// Populate workspace context fields if available
 	if projInfo != nil {
 		metadata.ProjectName = projInfo.Name
-		metadata.IsWorktree = projInfo.IsWorktree
+		metadata.IsWorktree = projInfo.IsWorktree()
 		metadata.ParentEcosystemPath = projInfo.ParentEcosystemPath
-		metadata.WorktreeRootPath = projInfo.WorktreeRootPath
-
-		// For ecosystem worktrees, use the parent ecosystem name as the repo
-		// This ensures consistency with flow job discovery which uses the parent workspace
-		if projInfo.IsWorktree && projInfo.IsEcosystem && projInfo.ParentEcosystemPath != "" {
-			// Extract the parent ecosystem name from the path
-			parentName := filepath.Base(projInfo.ParentEcosystemPath)
-			metadata.Repo = parentName
-		}
 	}
 
 	// Write metadata.json
@@ -268,7 +286,6 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 			Branch:           gitBranch,
 			TmuxKey:          tmuxKey,
 			WorkingDirectory: workingDir,
-			WorktreeRootPath: "", // Will be populated from projInfo below
 			User:             username,
 			Status:           "running",
 			StartedAt:        now,
@@ -289,9 +306,9 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	// Populate workspace context fields if available
 	if projInfo != nil {
 		session.ProjectName = projInfo.Name
-		session.IsWorktree = projInfo.IsWorktree
+		session.IsWorktree = projInfo.IsWorktree()
+		session.IsEcosystem = projInfo.IsEcosystem()
 		session.ParentEcosystemPath = projInfo.ParentEcosystemPath
-		session.WorktreeRootPath = projInfo.WorktreeRootPath
 	}
 
 	return hc.Storage.EnsureSessionExists(session)
