@@ -22,6 +22,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewSessionsCmd())
 	rootCmd.AddCommand(NewInstallCmd())
 	rootCmd.AddCommand(NewVersionCmd())
+	rootCmd.AddCommand(NewDebugWorkspacesCmd())
 
 	return rootCmd
 }
