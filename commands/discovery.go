@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	coreconfig "github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -18,6 +20,7 @@ import (
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/mattsolo1/grove-notifications"
+	"github.com/sirupsen/logrus"
 )
 
 // Cache for flow jobs discovery to avoid expensive flow plan list calls
@@ -250,121 +253,117 @@ func startBackgroundRefresh() {
 	}()
 }
 
-// refreshFlowJobsCache fetches fresh data and updates the cache file
+// refreshFlowJobsCache fetches fresh data and updates the cache file using NotebookLocator
 func refreshFlowJobsCache() {
-	cmdArgs := []string{"plan", "list", "--json", "--include-finished", "--verbose"}
-
-	// Conditionally add --all-workspaces unless in local discovery mode for testing
-	if os.Getenv("GROVE_HOOKS_DISCOVERY_MODE") != "local" {
-		cmdArgs = append(cmdArgs, "--all-workspaces")
+	// Initialize workspace provider and NotebookLocator
+	logger := logrus.New()
+	logger.SetOutput(os.Stderr)
+	if os.Getenv("GROVE_DEBUG") == "" {
+		logger.SetLevel(logrus.ErrorLevel) // Suppress logs unless debugging
 	}
 
-	cmd := exec.Command("flow", cmdArgs...)
-	output, err := cmd.Output()
+	discoveryService := workspace.NewDiscoveryService(logger)
+	discoveryResult, err := discoveryService.DiscoverAll()
 	if err != nil {
 		return // Silently fail for background refresh
 	}
+	provider := workspace.NewProvider(discoveryResult)
 
-	type Job struct {
-		ID        string    `json:"id"`
-		Title     string    `json:"title"`
-		Status    string    `json:"status"`
-		Type      string    `json:"type"`
-		Worktree  string    `json:"worktree,omitempty"`
-		Filename  string    `json:"filename,omitempty"`
-		FilePath  string    `json:"file_path,omitempty"`
-		StartTime time.Time `json:"start_time,omitempty"`
-		UpdatedAt time.Time `json:"updated_at,omitempty"`
+	// Load config and create NotebookLocator
+	coreCfg, err := coreconfig.LoadDefault()
+	if err != nil {
+		coreCfg = &coreconfig.Config{}
 	}
-	type PlanSummary struct {
-		Title         string `json:"title"`
-		Path          string `json:"path"`
-		Jobs          []*Job `json:"jobs,omitempty"`
-		WorkspaceName string `json:"workspace_name,omitempty"`
-		WorkspacePath string `json:"workspace_path,omitempty"`
-	}
+	locator := workspace.NewNotebookLocator(coreCfg)
 
-	var planSummaries []PlanSummary
-	if err := json.Unmarshal(output, &planSummaries); err != nil {
-		return
+	// Get all plan directories across all workspaces
+	planDirs, err := locator.ScanForAllPlans(provider)
+	if err != nil {
+		return // Silently fail for background refresh
 	}
 
 	var sessions []*models.Session
 	seenJobs := make(map[string]bool)
 
-	for _, plan := range planSummaries {
-		// Get workspace info for this plan
-		var projInfo *workspace.WorkspaceNode
-		if plan.WorkspacePath != "" {
-			projInfo, _ = workspace.GetProjectByPath(plan.WorkspacePath)
+	// Scan each plan directory for jobs
+	for _, planDir := range planDirs {
+		// Determine the workspace for this plan directory
+		workspaceNode := provider.FindByPath(planDir)
+		if workspaceNode == nil {
+			workspaceNode = provider.FindByPath(filepath.Dir(planDir))
 		}
 
-		for _, job := range plan.Jobs {
-			// Deduplicate by job ID (most reliable for flow jobs across workspaces)
-			if job.ID != "" {
-				if seenJobs[job.ID] {
-					continue
-				}
-				seenJobs[job.ID] = true
-			} else if job.FilePath != "" {
-				// If no ID, fall back to file path
-				if seenJobs[job.FilePath] {
-					continue
-				}
-				seenJobs[job.FilePath] = true
+		planName := filepath.Base(planDir)
+
+		// Determine repo name and branch
+		var repoName, branch string
+		if workspaceNode != nil {
+			if workspaceNode.IsWorktree() && workspaceNode.ParentProjectPath != "" {
+				repoName = filepath.Base(workspaceNode.ParentProjectPath)
+				_, branch, _ = git.GetRepoInfo(workspaceNode.Path)
+			} else {
+				repoName = workspaceNode.Name
+			}
+		}
+
+		// Scan for job files in this plan directory
+		entries, err := os.ReadDir(planDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
 			}
 
-			displayStatus := job.Status
-
-			startTime := job.StartTime
-			if startTime.IsZero() {
-				startTime = job.UpdatedAt
+			filename := entry.Name()
+			if filename == "spec.md" || filename == "README.md" {
+				continue
 			}
 
-			// If `flow plan list` returns a zero time, fall back to reading from the job file's frontmatter.
-			if startTime.IsZero() && job.FilePath != "" {
-				if content, err := os.ReadFile(job.FilePath); err == nil {
-					jobInfo := parseJobFrontmatter(string(content))
-					if !jobInfo.StartedAt.IsZero() {
-						startTime = jobInfo.StartedAt
-					}
-				}
-			}
+			filePath := filepath.Join(planDir, filename)
 
-			// Populate EndedAt for terminal states
+			content, err := os.ReadFile(filePath)
+			if err != nil {
+				continue
+			}
+			jobInfo := parseJobFrontmatter(string(content))
+
+			dedupeKey := jobInfo.ID
+			if dedupeKey == "" {
+				dedupeKey = filePath
+			}
+			if seenJobs[dedupeKey] {
+				continue
+			}
+			seenJobs[dedupeKey] = true
+
+			displayStatus := jobInfo.Status
+			startTime := jobInfo.StartedAt
+
 			var endedAt *time.Time
-			if job.Status == "completed" || job.Status == "failed" || job.Status == "interrupted" {
-				endTime := job.UpdatedAt
-				endedAt = &endTime
-			}
-
-
-			// Determine repo name using ProjectInfo if available
-			repoName := plan.WorkspaceName
-			if projInfo != nil {
-				if projInfo.IsWorktree() && projInfo.ParentEcosystemPath != "" {
-					// For ecosystem worktrees, use parent ecosystem name
-					repoName = filepath.Base(projInfo.ParentEcosystemPath)
-				} else {
-					// For primary workspaces, use project name
-					repoName = projInfo.Name
+			if jobInfo.Status == "completed" || jobInfo.Status == "failed" || jobInfo.Status == "interrupted" {
+				if fileInfo, err := os.Stat(filePath); err == nil {
+					endTime := fileInfo.ModTime()
+					endedAt = &endTime
 				}
 			}
 
 			session := &models.Session{
-				ID:               job.ID,
-				Type:             job.Type, // Use specific job type (e.g. chat, interactive_agent, oneshot)
+				ID:               jobInfo.ID,
+				Type:             jobInfo.Type,
 				Status:           displayStatus,
 				Repo:             repoName,
-				Branch:           job.Worktree,
-				WorkingDirectory: plan.Path,     // This is the plan directory path
+				Branch:           branch,
+				WorkingDirectory: planDir,
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
-				LastActivity:     job.UpdatedAt,
+				LastActivity:     startTime,
 				EndedAt:          endedAt,
-				PlanName:         plan.Title,
-				JobTitle:         job.Title,
-				JobFilePath:      job.FilePath,
+				PlanName:         planName,
+				JobTitle:         jobInfo.Title,
+				JobFilePath:      filePath,
 			}
 			sessions = append(sessions, session)
 		}
@@ -381,7 +380,8 @@ func refreshFlowJobsCache() {
 	}
 }
 
-// DiscoverFlowJobs calls `flow plan list` to get an accurate list of all jobs and their statuses.
+// DiscoverFlowJobs discovers all flow jobs by directly scanning plan directories using NotebookLocator.
+// This eliminates the subprocess call to `flow plan list` for better performance and reliability.
 func DiscoverFlowJobs() ([]*models.Session, error) {
 	// Start background refresh if enabled (only starts once)
 	startBackgroundRefresh()
@@ -403,133 +403,141 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		}
 	}
 
-	// Use the `flow` command as the source of truth.
-	// Note: --verbose is required to include job details in the JSON output
-	cmdArgs := []string{"plan", "list", "--json", "--include-finished", "--verbose"}
-
-	// Conditionally add --all-workspaces unless in local discovery mode for testing
-	if os.Getenv("GROVE_HOOKS_DISCOVERY_MODE") != "local" {
-		cmdArgs = append(cmdArgs, "--all-workspaces")
+	// Initialize workspace provider and NotebookLocator
+	logger := logrus.New()
+	logger.SetOutput(os.Stderr)
+	if os.Getenv("GROVE_DEBUG") == "" {
+		logger.SetLevel(logrus.ErrorLevel) // Suppress logs unless debugging
 	}
 
-	cmd := exec.Command("flow", cmdArgs...)
-	output, err := cmd.Output()
+	discoveryService := workspace.NewDiscoveryService(logger)
+	discoveryResult, err := discoveryService.DiscoverAll()
 	if err != nil {
-		// If `flow` command fails, we can't discover jobs. Return an empty list.
-		// This is not a fatal error for grove-hooks.
 		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Fprintf(os.Stderr, "Warning: could not execute 'flow plan list': %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: workspace discovery failed: %v\n", err)
 		}
 		return []*models.Session{}, nil
 	}
+	provider := workspace.NewProvider(discoveryResult)
 
-	// Define structs to parse the JSON output from `flow plan list`.
-	type Job struct {
-		ID        string    `json:"id"`
-		Title     string    `json:"title"`
-		Status    string    `json:"status"`
-		Type      string    `json:"type"`
-		Worktree  string    `json:"worktree,omitempty"`
-		Filename  string    `json:"filename,omitempty"`
-		FilePath  string    `json:"file_path,omitempty"`
-		StartTime time.Time `json:"start_time,omitempty"`
-		UpdatedAt time.Time `json:"updated_at,omitempty"`
+	// Load config and create NotebookLocator
+	coreCfg, err := coreconfig.LoadDefault()
+	if err != nil {
+		// Proceed with empty config if none exists (Local Mode)
+		coreCfg = &coreconfig.Config{}
 	}
-	type PlanSummary struct {
-		Title         string `json:"title"`
-		Path          string `json:"path"`
-		Jobs          []*Job `json:"jobs,omitempty"`
-		WorkspaceName string `json:"workspace_name,omitempty"`
-		WorkspacePath string `json:"workspace_path,omitempty"`
-	}
+	locator := workspace.NewNotebookLocator(coreCfg)
 
-	var planSummaries []PlanSummary
-	if err := json.Unmarshal(output, &planSummaries); err != nil {
+	// Get all plan directories across all workspaces
+	planDirs, err := locator.ScanForAllPlans(provider)
+	if err != nil {
 		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Fprintf(os.Stderr, "Warning: failed to parse JSON from 'flow plan list': %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to scan for plans: %v\n", err)
 		}
 		return []*models.Session{}, nil
 	}
 
 	var sessions []*models.Session
-	// Track seen jobs to avoid duplicates from multiple workspace discoveries
-	// We deduplicate by ID primarily (since file paths can vary), then fall back to file path
 	seenJobs := make(map[string]bool)
 
-	for _, plan := range planSummaries {
-		// Get workspace info for this plan
-		var projInfo *workspace.WorkspaceNode
-		if plan.WorkspacePath != "" {
-			projInfo, _ = workspace.GetProjectByPath(plan.WorkspacePath)
+	// Scan each plan directory for jobs
+	for _, planDir := range planDirs {
+		// Determine the workspace for this plan directory
+		workspaceNode := provider.FindByPath(planDir)
+		if workspaceNode == nil {
+			// Try parent directory
+			workspaceNode = provider.FindByPath(filepath.Dir(planDir))
 		}
 
-		for _, job := range plan.Jobs {
-			// Deduplicate by job ID (most reliable for flow jobs across workspaces)
-			if job.ID != "" {
-				if seenJobs[job.ID] {
-					continue
-				}
-				seenJobs[job.ID] = true
-			} else if job.FilePath != "" {
-				// If no ID, fall back to file path
-				if seenJobs[job.FilePath] {
-					continue
-				}
-				seenJobs[job.FilePath] = true
+		// Get plan name from directory
+		planName := filepath.Base(planDir)
+
+		// Determine repo name and branch
+		var repoName, branch string
+		if workspaceNode != nil {
+			if workspaceNode.IsWorktree() && workspaceNode.ParentProjectPath != "" {
+				// This is a worktree. The "repo" is its parent project.
+				repoName = filepath.Base(workspaceNode.ParentProjectPath)
+				// Get branch from workspace node
+				_, branch, _ = git.GetRepoInfo(workspaceNode.Path)
+			} else {
+				// Not a worktree, so it is its own repo context.
+				repoName = workspaceNode.Name
+			}
+		}
+
+		// Scan for job files in this plan directory
+		entries, err := os.ReadDir(planDir)
+		if err != nil {
+			continue // Skip plans we can't read
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
 			}
 
-			displayStatus := job.Status
+			filename := entry.Name()
 
-			// Use UpdatedAt if StartTime is zero
-			startTime := job.StartTime
-			if startTime.IsZero() {
-				startTime = job.UpdatedAt
+			// Skip non-.md files
+			if !strings.HasSuffix(filename, ".md") {
+				continue
 			}
 
-			// If `flow plan list` returns a zero time, fall back to reading from the job file's frontmatter.
-			if startTime.IsZero() && job.FilePath != "" {
-				if content, err := os.ReadFile(job.FilePath); err == nil {
-					jobInfo := parseJobFrontmatter(string(content))
-					if !jobInfo.StartedAt.IsZero() {
-						startTime = jobInfo.StartedAt
-					}
-				}
+			// Skip spec.md and other non-job files
+			if filename == "spec.md" || filename == "README.md" {
+				continue
 			}
+
+			filePath := filepath.Join(planDir, filename)
+
+			// Read and parse job frontmatter
+			content, err := os.ReadFile(filePath)
+			if err != nil {
+				continue
+			}
+			jobInfo := parseJobFrontmatter(string(content))
+
+			// Deduplicate by job ID or file path
+			dedupeKey := jobInfo.ID
+			if dedupeKey == "" {
+				dedupeKey = filePath
+			}
+			if seenJobs[dedupeKey] {
+				continue
+			}
+			seenJobs[dedupeKey] = true
+
+			// Determine status (use frontmatter status)
+			displayStatus := jobInfo.Status
+
+			// Use start time from frontmatter
+			startTime := jobInfo.StartedAt
 
 			// Populate EndedAt for terminal states
 			var endedAt *time.Time
-			if job.Status == "completed" || job.Status == "failed" || job.Status == "interrupted" {
-				endTime := job.UpdatedAt
-				endedAt = &endTime
-			}
-
-
-			// Determine repo name using ProjectInfo if available
-			repoName := plan.WorkspaceName
-			if projInfo != nil {
-				if projInfo.IsWorktree() && projInfo.ParentEcosystemPath != "" {
-					// For ecosystem worktrees, use parent ecosystem name
-					repoName = filepath.Base(projInfo.ParentEcosystemPath)
-				} else {
-					// For primary workspaces, use project name
-					repoName = projInfo.Name
+			if jobInfo.Status == "completed" || jobInfo.Status == "failed" || jobInfo.Status == "interrupted" {
+				// Use file modification time as a proxy for end time
+				if fileInfo, err := os.Stat(filePath); err == nil {
+					endTime := fileInfo.ModTime()
+					endedAt = &endTime
 				}
 			}
 
 			session := &models.Session{
-				ID:               job.ID,
-				Type:             job.Type, // Use specific job type (e.g. chat, interactive_agent, oneshot)
+				ID:               jobInfo.ID,
+				Type:             jobInfo.Type,
 				Status:           displayStatus,
 				Repo:             repoName,
-				Branch:           job.Worktree,
-				WorkingDirectory: plan.Path,     // This is the plan directory path
+				Branch:           branch,
+				WorkingDirectory: planDir,
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
-				LastActivity:     job.UpdatedAt,
+				LastActivity:     startTime, // Will be updated by updateSessionStatusFromFilesystem
 				EndedAt:          endedAt,
-				PlanName:         plan.Title,
-				JobTitle:         job.Title,
-				JobFilePath:      job.FilePath,
+				PlanName:         planName,
+				JobTitle:         jobInfo.Title,
+				JobFilePath:      filePath,
 			}
 			sessions = append(sessions, session)
 		}
@@ -541,15 +549,12 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		Sessions:  sessions,
 	}
 	if jsonData, err := json.Marshal(cacheData); err == nil {
-		// Ensure cache directory exists
 		os.MkdirAll(filepath.Dir(flowJobsCachePath), 0755)
-		// Write cache file (ignore errors - cache is best-effort)
 		os.WriteFile(flowJobsCachePath, jsonData, 0644)
 	}
 
-	// After getting sessions from cache or command, update their status in real-time
+	// Update real-time status for all sessions
 	for _, session := range sessions {
-		// Check if it's a flow job (not a claude_code session)
 		if session.Type != "" && session.Type != "claude_session" {
 			updateSessionStatusFromFilesystem(session)
 		}

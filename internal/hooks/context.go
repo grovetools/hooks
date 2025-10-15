@@ -156,11 +156,11 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	// Determine repo name from WorkspaceNode
 	repo := ""
 	if projInfo != nil {
-		if projInfo.IsWorktree() && projInfo.ParentEcosystemPath != "" {
-			// For ecosystem worktrees, use the parent ecosystem name
-			repo = filepath.Base(projInfo.ParentEcosystemPath)
+		if projInfo.IsWorktree() && projInfo.ParentProjectPath != "" {
+			// This is a worktree. The "repo" is its parent project.
+			repo = filepath.Base(projInfo.ParentProjectPath)
 		} else {
-			// For primary workspaces, use the project name
+			// Not a worktree, so it is its own repo context.
 			repo = projInfo.Name
 		}
 	}
