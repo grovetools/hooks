@@ -793,6 +793,7 @@ Example:
 			// Filter and collect sessions that need to be updated
 			var toUpdate []*models.Session
 			skipped := 0
+			invalidDate := 0
 
 			for _, session := range sessions {
 				// Skip if already in a terminal state (completed, abandoned, failed, interrupted)
@@ -803,12 +804,6 @@ Example:
 					"interrupted": true,
 				}
 				if terminalStates[session.Status] {
-					skipped++
-					continue
-				}
-
-				// Skip if started at or after cutoff date
-				if !session.StartedAt.Before(cutoffDate) {
 					skipped++
 					continue
 				}
@@ -825,6 +820,18 @@ Example:
 					continue
 				}
 
+				// Skip if date is invalid/zero (year 1 is the zero value for time.Time)
+				if session.StartedAt.Year() == 1 {
+					invalidDate++
+					continue
+				}
+
+				// Skip if started at or after cutoff date
+				if !session.StartedAt.Before(cutoffDate) {
+					skipped++
+					continue
+				}
+
 				toUpdate = append(toUpdate, session)
 			}
 
@@ -835,6 +842,7 @@ Example:
 
 			// Process and display sorted sessions
 			updated := 0
+			errors := 0
 			for _, session := range toUpdate {
 				fmt.Printf("📝 %s (started: %s, status: %s)\n",
 					filepath.Base(session.JobFilePath),
@@ -845,6 +853,7 @@ Example:
 					// Update the file
 					if err := updateJobStatus(session.JobFilePath, "completed"); err != nil {
 						fmt.Fprintf(os.Stderr, "   ⚠️  Failed to update: %v\n", err)
+						errors++
 						continue
 					}
 				}
@@ -854,8 +863,18 @@ Example:
 
 			fmt.Println()
 			fmt.Printf("✅ Summary:\n")
-			fmt.Printf("   Would mark/marked as completed: %d jobs\n", updated)
+			if dryRun {
+				fmt.Printf("   Would mark as completed: %d jobs\n", updated)
+			} else {
+				fmt.Printf("   Marked as completed: %d jobs\n", updated)
+			}
 			fmt.Printf("   Skipped: %d jobs (already in terminal state or from today)\n", skipped)
+			if invalidDate > 0 {
+				fmt.Printf("   Skipped: %d jobs (invalid/missing date)\n", invalidDate)
+			}
+			if errors > 0 {
+				fmt.Printf("   ⚠️  Errors: %d jobs (missing status field or other issues)\n", errors)
+			}
 
 			if dryRun {
 				fmt.Println()
