@@ -31,6 +31,7 @@ func NewSessionsCmd() *cobra.Command {
 	cmd.AddCommand(newMarkInterruptedCmd())
 	cmd.AddCommand(newKillCmd())
 	cmd.AddCommand(newSetStatusCmd())
+	cmd.AddCommand(newMarkOldCompletedCmd())
 
 	return cmd
 }
@@ -734,4 +735,168 @@ Example:
 	}
 
 	return cmd
+}
+
+func newMarkOldCompletedCmd() *cobra.Command {
+	var (
+		dryRun     bool
+		beforeDate string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "mark-old-completed",
+		Short: "Mark old jobs as completed",
+		Long: `Bulk update old flow jobs and chats to mark them as completed.
+
+By default, marks all jobs created before today as completed (unless already completed).
+Use --before to specify a different cutoff date (format: YYYY-MM-DD).
+
+Example:
+  grove-hooks sessions mark-old-completed --dry-run
+  grove-hooks sessions mark-old-completed --before 2025-10-01`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Determine cutoff date
+			var cutoffDate time.Time
+			var err error
+
+			if beforeDate != "" {
+				cutoffDate, err = time.Parse("2006-01-02", beforeDate)
+				if err != nil {
+					return fmt.Errorf("invalid date format (use YYYY-MM-DD): %w", err)
+				}
+			} else {
+				// Default to today
+				now := time.Now()
+				cutoffDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			}
+
+			fmt.Printf("🗓️  Cutoff date: %s\n", cutoffDate.Format("2006-01-02"))
+			if dryRun {
+				fmt.Println("🔍 DRY RUN MODE - No changes will be made")
+			}
+			fmt.Println()
+
+			// Create storage
+			storage, err := disk.NewSQLiteStore()
+			if err != nil {
+				return fmt.Errorf("failed to create storage: %w", err)
+			}
+			defer storage.(*disk.SQLiteStore).Close()
+
+			// Get all sessions
+			sessions, err := GetAllSessions(storage, false)
+			if err != nil {
+				return fmt.Errorf("failed to get sessions: %w", err)
+			}
+
+			updated := 0
+			skipped := 0
+
+			for _, session := range sessions {
+				// Skip if already completed
+				if session.Status == "completed" {
+					skipped++
+					continue
+				}
+
+				// Skip if started at or after cutoff date
+				if !session.StartedAt.Before(cutoffDate) {
+					skipped++
+					continue
+				}
+
+				// Skip if no job file path
+				if session.JobFilePath == "" {
+					skipped++
+					continue
+				}
+
+				// Check if file exists
+				if _, err := os.Stat(session.JobFilePath); os.IsNotExist(err) {
+					skipped++
+					continue
+				}
+
+				fmt.Printf("📝 %s (started: %s, status: %s)\n",
+					filepath.Base(session.JobFilePath),
+					session.StartedAt.Format("2006-01-02"),
+					session.Status)
+
+				if !dryRun {
+					// Update the file
+					if err := updateJobStatus(session.JobFilePath, "completed"); err != nil {
+						fmt.Fprintf(os.Stderr, "   ⚠️  Failed to update: %v\n", err)
+						continue
+					}
+				}
+
+				updated++
+			}
+
+			fmt.Println()
+			fmt.Printf("✅ Summary:\n")
+			fmt.Printf("   Would mark/marked as completed: %d jobs\n", updated)
+			fmt.Printf("   Skipped: %d jobs (already completed or from today)\n", skipped)
+
+			if dryRun {
+				fmt.Println()
+				fmt.Println("💡 Run without --dry-run to actually update the files")
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be updated without making changes")
+	cmd.Flags().StringVar(&beforeDate, "before", "", "Mark jobs created before this date as completed (format: YYYY-MM-DD, default: today)")
+
+	return cmd
+}
+
+// updateJobStatus updates the status field in a job file's frontmatter
+func updateJobStatus(jobFilePath, newStatus string) error {
+	// Read the file
+	content, err := os.ReadFile(jobFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read job file: %w", err)
+	}
+
+	contentStr := string(content)
+
+	// Parse frontmatter to find status line
+	lines := strings.Split(contentStr, "\n")
+	inFrontmatter := false
+	statusLineIdx := -1
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+				continue
+			} else {
+				break
+			}
+		}
+
+		if inFrontmatter && strings.HasPrefix(trimmed, "status:") {
+			statusLineIdx = i
+			break
+		}
+	}
+
+	if statusLineIdx == -1 {
+		return fmt.Errorf("no status field found in frontmatter")
+	}
+
+	// Update the status line
+	lines[statusLineIdx] = fmt.Sprintf("status: %s", newStatus)
+	newContent := strings.Join(lines, "\n")
+
+	// Write back to file
+	if err := os.WriteFile(jobFilePath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write job file: %w", err)
+	}
+
+	return nil
 }
