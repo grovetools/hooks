@@ -515,7 +515,7 @@ func (m *Model) buildDisplayTree() {
 		for _, ws := range m.workspaces {
 			// Check if session's working directory is within this workspace
 			if strings.HasPrefix(session.WorkingDirectory+"/", ws.Path+"/") || session.WorkingDirectory == ws.Path {
-				depth := ws.GetDepth()
+				depth := ws.Depth // Use pre-calculated depth
 				if depth > bestMatchDepth {
 					bestMatch = ws
 					bestMatchDepth = depth
@@ -539,7 +539,7 @@ func (m *Model) buildDisplayTree() {
 							if session.Repo != "" {
 								// The workspace should be under the ecosystem/worktree specified in session.Repo
 								if strings.Contains(ws.Path, session.Repo) {
-									depth := ws.GetDepth()
+									depth := ws.Depth // Use pre-calculated depth
 									if depth > bestMatchDepth {
 										bestMatch = ws
 										bestMatchDepth = depth
@@ -547,7 +547,7 @@ func (m *Model) buildDisplayTree() {
 								}
 							} else {
 								// No repo specified, just match by name
-								depth := ws.GetDepth()
+								depth := ws.Depth // Use pre-calculated depth
 								if depth > bestMatchDepth {
 									bestMatch = ws
 									bestMatchDepth = depth
@@ -616,7 +616,7 @@ func (m *Model) buildDisplayTree() {
 					sessionPrefixBuilder.WriteString(indentPrefix)
 
 					// Add extra indent level
-					if ws.GetDepth() > 0 || ws.TreePrefix != "" {
+					if ws.Depth > 0 || ws.TreePrefix != "" { // Use pre-calculated depth
 						sessionPrefixBuilder.WriteString("  ")
 					}
 
