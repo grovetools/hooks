@@ -333,7 +333,12 @@ func refreshFlowJobsCache() {
 				if effectiveOwnerNode.ParentProjectPath != "" {
 					repoName = filepath.Base(effectiveOwnerNode.ParentProjectPath)
 				}
-				worktreeName = effectiveOwnerNode.Name
+				// For EcosystemWorktreeSubProjectWorktree, extract worktree name from parent path
+				if string(effectiveOwnerNode.Kind) == "EcosystemWorktreeSubProjectWorktree" {
+					worktreeName = filepath.Base(effectiveOwnerNode.ParentEcosystemPath)
+				} else {
+					worktreeName = effectiveOwnerNode.Name
+				}
 			}
 
 			session := &models.Session{
@@ -466,7 +471,12 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 				if effectiveOwnerNode.ParentProjectPath != "" {
 					repoName = filepath.Base(effectiveOwnerNode.ParentProjectPath)
 				}
-				worktreeName = effectiveOwnerNode.Name
+				// For EcosystemWorktreeSubProjectWorktree, extract worktree name from parent path
+				if string(effectiveOwnerNode.Kind) == "EcosystemWorktreeSubProjectWorktree" {
+					worktreeName = filepath.Base(effectiveOwnerNode.ParentEcosystemPath)
+				} else {
+					worktreeName = effectiveOwnerNode.Name
+				}
 			}
 
 			session := &models.Session{
