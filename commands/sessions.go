@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -789,7 +790,8 @@ Example:
 				return fmt.Errorf("failed to get sessions: %w", err)
 			}
 
-			updated := 0
+			// Filter and collect sessions that need to be updated
+			var toUpdate []*models.Session
 			skipped := 0
 
 			for _, session := range sessions {
@@ -817,6 +819,17 @@ Example:
 					continue
 				}
 
+				toUpdate = append(toUpdate, session)
+			}
+
+			// Sort by StartedAt descending (most recent first)
+			sort.Slice(toUpdate, func(i, j int) bool {
+				return toUpdate[i].StartedAt.After(toUpdate[j].StartedAt)
+			})
+
+			// Process and display sorted sessions
+			updated := 0
+			for _, session := range toUpdate {
 				fmt.Printf("📝 %s (started: %s, status: %s)\n",
 					filepath.Base(session.JobFilePath),
 					session.StartedAt.Format("2006-01-02"),
