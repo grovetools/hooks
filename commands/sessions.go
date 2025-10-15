@@ -795,8 +795,14 @@ Example:
 			skipped := 0
 
 			for _, session := range sessions {
-				// Skip if already completed
-				if session.Status == "completed" {
+				// Skip if already in a terminal state (completed, abandoned, failed, interrupted)
+				terminalStates := map[string]bool{
+					"completed":   true,
+					"abandoned":   true,
+					"failed":      true,
+					"interrupted": true,
+				}
+				if terminalStates[session.Status] {
 					skipped++
 					continue
 				}
@@ -849,7 +855,7 @@ Example:
 			fmt.Println()
 			fmt.Printf("✅ Summary:\n")
 			fmt.Printf("   Would mark/marked as completed: %d jobs\n", updated)
-			fmt.Printf("   Skipped: %d jobs (already completed or from today)\n", skipped)
+			fmt.Printf("   Skipped: %d jobs (already in terminal state or from today)\n", skipped)
 
 			if dryRun {
 				fmt.Println()
