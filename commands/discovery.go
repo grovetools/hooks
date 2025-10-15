@@ -311,17 +311,29 @@ func refreshFlowJobsCache() {
 			}
 			seenJobs[path] = true
 
-			// Determine repo name and worktree from the owning WorkspaceNode
-			repoName := ownerNode.Name
-			worktreeName := ""
-			if ownerNode.IsWorktree() {
-				repoName = filepath.Base(ownerNode.ParentProjectPath)
-				worktreeName = ownerNode.Name
+			// Start with the owner of the plan directory as the default context.
+			effectiveOwnerNode := ownerNode
+
+			// If the job's frontmatter specifies a worktree, resolve it to a more specific node.
+			if job.Worktree != "" {
+				// The ownerNode is the "base project" (e.g., main grove-core).
+				// The job.Worktree is the name of the ecosystem worktree (e.g., "test444").
+				resolvedNode := provider.FindByWorktree(ownerNode, job.Worktree)
+				if resolvedNode != nil {
+					// We found the correct workspace node! Use this as the effective owner.
+					effectiveOwnerNode = resolvedNode
+				}
+				// If resolvedNode is nil, we gracefully fall back to the base project node.
 			}
 
-			// If the job specifies a worktree, it overrides the one from the context.
-			if job.Worktree != "" {
-				worktreeName = job.Worktree
+			// Now, determine repo name and worktree from the correctly resolved effectiveOwnerNode.
+			repoName := effectiveOwnerNode.Name
+			worktreeName := ""
+			if effectiveOwnerNode.IsWorktree() {
+				if effectiveOwnerNode.ParentProjectPath != "" {
+					repoName = filepath.Base(effectiveOwnerNode.ParentProjectPath)
+				}
+				worktreeName = effectiveOwnerNode.Name
 			}
 
 			session := &models.Session{
@@ -330,7 +342,7 @@ func refreshFlowJobsCache() {
 				Status:           string(job.Status),
 				Repo:             repoName,
 				Branch:           worktreeName, // Branch and Worktree are synonymous here
-				WorkingDirectory: filepath.Dir(path),
+				WorkingDirectory: effectiveOwnerNode.Path, // CRITICAL: This path is used for TUI grouping.
 				StartedAt:        job.StartTime,
 				LastActivity:     job.UpdatedAt,
 				PlanName:         filepath.Base(filepath.Dir(path)),
@@ -432,17 +444,29 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 			}
 			seenJobs[path] = true
 
-			// Determine repo name and worktree from the owning WorkspaceNode
-			repoName := ownerNode.Name
-			worktreeName := ""
-			if ownerNode.IsWorktree() {
-				repoName = filepath.Base(ownerNode.ParentProjectPath)
-				worktreeName = ownerNode.Name
+			// Start with the owner of the plan directory as the default context.
+			effectiveOwnerNode := ownerNode
+
+			// If the job's frontmatter specifies a worktree, resolve it to a more specific node.
+			if job.Worktree != "" {
+				// The ownerNode is the "base project" (e.g., main grove-core).
+				// The job.Worktree is the name of the ecosystem worktree (e.g., "test444").
+				resolvedNode := provider.FindByWorktree(ownerNode, job.Worktree)
+				if resolvedNode != nil {
+					// We found the correct workspace node! Use this as the effective owner.
+					effectiveOwnerNode = resolvedNode
+				}
+				// If resolvedNode is nil, we gracefully fall back to the base project node.
 			}
 
-			// If the job specifies a worktree, it overrides the one from the context.
-			if job.Worktree != "" {
-				worktreeName = job.Worktree
+			// Now, determine repo name and worktree from the correctly resolved effectiveOwnerNode.
+			repoName := effectiveOwnerNode.Name
+			worktreeName := ""
+			if effectiveOwnerNode.IsWorktree() {
+				if effectiveOwnerNode.ParentProjectPath != "" {
+					repoName = filepath.Base(effectiveOwnerNode.ParentProjectPath)
+				}
+				worktreeName = effectiveOwnerNode.Name
 			}
 
 			session := &models.Session{
@@ -451,7 +475,7 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 				Status:           string(job.Status),
 				Repo:             repoName,
 				Branch:           worktreeName, // Branch and Worktree are synonymous here
-				WorkingDirectory: filepath.Dir(path),
+				WorkingDirectory: effectiveOwnerNode.Path, // CRITICAL: This path is used for TUI grouping.
 				StartedAt:        job.StartTime,
 				LastActivity:     job.UpdatedAt,
 				PlanName:         filepath.Base(filepath.Dir(path)),
