@@ -276,97 +276,101 @@ func refreshFlowJobsCache() {
 	}
 	locator := workspace.NewNotebookLocator(coreCfg)
 
-	// Get all plan directories across all workspaces
+	// Get all plan and chat directories across all workspaces
 	planDirs, err := locator.ScanForAllPlans(provider)
 	if err != nil {
 		return // Silently fail for background refresh
 	}
 
+	chatDirs, _ := locator.ScanForAllChats(provider)
+
+	// Combine plan and chat directories
+	allDirs := append(planDirs, chatDirs...)
+
 	var sessions []*models.Session
 	seenJobs := make(map[string]bool)
 
-	// Scan each plan directory for jobs
-	for _, planDir := range planDirs {
-		// Determine the workspace for this plan directory
-		workspaceNode := provider.FindByPath(planDir)
-		if workspaceNode == nil {
-			workspaceNode = provider.FindByPath(filepath.Dir(planDir))
-		}
+	// Scan each directory for jobs
+	for _, scannedDir := range allDirs {
+		ownerNode := scannedDir.Owner
+		dirPath := scannedDir.Path
 
-		planName := filepath.Base(planDir)
-
-		// Determine repo name and branch
+		// Determine repo name and branch from the owner node
 		var repoName, branch string
-		if workspaceNode != nil {
-			if workspaceNode.IsWorktree() && workspaceNode.ParentProjectPath != "" {
-				repoName = filepath.Base(workspaceNode.ParentProjectPath)
-				_, branch, _ = git.GetRepoInfo(workspaceNode.Path)
-			} else {
-				repoName = workspaceNode.Name
-			}
+		if ownerNode.IsWorktree() && ownerNode.ParentProjectPath != "" {
+			repoName = filepath.Base(ownerNode.ParentProjectPath)
+			_, branch, _ = git.GetRepoInfo(ownerNode.Path)
+		} else {
+			repoName = ownerNode.Name
 		}
 
-		// Scan for job files in this plan directory
-		entries, err := os.ReadDir(planDir)
-		if err != nil {
-			continue
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-				continue
+		// Walk the directory to find all markdown files
+		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
 			}
 
-			filename := entry.Name()
-			if filename == "spec.md" || filename == "README.md" {
-				continue
+			if !strings.HasSuffix(info.Name(), ".md") {
+				return nil
 			}
 
-			filePath := filepath.Join(planDir, filename)
+			if info.Name() == "spec.md" || info.Name() == "README.md" {
+				return nil
+			}
 
-			content, err := os.ReadFile(filePath)
+			content, err := os.ReadFile(path)
 			if err != nil {
-				continue
+				return nil
 			}
 			jobInfo := parseJobFrontmatter(string(content))
 
+			if jobInfo.Type == "" {
+				return nil
+			}
+
 			dedupeKey := jobInfo.ID
 			if dedupeKey == "" {
-				dedupeKey = filePath
+				dedupeKey = path
 			}
 			if seenJobs[dedupeKey] {
-				continue
+				return nil
 			}
 			seenJobs[dedupeKey] = true
 
-			displayStatus := jobInfo.Status
 			startTime := jobInfo.StartedAt
 
 			var endedAt *time.Time
 			if jobInfo.Status == "completed" || jobInfo.Status == "failed" || jobInfo.Status == "interrupted" {
-				if fileInfo, err := os.Stat(filePath); err == nil {
+				if fileInfo, err := os.Stat(path); err == nil {
 					endTime := fileInfo.ModTime()
 					endedAt = &endTime
 				}
 			}
 
+			relativePath, _ := filepath.Rel(dirPath, path)
+			planOrChatName := filepath.Base(filepath.Dir(path))
+			if relativePath == info.Name() {
+				planOrChatName = filepath.Base(dirPath)
+			}
+
 			session := &models.Session{
 				ID:               jobInfo.ID,
 				Type:             jobInfo.Type,
-				Status:           displayStatus,
+				Status:           jobInfo.Status,
 				Repo:             repoName,
 				Branch:           branch,
-				WorkingDirectory: planDir,
+				WorkingDirectory: filepath.Dir(path),
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
 				LastActivity:     startTime,
 				EndedAt:          endedAt,
-				PlanName:         planName,
+				PlanName:         planOrChatName,
 				JobTitle:         jobInfo.Title,
-				JobFilePath:      filePath,
+				JobFilePath:      path,
 			}
 			sessions = append(sessions, session)
-		}
+			return nil
+		})
 	}
 
 	// Update cache file
@@ -428,7 +432,7 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 	}
 	locator := workspace.NewNotebookLocator(coreCfg)
 
-	// Get all plan directories across all workspaces
+	// Get all plan and chat directories across all workspaces
 	planDirs, err := locator.ScanForAllPlans(provider)
 	if err != nil {
 		if os.Getenv("GROVE_DEBUG") != "" {
@@ -437,79 +441,73 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		return []*models.Session{}, nil
 	}
 
+	chatDirs, err := locator.ScanForAllChats(provider)
+	if err != nil {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "Warning: failed to scan for chats: %v\n", err)
+		}
+	}
+
+	// Combine plan and chat directories
+	allDirs := append(planDirs, chatDirs...)
+
 	var sessions []*models.Session
 	seenJobs := make(map[string]bool)
 
-	// Scan each plan directory for jobs
-	for _, planDir := range planDirs {
-		// Determine the workspace for this plan directory
-		workspaceNode := provider.FindByPath(planDir)
-		if workspaceNode == nil {
-			// Try parent directory
-			workspaceNode = provider.FindByPath(filepath.Dir(planDir))
-		}
+	// Scan each directory for jobs
+	for _, scannedDir := range allDirs {
+		ownerNode := scannedDir.Owner
+		dirPath := scannedDir.Path
 
-		// Get plan name from directory
-		planName := filepath.Base(planDir)
-
-		// Determine repo name and branch
+		// Determine repo name and branch from the owner node
 		var repoName, branch string
-		if workspaceNode != nil {
-			if workspaceNode.IsWorktree() && workspaceNode.ParentProjectPath != "" {
-				// This is a worktree. The "repo" is its parent project.
-				repoName = filepath.Base(workspaceNode.ParentProjectPath)
-				// Get branch from workspace node
-				_, branch, _ = git.GetRepoInfo(workspaceNode.Path)
-			} else {
-				// Not a worktree, so it is its own repo context.
-				repoName = workspaceNode.Name
-			}
+		if ownerNode.IsWorktree() && ownerNode.ParentProjectPath != "" {
+			// This is a worktree. The "repo" is its parent project.
+			repoName = filepath.Base(ownerNode.ParentProjectPath)
+			// Get branch from workspace node
+			_, branch, _ = git.GetRepoInfo(ownerNode.Path)
+		} else {
+			// Not a worktree, so it is its own repo context.
+			repoName = ownerNode.Name
 		}
 
-		// Scan for job files in this plan directory
-		entries, err := os.ReadDir(planDir)
-		if err != nil {
-			continue // Skip plans we can't read
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
+		// Walk the directory to find all markdown files
+		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
 			}
-
-			filename := entry.Name()
 
 			// Skip non-.md files
-			if !strings.HasSuffix(filename, ".md") {
-				continue
+			if !strings.HasSuffix(info.Name(), ".md") {
+				return nil
 			}
 
-			// Skip spec.md and other non-job files
-			if filename == "spec.md" || filename == "README.md" {
-				continue
+			// Skip spec.md and README.md
+			if info.Name() == "spec.md" || info.Name() == "README.md" {
+				return nil
 			}
-
-			filePath := filepath.Join(planDir, filename)
 
 			// Read and parse job frontmatter
-			content, err := os.ReadFile(filePath)
+			content, err := os.ReadFile(path)
 			if err != nil {
-				continue
+				return nil
 			}
 			jobInfo := parseJobFrontmatter(string(content))
+
+			// Skip if not a valid job type
+			if jobInfo.Type == "" {
+				return nil
+			}
 
 			// Deduplicate by job ID or file path
 			dedupeKey := jobInfo.ID
 			if dedupeKey == "" {
-				dedupeKey = filePath
+				dedupeKey = path
 			}
 			if seenJobs[dedupeKey] {
-				continue
+				return nil
 			}
 			seenJobs[dedupeKey] = true
-
-			// Determine status (use frontmatter status)
-			displayStatus := jobInfo.Status
 
 			// Use start time from frontmatter
 			startTime := jobInfo.StartedAt
@@ -518,29 +516,38 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 			var endedAt *time.Time
 			if jobInfo.Status == "completed" || jobInfo.Status == "failed" || jobInfo.Status == "interrupted" {
 				// Use file modification time as a proxy for end time
-				if fileInfo, err := os.Stat(filePath); err == nil {
+				if fileInfo, err := os.Stat(path); err == nil {
 					endTime := fileInfo.ModTime()
 					endedAt = &endTime
 				}
 			}
 
+			// Determine plan/chat name from directory structure
+			relativePath, _ := filepath.Rel(dirPath, path)
+			planOrChatName := filepath.Base(filepath.Dir(path))
+			if relativePath == info.Name() {
+				// File is directly in the base directory (e.g., chat files)
+				planOrChatName = filepath.Base(dirPath)
+			}
+
 			session := &models.Session{
 				ID:               jobInfo.ID,
 				Type:             jobInfo.Type,
-				Status:           displayStatus,
+				Status:           jobInfo.Status,
 				Repo:             repoName,
 				Branch:           branch,
-				WorkingDirectory: planDir,
+				WorkingDirectory: filepath.Dir(path),
 				User:             os.Getenv("USER"),
 				StartedAt:        startTime,
 				LastActivity:     startTime, // Will be updated by updateSessionStatusFromFilesystem
 				EndedAt:          endedAt,
-				PlanName:         planName,
+				PlanName:         planOrChatName,
 				JobTitle:         jobInfo.Title,
-				JobFilePath:      filePath,
+				JobFilePath:      path,
 			}
 			sessions = append(sessions, session)
-		}
+			return nil
+		})
 	}
 
 	// Update file cache
