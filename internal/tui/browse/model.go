@@ -3,6 +3,7 @@ package browse
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -94,6 +95,11 @@ type Model struct {
 	typeFilters      map[string]bool
 	searchActive     bool // Whether search input is active
 	viewMode         viewMode
+	gPressed         bool // Track first 'g' press for 'gg' chord
+
+	// Exit actions
+	CommandOnExit *exec.Cmd
+	MessageOnExit string
 
 	// Function dependencies (to avoid import cycles)
 	getAllSessions         GetAllSessionsFunc
@@ -170,6 +176,10 @@ func NewModel(
 
 type tickMsg time.Time
 
+type gChordTimeoutMsg struct{}
+
+const gChordTimeout = 400 * time.Millisecond
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
@@ -183,6 +193,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case gChordTimeoutMsg:
+		m.gPressed = false
+		return m, nil
+
 	case tickMsg:
 		// Preserve cursor position
 		var selectedID string
@@ -254,6 +268,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle 'gg' chord for go to top
+		if m.gPressed {
+			m.gPressed = false
+			if key.Matches(msg, m.keys.GoToTop) {
+				// Second 'g' pressed - go to top
+				m.cursor = 0
+				m.scrollOffset = 0
+				return m, nil
+			}
+			// Any other key resets the chord state
+		} else if key.Matches(msg, m.keys.GoToTop) && !m.showDetails {
+			// First 'g' pressed - start chord timer
+			m.gPressed = true
+			return m, tea.Tick(gChordTimeout, func(t time.Time) tea.Msg {
+				return gChordTimeoutMsg{}
+			})
+		}
+
+		// Handle 'G' for go to bottom
+		if key.Matches(msg, m.keys.GoToBottom) && !m.showDetails {
+			var listLen int
+			if m.viewMode == tableView {
+				listLen = len(m.filteredSessions)
+			} else {
+				listLen = len(m.displayNodes)
+			}
+			if listLen > 0 {
+				m.cursor = listLen - 1
+				viewportHeight := m.getViewportHeight()
+				m.scrollOffset = listLen - viewportHeight
+				if m.scrollOffset < 0 {
+					m.scrollOffset = 0
+				}
+			}
+			return m, nil
+		}
+
 		if key.Matches(msg, m.keys.Help) {
 			m.help.Toggle()
 			return m, nil
@@ -348,30 +399,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if key.Matches(msg, m.keys.ScrollDown) {
 			if !m.showDetails {
 				viewportHeight := m.getViewportHeight()
-				m.scrollOffset += viewportHeight / 2
-				maxScroll := listLen - viewportHeight
-				if maxScroll < 0 {
-					maxScroll = 0
+				halfPage := viewportHeight / 2
+				// Move cursor down by half a page
+				m.cursor += halfPage
+				if m.cursor >= listLen {
+					m.cursor = listLen - 1
 				}
-				if m.scrollOffset > maxScroll {
-					m.scrollOffset = maxScroll
-				}
-				if m.cursor < m.scrollOffset {
-					m.cursor = m.scrollOffset
+				// Adjust scroll offset if cursor is outside viewport
+				if m.cursor >= m.scrollOffset+viewportHeight {
+					m.scrollOffset = m.cursor - viewportHeight + 1
 				}
 			}
 		} else if key.Matches(msg, m.keys.ScrollUp) {
 			if !m.showDetails {
 				viewportHeight := m.getViewportHeight()
-				m.scrollOffset -= viewportHeight / 2
-				if m.scrollOffset < 0 {
-					m.scrollOffset = 0
+				halfPage := viewportHeight / 2
+				// Move cursor up by half a page
+				m.cursor -= halfPage
+				if m.cursor < 0 {
+					m.cursor = 0
 				}
-				if m.cursor >= m.scrollOffset+viewportHeight {
-					m.cursor = m.scrollOffset + viewportHeight - 1
-					if m.cursor >= listLen {
-						m.cursor = listLen - 1
-					}
+				// Adjust scroll offset if cursor is outside viewport
+				if m.cursor < m.scrollOffset {
+					m.scrollOffset = m.cursor
 				}
 			}
 		} else if key.Matches(msg, m.keys.Confirm) {
@@ -469,6 +519,65 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusMessage = fmt.Sprintf("Killed session %s (PID %d)", session.ID[:8], pid)
 				} else {
 					m.statusMessage = "Error: Can only kill Claude sessions, not flow jobs"
+				}
+			}
+		} else if key.Matches(msg, m.keys.Edit) {
+			if session := m.getCurrentSession(); session != nil && session.JobFilePath != "" && !m.showDetails {
+				editor := os.Getenv("EDITOR")
+				if editor == "" {
+					editor = "vim"
+				}
+				return m, tea.ExecProcess(exec.Command(editor, session.JobFilePath), func(err error) tea.Msg {
+					if err != nil {
+						return fmt.Errorf("editor failed: %w", err)
+					}
+					return tickMsg(time.Now())
+				})
+			}
+		} else if key.Matches(msg, m.keys.Open) {
+			if session := m.getCurrentSession(); session != nil && !m.showDetails {
+				sessionType := session.Type
+				if sessionType == "" || sessionType == "claude_session" {
+					sessionType = "claude_code"
+				}
+
+				if sessionType == "claude_code" && session.TmuxKey != "" && (session.Status == "running" || session.Status == "idle") {
+					if os.Getenv("TMUX") != "" {
+						tmuxCmd := exec.Command("tmux", "switch-client", "-t", session.TmuxKey)
+						cmdToRun := tmuxCmd
+						m.CommandOnExit = &cmdToRun
+						return m, tea.Quit
+					}
+					m.MessageOnExit = fmt.Sprintf("Attach to session with:\ntmux attach -t %s", session.TmuxKey)
+					return m, tea.Quit
+				}
+
+				if session.Type == "interactive_agent" && (session.Status == "running" || session.Status == "idle") {
+					workDir := session.WorkingDirectory
+					projInfo, err := m.workspaceProvider.GetProjectByPath(workDir)
+					if err != nil {
+						m.statusMessage = fmt.Sprintf("Error: could not find workspace for %s", workDir)
+						return m, nil
+					}
+
+					sessionName := projInfo.Identifier()
+					windowName := "job-" + session.JobTitle
+					// Sanitize window name for tmux
+					windowName = strings.Map(func(r rune) rune {
+						if r == ':' || r == '.' || r == ' ' {
+							return '-'
+						}
+						return r
+					}, windowName)
+
+					if os.Getenv("TMUX") != "" {
+						tmuxCmd := exec.Command("sh", "-c", fmt.Sprintf("tmux switch-client -t %s && tmux select-window -t :'%s'", sessionName, windowName))
+						cmdToRun := tmuxCmd
+						m.CommandOnExit = &cmdToRun
+						return m, tea.Quit
+					}
+					m.MessageOnExit = fmt.Sprintf("Attach to session and window with:\ntmux attach -t %s\ntmux select-window -t :'%s'", sessionName, windowName)
+					return m, tea.Quit
 				}
 			}
 		} else if m.searchActive && !m.showDetails {

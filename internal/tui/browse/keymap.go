@@ -19,6 +19,10 @@ type KeyMap struct {
 	Kill         key.Binding
 	ToggleFilter key.Binding
 	SearchFilter key.Binding
+	GoToTop      key.Binding
+	GoToBottom   key.Binding
+	Edit         key.Binding
+	Open         key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -27,9 +31,9 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.ScrollUp, k.ScrollDown},
+		{k.Up, k.Down, k.ScrollUp, k.ScrollDown, k.GoToTop, k.GoToBottom},
 		{k.Confirm, k.Back, k.Select, k.SelectAll},
-		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.CopyID, k.OpenDir, k.ExportJSON},
+		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.Edit, k.Open, k.CopyID, k.OpenDir, k.ExportJSON},
 		{k.Kill, k.Help, k.Quit},
 	}
 }
@@ -81,6 +85,22 @@ func NewKeyMap() KeyMap {
 		Kill: key.NewBinding(
 			key.WithKeys("ctrl+k"),
 			key.WithHelp("ctrl+k", "kill session"),
+		),
+		GoToTop: key.NewBinding(
+			key.WithKeys("g"),
+			key.WithHelp("gg", "go to top"),
+		),
+		GoToBottom: key.NewBinding(
+			key.WithKeys("G"),
+			key.WithHelp("G", "go to bottom"),
+		),
+		Edit: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "edit job file"),
+		),
+		Open: key.NewBinding(
+			key.WithKeys("o"),
+			key.WithHelp("o", "open session/window"),
 		),
 	}
 }
