@@ -1,6 +1,7 @@
 package browse
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -431,23 +433,111 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scrollOffset = m.cursor
 				}
 			}
-		} else if key.Matches(msg, m.keys.Confirm) {
-			var currentSession *models.Session
-			if m.viewMode == tableView && m.cursor < len(m.filteredSessions) {
-				currentSession = m.filteredSessions[m.cursor]
-			} else if m.viewMode == treeView && m.cursor < len(m.displayNodes) {
-				if m.displayNodes[m.cursor].isSession {
-					currentSession = m.displayNodes[m.cursor].session
-				}
+		} else if key.Matches(msg, m.keys.Confirm) || key.Matches(msg, m.keys.Open) || key.Matches(msg, m.keys.Edit) {
+			if m.showDetails {
+				m.showDetails = false
+				return m, nil
 			}
-			if currentSession != nil {
-				if m.showDetails {
+
+			node := m.getCurrentDisplayNode()
+			if node == nil {
+				return m, nil // Nothing selected
+			}
+
+			// Handle context-aware actions for workspaces and plans (in tree view only)
+			if m.viewMode == treeView {
+				if node.isPlan {
+					// Action for plan: switch to workspace session and open flow plan TUI in new window
+					sessionName := node.workspace.Identifier()
+					planName := node.plan.Name
+					windowName := fmt.Sprintf("plan-%s", planName)
+
+					if os.Getenv("TMUX") != "" {
+						// Switch to session, create new window, and run flow plan status
+						m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf(
+							"tmux switch-client -t %s & tmux display-popup -C 2>/dev/null; sleep 0.1; tmux new-window -t %s: -n '%s' 'flow plan status -t %s'",
+							sessionName, sessionName, windowName, planName))
+						return m, tea.Quit
+					}
+					m.MessageOnExit = fmt.Sprintf("Run: tmux attach -t %s; tmux new-window -n '%s' 'flow plan status -t %s'", sessionName, windowName, planName)
 					return m, tea.Quit
-				} else {
-					m.selectedSession = currentSession
-					m.showDetails = true
+				} else if !node.isSession { // It's a workspace
+					// Action for workspace: open tmux session
+					sessionName := node.workspace.Identifier()
+					return m.switchToTmuxSession(sessionName)
 				}
 			}
+
+			// If it's a session (in either view), fall back to key-specific actions
+			if node.isSession {
+				session := node.session
+				if key.Matches(msg, m.keys.Confirm) { // Enter -> view details
+					m.selectedSession = session
+					m.showDetails = true
+				} else if key.Matches(msg, m.keys.Open) { // o -> open running session
+					sessionType := session.Type
+					if sessionType == "" || sessionType == "claude_session" {
+						sessionType = "claude_code"
+					}
+
+					if sessionType == "claude_code" && session.TmuxKey != "" && (session.Status == "running" || session.Status == "idle") {
+						if os.Getenv("TMUX") != "" {
+							// Run switch in background so it survives popup closing
+							m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf("tmux switch-client -t %s & tmux display-popup -C 2>/dev/null", session.TmuxKey))
+							return m, tea.Quit
+						}
+						m.MessageOnExit = fmt.Sprintf("Attach to session with:\ntmux attach -t %s", session.TmuxKey)
+						return m, tea.Quit
+					}
+
+					if session.Type == "interactive_agent" && (session.Status == "running" || session.Status == "idle") {
+						workDir := session.WorkingDirectory
+						projInfo, err := workspace.GetProjectByPath(workDir)
+						if err != nil {
+							m.statusMessage = fmt.Sprintf("Error: could not find workspace for %s", workDir)
+							return m, nil
+						}
+
+						sessionName := projInfo.Identifier()
+						windowName := "job-" + session.JobTitle
+						// Sanitize window name for tmux
+						windowName = strings.Map(func(r rune) rune {
+							if r == ':' || r == '.' || r == ' ' {
+								return '-'
+							}
+							return r
+						}, windowName)
+
+						if os.Getenv("TMUX") != "" {
+							// Run switch in background so it survives popup closing
+							m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf("(tmux switch-client -t %s && tmux select-window -t :'%s') & tmux display-popup -C 2>/dev/null", sessionName, windowName))
+							return m, tea.Quit
+						}
+						m.MessageOnExit = fmt.Sprintf("Attach to session and window with:\ntmux attach -t %s\ntmux select-window -t :'%s'", sessionName, windowName)
+						return m, tea.Quit
+					}
+				} else if key.Matches(msg, m.keys.Edit) { // e -> edit job file
+					if session.JobFilePath != "" {
+						if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
+							return m, func() tea.Msg {
+								return editFileAndQuitMsg{filePath: session.JobFilePath}
+							}
+						}
+
+						editor := os.Getenv("EDITOR")
+						if editor == "" {
+							editor = "vim"
+						}
+						return m, tea.ExecProcess(exec.Command(editor, session.JobFilePath), func(err error) tea.Msg {
+							if err != nil {
+								return fmt.Errorf("editor failed: %w", err)
+							}
+							return tickMsg(time.Now())
+						})
+					}
+				}
+			}
+			return m, nil
 		} else if key.Matches(msg, m.keys.CopyID) {
 			if session := m.getCurrentSession(); session != nil {
 				utils.CopyToClipboard(session.ID)
@@ -526,68 +616,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusMessage = fmt.Sprintf("Killed session %s (PID %d)", session.ID[:8], pid)
 				} else {
 					m.statusMessage = "Error: Can only kill Claude sessions, not flow jobs"
-				}
-			}
-		} else if key.Matches(msg, m.keys.Edit) {
-			if session := m.getCurrentSession(); session != nil && session.JobFilePath != "" && !m.showDetails {
-				// If running inside Neovim plugin, signal to quit and let plugin handle editing
-				if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
-					return m, func() tea.Msg {
-						return editFileAndQuitMsg{filePath: session.JobFilePath}
-					}
-				}
-
-				editor := os.Getenv("EDITOR")
-				if editor == "" {
-					editor = "vim"
-				}
-				return m, tea.ExecProcess(exec.Command(editor, session.JobFilePath), func(err error) tea.Msg {
-					if err != nil {
-						return fmt.Errorf("editor failed: %w", err)
-					}
-					return tickMsg(time.Now())
-				})
-			}
-		} else if key.Matches(msg, m.keys.Open) {
-			if session := m.getCurrentSession(); session != nil && !m.showDetails {
-				sessionType := session.Type
-				if sessionType == "" || sessionType == "claude_session" {
-					sessionType = "claude_code"
-				}
-
-				if sessionType == "claude_code" && session.TmuxKey != "" && (session.Status == "running" || session.Status == "idle") {
-					if os.Getenv("TMUX") != "" {
-						m.CommandOnExit = exec.Command("tmux", "switch-client", "-t", session.TmuxKey)
-						return m, tea.Quit
-					}
-					m.MessageOnExit = fmt.Sprintf("Attach to session with:\ntmux attach -t %s", session.TmuxKey)
-					return m, tea.Quit
-				}
-
-				if session.Type == "interactive_agent" && (session.Status == "running" || session.Status == "idle") {
-					workDir := session.WorkingDirectory
-					projInfo, err := workspace.GetProjectByPath(workDir)
-					if err != nil {
-						m.statusMessage = fmt.Sprintf("Error: could not find workspace for %s", workDir)
-						return m, nil
-					}
-
-					sessionName := projInfo.Identifier()
-					windowName := "job-" + session.JobTitle
-					// Sanitize window name for tmux
-					windowName = strings.Map(func(r rune) rune {
-						if r == ':' || r == '.' || r == ' ' {
-							return '-'
-						}
-						return r
-					}, windowName)
-
-					if os.Getenv("TMUX") != "" {
-						m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf("tmux switch-client -t %s && tmux select-window -t :'%s'", sessionName, windowName))
-						return m, tea.Quit
-					}
-					m.MessageOnExit = fmt.Sprintf("Attach to session and window with:\ntmux attach -t %s\ntmux select-window -t :'%s'", sessionName, windowName)
-					return m, tea.Quit
 				}
 			}
 		} else if m.searchActive && !m.showDetails {
@@ -677,8 +705,12 @@ func (m *Model) buildDisplayTree() {
 		var bestMatch *workspace.WorkspaceNode
 		bestMatchDepth := -1
 
+		// Normalize paths for case-insensitive comparison (macOS filesystem is case-insensitive)
+		sessionWorkDir := strings.ToLower(session.WorkingDirectory)
+
 		for _, ws := range m.workspaces {
-			if strings.HasPrefix(session.WorkingDirectory+"/", ws.Path+"/") || session.WorkingDirectory == ws.Path {
+			wsPath := strings.ToLower(ws.Path)
+			if strings.HasPrefix(sessionWorkDir+"/", wsPath+"/") || sessionWorkDir == wsPath {
 				if ws.Depth > bestMatchDepth {
 					bestMatch = ws
 					bestMatchDepth = ws.Depth
@@ -896,6 +928,43 @@ func (m *Model) getViewportHeight() int {
 		return 1
 	}
 	return availableHeight
+}
+
+// getCurrentDisplayNode returns the currently selected displayNode
+func (m *Model) getCurrentDisplayNode() *displayNode {
+	if m.viewMode == treeView {
+		if m.cursor >= 0 && m.cursor < len(m.displayNodes) {
+			return m.displayNodes[m.cursor]
+		}
+	} else { // tableView only shows sessions
+		if m.cursor >= 0 && m.cursor < len(m.filteredSessions) {
+			return &displayNode{isSession: true, session: m.filteredSessions[m.cursor]}
+		}
+	}
+	return nil
+}
+
+// switchToTmuxSession handles switching to a tmux session
+func (m Model) switchToTmuxSession(sessionName string) (tea.Model, tea.Cmd) {
+	tmuxClient, err := tmux.NewClient()
+	if err != nil {
+		m.statusMessage = fmt.Sprintf("Error: tmux not available: %v", err)
+		return m, nil
+	}
+	sessionExists, _ := tmuxClient.SessionExists(context.Background(), sessionName)
+
+	if !sessionExists {
+		m.statusMessage = fmt.Sprintf("Tmux session '%s' not found.", sessionName)
+		return m, nil
+	}
+
+	if os.Getenv("TMUX") != "" {
+		// Run switch in background so it survives popup closing
+		m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf("tmux switch-client -t %s & tmux display-popup -C 2>/dev/null", sessionName))
+	} else {
+		m.MessageOnExit = fmt.Sprintf("Attach to session with:\ntmux attach -t %s", sessionName)
+	}
+	return m, tea.Quit
 }
 
 func (m *Model) getCurrentSession() *models.Session {

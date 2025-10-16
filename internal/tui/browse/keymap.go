@@ -32,7 +32,10 @@ func (k KeyMap) ShortHelp() []key.Binding {
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.ScrollUp, k.ScrollDown, k.GoToTop, k.GoToBottom},
-		{k.Confirm, k.Back, k.Select, k.SelectAll},
+		{key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "action"),
+		), k.Back, k.Select, k.SelectAll},
 		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.Edit, k.Open, k.CopyID, k.OpenDir, k.ExportJSON},
 		{k.Kill, k.Help, k.Quit},
 	}
@@ -96,11 +99,11 @@ func NewKeyMap() KeyMap {
 		),
 		Edit: key.NewBinding(
 			key.WithKeys("e"),
-			key.WithHelp("e", "edit job file"),
+			key.WithHelp("e", "action"),
 		),
 		Open: key.NewBinding(
 			key.WithKeys("o"),
-			key.WithHelp("o", "open session/window"),
+			key.WithHelp("o", "action"),
 		),
 	}
 }

@@ -24,6 +24,11 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewVersionCmd())
 	rootCmd.AddCommand(NewDebugWorkspacesCmd())
 
+	tuiCmd := NewBrowseCmd()
+	tuiCmd.Use = "tui"
+	tuiCmd.Aliases = []string{"browse", "b"}
+	rootCmd.AddCommand(tuiCmd)
+
 	return rootCmd
 }
 
