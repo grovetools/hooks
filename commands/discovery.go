@@ -566,26 +566,14 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 
 	// Add/update with flow jobs, which are more authoritative for job-related metadata
 	for _, session := range flowJobs {
-		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Fprintf(os.Stderr, "DEBUG: Adding flow job ID=%s Type=%s Status=%s ClaudeSessionID=%s\n",
-				session.ID, session.Type, session.Status, session.ClaudeSessionID)
-		}
 		sessionsMap[session.ID] = session
 	}
 
 	// Add/update with live Claude sessions, which provide the most current "live" status
 	for _, session := range liveClaudeSessions {
-		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Fprintf(os.Stderr, "DEBUG: Processing live session ID=%s Type=%s Status=%s ClaudeSessionID=%s\n",
-				session.ID, session.Type, session.Status, session.ClaudeSessionID)
-		}
-
 		// If a session with this ID already exists (from flow jobs),
 		// update its status to reflect the live process.
 		if existing, ok := sessionsMap[session.ID]; ok {
-			if os.Getenv("GROVE_DEBUG") != "" {
-				fmt.Fprintf(os.Stderr, "DEBUG: Direct match found for session ID=%s\n", session.ID)
-			}
 			// Don't override terminal states from flow jobs
 			// Flow jobs are authoritative for completed/failed/interrupted states
 			if existing.Status != "completed" && existing.Status != "failed" && existing.Status != "interrupted" {
@@ -600,10 +588,6 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 			matched := false
 			for _, existing := range sessionsMap {
 				if existing.Type == "interactive_agent" && existing.ClaudeSessionID == session.ID {
-					if os.Getenv("GROVE_DEBUG") != "" {
-						fmt.Fprintf(os.Stderr, "DEBUG: Matched live session %s to interactive_agent %s (old status=%s, new status=%s)\n",
-							session.ID, existing.ID, existing.Status, session.Status)
-					}
 					// Found the interactive_agent that manages this claude session
 					if existing.Status != "completed" && existing.Status != "failed" && existing.Status != "interrupted" {
 						existing.Status = session.Status
@@ -615,9 +599,6 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 				}
 			}
 			if !matched {
-				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "DEBUG: No match found for session %s, adding as standalone\n", session.ID)
-				}
 				// This is a standalone claude session, not from a flow job
 				sessionsMap[session.ID] = session
 			}

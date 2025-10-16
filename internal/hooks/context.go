@@ -129,6 +129,31 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 			if _, err := fmt.Sscanf(string(content), "%d", &pid); err == nil {
 				if process.IsProcessAlive(pid) {
 					// Session is already running and tracked
+					// But we need to update the status if it's currently idle (resuming from idle)
+					// Read metadata to get the actual session ID (for interactive_agent jobs)
+					actualSessionID := sessionID
+					if metadataContent, err := os.ReadFile(metadataFile); err == nil {
+						var existingMetadata struct {
+							SessionID string `json:"session_id"`
+						}
+						if err := json.Unmarshal(metadataContent, &existingMetadata); err == nil && existingMetadata.SessionID != "" {
+							actualSessionID = existingMetadata.SessionID
+						}
+					}
+
+					// Check current status and update if idle
+					if existingSessionData, err := hc.Storage.GetSession(actualSessionID); err == nil && existingSessionData != nil {
+						var status string
+						if extSession, ok := existingSessionData.(*disk.ExtendedSession); ok {
+							status = extSession.Status
+						} else if session, ok := existingSessionData.(*models.Session); ok {
+							status = session.Status
+						}
+
+						if status == "idle" {
+							hc.Storage.UpdateSessionStatus(actualSessionID, "running")
+						}
+					}
 					return nil
 				}
 			}
@@ -258,25 +283,6 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 
 	if err := os.WriteFile(metadataFile, metadataJSON, 0644); err != nil {
 		return fmt.Errorf("failed to write metadata.json: %w", err)
-	}
-
-	// Also create a DB record for backwards compatibility (will be removed later)
-	// This allows existing tools to continue working during the transition
-	existingSessionData, err := hc.Storage.GetSession(sessionID)
-	if err == nil && existingSessionData != nil {
-		// Check the status based on the type
-		var status string
-		if extSession, ok := existingSessionData.(*disk.ExtendedSession); ok {
-			status = extSession.Status
-		} else if session, ok := existingSessionData.(*models.Session); ok {
-			status = session.Status
-		}
-
-		// Session exists - update status if idle
-		if status == "idle" {
-			return hc.Storage.UpdateSessionStatus(sessionID, "running")
-		}
-		return nil
 	}
 
 	// Create extended session with workspace context
