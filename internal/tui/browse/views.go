@@ -42,7 +42,7 @@ func (m Model) viewTable() string {
 	b.WriteString(headerLine)
 	b.WriteString("\n")
 
-	headers := []string{"", "SESSION ID", "TYPE", "STATUS", "REPOSITORY", "WORKTREE", "STARTED"}
+	headers := []string{"", "SESSION ID", "TYPE", "STATUS", "REPOSITORY", "WORKTREE"}
 	var rows [][]string
 
 	viewportHeight := m.getViewportHeight()
@@ -115,16 +115,6 @@ func (m Model) viewTable() string {
 		} else {
 			indicator = "   "
 		}
-		var startedStr string
-		if s.StartedAt.IsZero() {
-			startedStr = "n/a"
-		} else {
-			if time.Since(s.StartedAt) < 24*time.Hour {
-				startedStr = utils.FormatDuration(time.Since(s.StartedAt)) + " ago"
-			} else {
-				startedStr = s.StartedAt.Format("Jan 2 15:04")
-			}
-		}
 		rows = append(rows, []string{
 			utils.PadStr(indicator, 4),
 			utils.PadStr(sessionIDStr, 32),
@@ -132,7 +122,6 @@ func (m Model) viewTable() string {
 			utils.PadStr(statusStr, 20),
 			utils.PadStr(utils.TruncateStr(repository, 25), 25),
 			utils.PadStr(utils.TruncateStr(worktree, 20), 20),
-			utils.PadStr(startedStr, 12),
 		})
 	}
 

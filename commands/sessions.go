@@ -165,7 +165,7 @@ func newSessionsListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "SESSION ID\tTYPE\tSTATUS\tCONTEXT\tUSER\tSTARTED\tDURATION\tIN STATE")
+			fmt.Fprintln(w, "SESSION ID\tTYPE\tSTATUS\tCONTEXT\tUSER\tDURATION\tIN STATE")
 
 			for _, s := range sessions {
 				// Derive status for oneshot jobs based on ended_at
@@ -194,8 +194,6 @@ func newSessionsListCmd() *cobra.Command {
 					// Fallback to time since started
 					inState = time.Since(s.StartedAt).Round(time.Second).String()
 				}
-
-				started := s.StartedAt.Format("2006-01-02 15:04:05")
 
 				// Format context based on session type with enhanced worktree information
 				context := ""
@@ -248,13 +246,12 @@ func newSessionsListCmd() *cobra.Command {
 					}
 				}
 
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					truncate(s.ID, 12),
 					sessionType,
 					displayStatus,
 					truncate(context, 30),
 					s.User,
-					started,
 					duration,
 					inState,
 				)
