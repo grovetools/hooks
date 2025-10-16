@@ -140,23 +140,47 @@ func NewBrowseCmd() *cobra.Command {
 			)
 
 			// Run the interactive program
-			p := tea.NewProgram(m, tea.WithAltScreen())
+			// Use alt screen only when not in Neovim (to allow editor functionality)
+			var opts []tea.ProgramOption
+			if os.Getenv("GROVE_NVIM_PLUGIN") != "true" {
+				opts = append(opts, tea.WithAltScreen())
+			}
+			p := tea.NewProgram(m, opts...)
 			finalModel, err := p.Run()
 			if err != nil {
 				return fmt.Errorf("error running program: %w", err)
 			}
 
-			// Check if a session was selected
-			if bm, ok := finalModel.(browse.Model); ok && bm.SelectedSession() != nil {
-				// Output the selected session details
-				s := bm.SelectedSession()
-				fmt.Printf("\nSelected Session: %s\n", s.ID)
-				fmt.Printf("Status: %s\n", s.Status)
-				fmt.Printf("Type: %s\n", s.Type)
-				if s.Repo != "" {
-					fmt.Printf("Repo: %s/%s\n", s.Repo, s.Branch)
+			// Check if we need to run a command after the TUI exits
+			if bm, ok := finalModel.(browse.Model); ok {
+				if bm.CommandOnExit != nil {
+					// The TUI needs to exit before we can run a command that
+					// might switch the tmux client.
+					bm.CommandOnExit.Stdin = os.Stdin
+					bm.CommandOnExit.Stdout = os.Stdout
+					bm.CommandOnExit.Stderr = os.Stderr
+					if err := bm.CommandOnExit.Run(); err != nil {
+						fmt.Fprintf(os.Stderr, "Error executing command on exit: %v\n", err)
+					}
+					return nil // Exit cleanly after command.
 				}
-				fmt.Printf("Working Directory: %s\n", s.WorkingDirectory)
+				if bm.MessageOnExit != "" {
+					fmt.Println(bm.MessageOnExit)
+					return nil
+				}
+
+				// Check if a session was selected
+				if bm.SelectedSession() != nil {
+					// Output the selected session details
+					s := bm.SelectedSession()
+					fmt.Printf("\nSelected Session: %s\n", s.ID)
+					fmt.Printf("Status: %s\n", s.Status)
+					fmt.Printf("Type: %s\n", s.Type)
+					if s.Repo != "" {
+						fmt.Printf("Repo: %s/%s\n", s.Repo, s.Branch)
+					}
+					fmt.Printf("Working Directory: %s\n", s.WorkingDirectory)
+				}
 			}
 
 			return nil

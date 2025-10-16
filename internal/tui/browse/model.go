@@ -67,44 +67,44 @@ type displayNode struct {
 
 // Model is the model for the interactive session browser
 type Model struct {
-	sessions         []*models.Session
-	previousSessions []*models.Session // Track previous state for notification dispatch
-	workspaces       []*workspace.WorkspaceNode
+	sessions          []*models.Session
+	previousSessions  []*models.Session // Track previous state for notification dispatch
+	workspaces        []*workspace.WorkspaceNode
 	workspaceProvider *workspace.Provider
 
 	filteredSessions []*models.Session
 	displayNodes     []*displayNode
 
-	selectedSession  *models.Session
-	cursor           int
-	scrollOffset     int // For viewport scrolling
-	filterInput      textinput.Model
-	width            int
-	height           int
-	showDetails      bool
-	selectedIDs      map[string]bool // Track multiple selections by ID
-	storage          interfaces.SessionStorer
-	lastRefresh      time.Time
-	keys             KeyMap
-	help             help.Model
-	statusMessage    string // For showing kill/error messages
-	hideCompleted    bool   // Store the initial --active flag
-	showFilterView   bool   // Toggle for filter options view
-	filterCursor     int    // Cursor position in filter view
-	statusFilters    map[string]bool
-	typeFilters      map[string]bool
-	searchActive     bool // Whether search input is active
-	viewMode         viewMode
-	gPressed         bool // Track first 'g' press for 'gg' chord
+	selectedSession *models.Session
+	cursor          int
+	scrollOffset    int // For viewport scrolling
+	filterInput     textinput.Model
+	width           int
+	height          int
+	showDetails     bool
+	selectedIDs     map[string]bool // Track multiple selections by ID
+	storage         interfaces.SessionStorer
+	lastRefresh     time.Time
+	keys            KeyMap
+	help            help.Model
+	statusMessage   string // For showing kill/error messages
+	hideCompleted   bool   // Store the initial --active flag
+	showFilterView  bool   // Toggle for filter options view
+	filterCursor    int    // Cursor position in filter view
+	statusFilters   map[string]bool
+	typeFilters     map[string]bool
+	searchActive    bool // Whether search input is active
+	viewMode        viewMode
+	gPressed        bool // Track first 'g' press for 'gg' chord
 
 	// Exit actions
 	CommandOnExit *exec.Cmd
 	MessageOnExit string
 
 	// Function dependencies (to avoid import cycles)
-	getAllSessions         GetAllSessionsFunc
-	dispatchNotifications  DispatchNotificationsFunc
-	saveFilterPreferences  SaveFilterPreferencesFunc
+	getAllSessions        GetAllSessionsFunc
+	dispatchNotifications DispatchNotificationsFunc
+	saveFilterPreferences SaveFilterPreferencesFunc
 }
 
 func NewModel(
@@ -142,7 +142,7 @@ func NewModel(
 		hideCompleted:         hideCompleted,
 		statusFilters:         filterPrefs.StatusFilters,
 		typeFilters:           filterPrefs.TypeFilters,
-		viewMode:              tableView,
+		viewMode:              treeView,
 		getAllSessions:        getAllSessions,
 		dispatchNotifications: dispatchNotifications,
 		saveFilterPreferences: saveFilterPreferences,
@@ -178,6 +178,8 @@ type tickMsg time.Time
 
 type gChordTimeoutMsg struct{}
 
+type editFileAndQuitMsg struct{ filePath string }
+
 const gChordTimeout = 400 * time.Millisecond
 
 func (m Model) Init() tea.Cmd {
@@ -196,6 +198,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case gChordTimeoutMsg:
 		m.gPressed = false
 		return m, nil
+
+	case editFileAndQuitMsg:
+		// Print protocol string and quit - Neovim plugin will handle the file opening
+		fmt.Printf("EDIT_FILE:%s\n", msg.filePath)
+		return m, tea.Quit
 
 	case tickMsg:
 		// Preserve cursor position
@@ -523,6 +530,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if key.Matches(msg, m.keys.Edit) {
 			if session := m.getCurrentSession(); session != nil && session.JobFilePath != "" && !m.showDetails {
+				// If running inside Neovim plugin, signal to quit and let plugin handle editing
+				if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
+					return m, func() tea.Msg {
+						return editFileAndQuitMsg{filePath: session.JobFilePath}
+					}
+				}
+
 				editor := os.Getenv("EDITOR")
 				if editor == "" {
 					editor = "vim"
@@ -543,9 +557,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if sessionType == "claude_code" && session.TmuxKey != "" && (session.Status == "running" || session.Status == "idle") {
 					if os.Getenv("TMUX") != "" {
-						tmuxCmd := exec.Command("tmux", "switch-client", "-t", session.TmuxKey)
-						cmdToRun := tmuxCmd
-						m.CommandOnExit = &cmdToRun
+						m.CommandOnExit = exec.Command("tmux", "switch-client", "-t", session.TmuxKey)
 						return m, tea.Quit
 					}
 					m.MessageOnExit = fmt.Sprintf("Attach to session with:\ntmux attach -t %s", session.TmuxKey)
@@ -554,7 +566,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if session.Type == "interactive_agent" && (session.Status == "running" || session.Status == "idle") {
 					workDir := session.WorkingDirectory
-					projInfo, err := m.workspaceProvider.GetProjectByPath(workDir)
+					projInfo, err := workspace.GetProjectByPath(workDir)
 					if err != nil {
 						m.statusMessage = fmt.Sprintf("Error: could not find workspace for %s", workDir)
 						return m, nil
@@ -571,9 +583,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}, windowName)
 
 					if os.Getenv("TMUX") != "" {
-						tmuxCmd := exec.Command("sh", "-c", fmt.Sprintf("tmux switch-client -t %s && tmux select-window -t :'%s'", sessionName, windowName))
-						cmdToRun := tmuxCmd
-						m.CommandOnExit = &cmdToRun
+						m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf("tmux switch-client -t %s && tmux select-window -t :'%s'", sessionName, windowName))
 						return m, tea.Quit
 					}
 					m.MessageOnExit = fmt.Sprintf("Attach to session and window with:\ntmux attach -t %s\ntmux select-window -t :'%s'", sessionName, windowName)
