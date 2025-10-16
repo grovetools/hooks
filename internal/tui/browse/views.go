@@ -100,9 +100,9 @@ func (m Model) viewTable() string {
 			} else {
 				elapsedStr = "(unknown)"
 			}
-			statusStr = statusStyle.Render(statusIcon+" "+s.Status) + " " + t.Muted.Render(elapsedStr)
+			statusStr = statusIcon + " " + statusStyle.Render(s.Status) + " " + t.Muted.Render(elapsedStr)
 		} else {
-			statusStr = statusStyle.Render(statusIcon + " " + s.Status)
+			statusStr = statusIcon + " " + statusStyle.Render(s.Status)
 		}
 
 		var indicator string
@@ -438,46 +438,53 @@ func getStatusStyle(status string) lipgloss.Style {
 }
 
 func getStatusIcon(status string, sessionType string) string {
+	// First determine the icon character
+	var icon string
 	if sessionType == "plan" {
 		switch status {
 		case "completed":
-			return "✔"
+			icon = "✔"
 		case "running":
-			return "▶"
+			icon = "▶"
 		case "pending_user", "idle":
-			return "⏸"
+			icon = "⏸"
 		case "failed", "error":
-			return "✗"
+			icon = "✗"
 		default:
-			return "…"
+			icon = "…"
+		}
+	} else {
+		switch status {
+		case "completed":
+			icon = "●"
+		case "running":
+			icon = "◐"
+		case "idle":
+			icon = "⏸"
+		case "pending_user":
+			if sessionType == "chat" {
+				icon = "⏸"
+			} else {
+				icon = "○"
+			}
+		case "failed", "error":
+			icon = "✗"
+		case "interrupted":
+			icon = "⊗"
+		case "hold":
+			icon = "⏸"
+		case "todo":
+			icon = "○"
+		case "abandoned":
+			icon = "⊗"
+		default:
+			icon = "○"
 		}
 	}
 
-	switch status {
-	case "completed":
-		return "●"
-	case "running":
-		return "◐"
-	case "idle":
-		return "⏸"
-	case "pending_user":
-		if sessionType == "chat" {
-			return "⏸"
-		}
-		return "○"
-	case "failed", "error":
-		return "✗"
-	case "interrupted":
-		return "⊗"
-	case "hold":
-		return "⏸"
-	case "todo":
-		return "○"
-	case "abandoned":
-		return "⊗"
-	default:
-		return "○"
-	}
+	// Apply the status color to the icon
+	statusStyle := getStatusStyle(status)
+	return statusStyle.Render(icon)
 }
 
 func max(a, b int) int {
