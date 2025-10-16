@@ -231,6 +231,17 @@ func (m Model) viewTree() string {
 					sessionType,
 					statusStyle.Render(s.Status),
 				))
+			} else if node.isPlan {
+				plan := node.plan
+				statusIcon := getStatusIcon(plan.Status, "plan")
+				statusStyle := getStatusStyle(plan.Status)
+
+				line.WriteString(fmt.Sprintf("%s Plan: %s (%d jobs, %s)",
+					statusIcon,
+					t.Highlight.Render(plan.Name),
+					plan.JobCount,
+					statusStyle.Render(plan.Status),
+				))
 			} else {
 				ws := node.workspace
 				// Style workspace name based on its type
@@ -427,19 +438,45 @@ func getStatusStyle(status string) lipgloss.Style {
 }
 
 func getStatusIcon(status string, sessionType string) string {
+	if sessionType == "plan" {
+		switch status {
+		case "completed":
+			return "✔"
+		case "running":
+			return "▶"
+		case "pending_user", "idle":
+			return "⏸"
+		case "failed", "error":
+			return "✗"
+		default:
+			return "…"
+		}
+	}
+
 	switch status {
-	case "completed": return "●"
-	case "running": return "◐"
-	case "idle": return "⏸"
+	case "completed":
+		return "●"
+	case "running":
+		return "◐"
+	case "idle":
+		return "⏸"
 	case "pending_user":
-		if sessionType == "chat" { return "⏸" }
+		if sessionType == "chat" {
+			return "⏸"
+		}
 		return "○"
-	case "failed", "error": return "✗"
-	case "interrupted": return "⊗"
-	case "hold": return "⏸"
-	case "todo": return "○"
-	case "abandoned": return "⊗"
-	default: return "○"
+	case "failed", "error":
+		return "✗"
+	case "interrupted":
+		return "⊗"
+	case "hold":
+		return "⏸"
+	case "todo":
+		return "○"
+	case "abandoned":
+		return "⊗"
+	default:
+		return "○"
 	}
 }
 
