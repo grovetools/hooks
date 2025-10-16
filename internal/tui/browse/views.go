@@ -214,12 +214,36 @@ func (m Model) viewTree() string {
 
 				statusStyle := getStatusStyle(s.Status)
 
-				line.WriteString(fmt.Sprintf("%s %s (%s, %s)",
+				baseInfo := fmt.Sprintf("%s %s (%s, %s)",
 					statusIcon,
 					utils.TruncateStr(sessionID, 40),
 					sessionType,
 					statusStyle.Render(s.Status),
-				))
+				)
+
+				// Augment display for linked interactive_agent jobs
+				if s.Type == "interactive_agent" && s.ClaudeSessionID != "" {
+					// For display purposes, show 'running' for the agent, but use the live status for the linked session
+					agentStatusStyle := getStatusStyle("running")
+					agentStatusIcon := getStatusIcon("running", s.Type)
+					baseInfo = fmt.Sprintf("%s %s (%s, %s)",
+						agentStatusIcon,
+						utils.TruncateStr(sessionID, 40),
+						"interactive_agent",
+						agentStatusStyle.Render("running"),
+					)
+
+					linkedStatusIcon := getStatusIcon(s.Status, "claude_code")
+					linkedStatusStyle := getStatusStyle(s.Status)
+					augmentedInfo := fmt.Sprintf(" → %s %s (claude_code, %s)",
+						linkedStatusIcon,
+						utils.TruncateStr(s.ClaudeSessionID, 8),
+						linkedStatusStyle.Render(s.Status),
+					)
+					line.WriteString(baseInfo + t.Muted.Render(augmentedInfo))
+				} else {
+					line.WriteString(baseInfo)
+				}
 			} else if node.isPlan {
 				plan := node.plan
 				statusIcon := getStatusIcon(plan.Status, "plan")

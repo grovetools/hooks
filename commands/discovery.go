@@ -56,6 +56,7 @@ func GetCachedFlowJobs() ([]*models.Session, error) {
 // SessionMetadata represents the metadata.json structure for file-based sessions
 type SessionMetadata struct {
 	SessionID           string    `json:"session_id"`
+	ClaudeSessionID     string    `json:"claude_session_id,omitempty"`
 	PID                 int       `json:"pid"`
 	Repo                string    `json:"repo,omitempty"`
 	Branch              string    `json:"branch,omitempty"`
@@ -134,6 +135,11 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 		// Use the session ID from metadata, not the directory name
 		// This ensures consistency with flow jobs and database entries
 		sessionID := metadata.SessionID
+		claudeSessionID := metadata.ClaudeSessionID
+		if claudeSessionID == "" {
+			// Backwards compatibility: if the field doesn't exist, use the directory name
+			claudeSessionID = dirName
+		}
 
 		// Determine status and last activity based on liveness
 		status := "running"
@@ -178,7 +184,13 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 			lastActivity = now
 		} else {
 			// Process is alive, enrich with DB data if available
+			// For interactive_agent sessions, check both the flow job ID and Claude UUID
 			dbSessionData, err := storage.GetSession(sessionID)
+			if err != nil && claudeSessionID != "" && claudeSessionID != sessionID {
+				// Try the Claude UUID if the flow job ID lookup failed
+				dbSessionData, err = storage.GetSession(claudeSessionID)
+			}
+
 			if err == nil {
 				var dbStatus string
 				var dbLastActivity time.Time
@@ -205,6 +217,7 @@ func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Ses
 		// Create session object
 		session := &models.Session{
 			ID:               sessionID,
+			ClaudeSessionID:  claudeSessionID,
 			PID:              pid,
 			Repo:             metadata.Repo,
 			Branch:           metadata.Branch,
@@ -553,14 +566,26 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 
 	// Add/update with flow jobs, which are more authoritative for job-related metadata
 	for _, session := range flowJobs {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "DEBUG: Adding flow job ID=%s Type=%s Status=%s ClaudeSessionID=%s\n",
+				session.ID, session.Type, session.Status, session.ClaudeSessionID)
+		}
 		sessionsMap[session.ID] = session
 	}
 
 	// Add/update with live Claude sessions, which provide the most current "live" status
 	for _, session := range liveClaudeSessions {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "DEBUG: Processing live session ID=%s Type=%s Status=%s ClaudeSessionID=%s\n",
+				session.ID, session.Type, session.Status, session.ClaudeSessionID)
+		}
+
 		// If a session with this ID already exists (from flow jobs),
 		// update its status to reflect the live process.
 		if existing, ok := sessionsMap[session.ID]; ok {
+			if os.Getenv("GROVE_DEBUG") != "" {
+				fmt.Fprintf(os.Stderr, "DEBUG: Direct match found for session ID=%s\n", session.ID)
+			}
 			// Don't override terminal states from flow jobs
 			// Flow jobs are authoritative for completed/failed/interrupted states
 			if existing.Status != "completed" && existing.Status != "failed" && existing.Status != "interrupted" {
@@ -568,9 +593,34 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 			}
 			existing.PID = session.PID
 			existing.LastActivity = session.LastActivity
+			existing.ClaudeSessionID = session.ClaudeSessionID
 		} else {
-			// This is a standalone claude session, not from a flow job
-			sessionsMap[session.ID] = session
+			// Check if this is a linked claude session for an interactive_agent job
+			// Interactive agents store the Claude UUID in ClaudeSessionID field
+			matched := false
+			for _, existing := range sessionsMap {
+				if existing.Type == "interactive_agent" && existing.ClaudeSessionID == session.ID {
+					if os.Getenv("GROVE_DEBUG") != "" {
+						fmt.Fprintf(os.Stderr, "DEBUG: Matched live session %s to interactive_agent %s (old status=%s, new status=%s)\n",
+							session.ID, existing.ID, existing.Status, session.Status)
+					}
+					// Found the interactive_agent that manages this claude session
+					if existing.Status != "completed" && existing.Status != "failed" && existing.Status != "interrupted" {
+						existing.Status = session.Status
+					}
+					existing.PID = session.PID
+					existing.LastActivity = session.LastActivity
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				if os.Getenv("GROVE_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "DEBUG: No match found for session %s, adding as standalone\n", session.ID)
+				}
+				// This is a standalone claude session, not from a flow job
+				sessionsMap[session.ID] = session
+			}
 		}
 	}
 

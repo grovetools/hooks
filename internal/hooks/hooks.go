@@ -215,13 +215,28 @@ func RunStopHook() {
 		os.Exit(1)
 	}
 
+	// For interactive_agent sessions, the session directory is named with the Claude UUID,
+	// but the actual session_id is the flow job ID. Read metadata to get the correct ID.
+	actualSessionID := data.SessionID
+	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	metadataFile := filepath.Join(groveSessionsDir, data.SessionID, "metadata.json")
+	if metadataContent, err := os.ReadFile(metadataFile); err == nil {
+		var metadata struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.Unmarshal(metadataContent, &metadata); err == nil && metadata.SessionID != "" {
+			actualSessionID = metadata.SessionID
+			log.Printf("Using actual session ID from metadata: %s (directory: %s)", actualSessionID, data.SessionID)
+		}
+	}
+
 	// Get session details to obtain working directory and type
 	var sessionType string = "claude_session" // default
 	var workingDir string
 	var jobFilePath string
 
 	// Get session data from storage directly to access type information
-	sessionData, err := ctx.Storage.GetSession(data.SessionID)
+	sessionData, err := ctx.Storage.GetSession(actualSessionID)
 	if err != nil {
 		log.Printf("Failed to get session details: %v", err)
 	} else if sessionData != nil {
@@ -234,19 +249,6 @@ func RunStopHook() {
 			jobFilePath = extSession.JobFilePath
 		} else if session, ok := sessionData.(*models.Session); ok {
 			workingDir = session.WorkingDirectory
-		}
-
-		// If this session is linked to a grove-flow job, automatically complete it.
-		if jobFilePath != "" {
-			log.Printf("Session is linked to flow job: %s. Marking as complete.", jobFilePath)
-			cmd := exec.Command("flow", "plan", "complete", jobFilePath)
-			if output, err := cmd.CombinedOutput(); err != nil {
-				// This isn't a fatal error for the hook itself, so just log it.
-				// The command might fail if the job is already complete, which is fine.
-				log.Printf("Failed to auto-complete flow job (this may be expected): %v\nOutput: %s", err, string(output))
-			} else {
-				log.Printf("Successfully marked flow job as complete.")
-			}
 		}
 
 		// Execute repository-specific hook commands if we have a working directory
@@ -299,23 +301,37 @@ func RunStopHook() {
 		}
 	}
 
-	// Update database status
-	if err := ctx.Storage.UpdateSessionStatus(data.SessionID, finalStatus); err != nil {
+	// Update database status using the actual session ID
+	if err := ctx.Storage.UpdateSessionStatus(actualSessionID, finalStatus); err != nil {
 		log.Printf("Failed to update session status: %v", err)
 	}
 
 	// Handle session directory cleanup based on completion status
-	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	// Note: directory is always named with the original Claude UUID (data.SessionID)
 	sessionDir := filepath.Join(groveSessionsDir, data.SessionID)
 
 	if isComplete {
+		// If this session is linked to a grove-flow job, automatically complete it
+		// Only do this when the session is actually complete, not when it's just going idle
+		if jobFilePath != "" {
+			log.Printf("Session is linked to flow job: %s. Marking as complete.", jobFilePath)
+			cmd := exec.Command("flow", "plan", "complete", jobFilePath)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				// This isn't a fatal error for the hook itself, so just log it.
+				// The command might fail if the job is already complete, which is fine.
+				log.Printf("Failed to auto-complete flow job (this may be expected): %v\nOutput: %s", err, string(output))
+			} else {
+				log.Printf("Successfully marked flow job as complete.")
+			}
+		}
+
 		// Session is complete - archive metadata to DB and delete directory
 		// The metadata has already been written to the DB by previous hooks
 		// Now we can safely delete the session directory
 		if err := os.RemoveAll(sessionDir); err != nil {
 			log.Printf("Warning: failed to remove session directory %s: %v", sessionDir, err)
 		} else {
-			log.Printf("Removed session directory for completed session: %s", data.SessionID)
+			log.Printf("Removed session directory for completed session: %s (actual ID: %s)", data.SessionID, actualSessionID)
 		}
 
 		// Send ntfy notification for completed sessions

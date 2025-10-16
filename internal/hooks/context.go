@@ -205,6 +205,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	now := time.Now()
 	metadata := struct {
 		SessionID            string    `json:"session_id"`
+		ClaudeSessionID      string    `json:"claude_session_id,omitempty"`
 		PID                  int       `json:"pid"`
 		Repo                 string    `json:"repo,omitempty"`
 		Branch               string    `json:"branch,omitempty"`
@@ -234,7 +235,8 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 
 	// Check for grove-flow integration environment variables
 	if flowJobID := os.Getenv("GROVE_FLOW_JOB_ID"); flowJobID != "" {
-		metadata.SessionID = flowJobID // Use the job ID as the session ID for unification
+		metadata.ClaudeSessionID = sessionID // Preserve the original claude_code UUID
+		metadata.SessionID = flowJobID       // Use the job ID as the session ID for unification
 		metadata.Type = "interactive_agent"
 		metadata.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
 		metadata.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
@@ -296,7 +298,8 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 
 	// Check for grove-flow integration environment variables
 	if flowJobID := os.Getenv("GROVE_FLOW_JOB_ID"); flowJobID != "" {
-		session.ID = flowJobID // Use the job ID as the session ID for unification
+		session.ClaudeSessionID = sessionID // Preserve the original claude_code UUID
+		session.ID = flowJobID              // Use the job ID as the session ID for unification
 		session.Type = "interactive_agent"
 		session.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
 		session.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
