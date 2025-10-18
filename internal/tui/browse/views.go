@@ -42,113 +42,100 @@ func (m Model) viewTable() string {
 	b.WriteString(headerLine)
 	b.WriteString("\n")
 
-	headers := []string{"", "SESSION ID", "TYPE", "STATUS", "REPOSITORY", "WORKTREE"}
+	headers := []string{"WORKSPACE / JOB", "TYPE", "STATUS", "LAST ACTIVITY"}
 	var rows [][]string
 
 	viewportHeight := m.getViewportHeight()
 	startIdx := m.scrollOffset
 	endIdx := m.scrollOffset + viewportHeight
-	if endIdx > len(m.filteredSessions) {
-		endIdx = len(m.filteredSessions)
+	if endIdx > len(m.displayNodes) {
+		endIdx = len(m.displayNodes)
 	}
 
-	for i := startIdx; i < endIdx; i++ {
-		s := m.filteredSessions[i]
-		sessionType := s.Type
-		isClaudeSession := sessionType == "" || sessionType == "claude_session"
-		if isClaudeSession {
-			sessionType = "claude_code"
-		}
-		sessionID := s.ID
-		if !isClaudeSession && s.JobTitle != "" {
-			sessionID = s.JobTitle
-		}
+	if len(m.displayNodes) == 0 {
+		b.WriteString("\n" + t.Muted.Render("No matching sessions or workspaces"))
+	} else {
+		for i := startIdx; i < endIdx; i++ {
+			node := m.displayNodes[i]
+			var row []string
 
-		var sessionIDStr, sessionTypeStr string
-		if isClaudeSession {
-			sessionIDStr = lipgloss.NewStyle().Foreground(t.Colors.Blue).Render(utils.TruncateStr(sessionID, 30))
-			sessionTypeStr = lipgloss.NewStyle().Foreground(t.Colors.Blue).Render(sessionType)
-		} else {
-			sessionIDStr = lipgloss.NewStyle().Foreground(t.Colors.Violet).Render(utils.TruncateStr(sessionID, 30))
-			sessionTypeStr = lipgloss.NewStyle().Foreground(t.Colors.Violet).Render(sessionType)
-		}
-
-		repository := s.Repo
-		if repository == "" {
-			if !isClaudeSession && s.PlanName != "" {
-				repository = s.PlanName
-			} else {
-				repository = "n/a"
+			// WORKSPACE / JOB column
+			var firstCol string
+			if node.isSession {
+				sessionTitle := node.session.JobTitle
+				if sessionTitle == "" {
+					sessionTitle = node.session.ID
+				}
+				titleStyle := lipgloss.NewStyle().Foreground(t.Colors.Pink).Bold(false)
+				firstCol = node.prefix + titleStyle.Render(utils.TruncateStr(sessionTitle, 40))
+			} else if node.isPlan {
+				firstCol = node.prefix + t.Highlight.Render("Plan: "+node.plan.Name)
+			} else { // Workspace
+				var nameStyle lipgloss.Style
+				if node.workspace.IsWorktree() {
+					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Blue)
+				} else if node.workspace.IsEcosystem() {
+					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Cyan).Bold(true)
+				} else {
+					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Cyan)
+				}
+				firstCol = node.prefix + nameStyle.Render(node.workspace.Name)
 			}
-		}
-		worktree := s.Branch
-		if worktree == "" {
-			worktree = "n/a"
-		}
+			row = append(row, firstCol)
 
-		statusStyle := getStatusStyle(s.Status)
-		statusIcon := getStatusIcon(s.Status, s.Type)
-		var statusStr string
-		if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
-			var elapsedStr string
-			if !s.LastActivity.IsZero() {
-				elapsed := utils.FormatDuration(time.Since(s.LastActivity))
-				elapsedStr = fmt.Sprintf("(%s)", elapsed)
-			} else if !s.StartedAt.IsZero() {
-				elapsed := utils.FormatDuration(time.Since(s.StartedAt))
-				elapsedStr = fmt.Sprintf("(%s)", elapsed)
-			} else {
-				elapsedStr = "(unknown)"
+			// TYPE column
+			var typeCol string
+			if node.isSession {
+				sessionType := node.session.Type
+				if sessionType == "" || sessionType == "claude_session" {
+					sessionType = "claude_code"
+				}
+				typeCol = sessionType
+			} else if node.isPlan {
+				typeCol = fmt.Sprintf("(%d jobs)", node.plan.JobCount)
 			}
-			statusStr = statusIcon + " " + statusStyle.Render(s.Status) + " " + t.Muted.Render(elapsedStr)
-		} else {
-			statusStr = statusIcon + " " + statusStyle.Render(s.Status)
-		}
+			row = append(row, typeCol)
 
-		var indicator string
-		if m.selectedIDs[s.ID] && i == m.cursor {
-			indicator = "[*]▶"
-		} else if m.selectedIDs[s.ID] {
-			indicator = "[*] "
-		} else if i == m.cursor {
-			indicator = "  ▶"
-		} else {
-			indicator = "   "
+			// STATUS column
+			var statusCol string
+			if node.isSession {
+				s := node.session
+				statusIcon := getStatusIcon(s.Status, s.Type)
+				statusStyle := getStatusStyle(s.Status)
+				statusCol = statusIcon + " " + statusStyle.Render(s.Status)
+			}
+			row = append(row, statusCol)
+
+			// LAST ACTIVITY column
+			var lastActivityCol string
+			if node.isSession {
+				s := node.session
+				if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
+					if !s.LastActivity.IsZero() {
+						lastActivityCol = utils.FormatDuration(time.Since(s.LastActivity))
+					} else if !s.StartedAt.IsZero() {
+						lastActivityCol = utils.FormatDuration(time.Since(s.StartedAt))
+					}
+				}
+			}
+			row = append(row, lastActivityCol)
+
+			rows = append(rows, row)
 		}
-		rows = append(rows, []string{
-			utils.PadStr(indicator, 4),
-			utils.PadStr(sessionIDStr, 32),
-			utils.PadStr(sessionTypeStr, 18),
-			utils.PadStr(statusStr, 20),
-			utils.PadStr(utils.TruncateStr(repository, 25), 25),
-			utils.PadStr(utils.TruncateStr(worktree, 20), 20),
-		})
 	}
 
-	if len(m.filteredSessions) > 0 {
+	if len(rows) > 0 {
 		visibleCursor := m.cursor - m.scrollOffset
 		tableStr := gtable.SelectableTable(headers, rows, visibleCursor)
-		scrollbar := m.generateScrollbar(viewportHeight, len(m.filteredSessions))
-		tableLines := strings.Split(tableStr, "\n")
-		var combinedLines []string
-		for i, line := range tableLines {
-			scrollbarChar := " "
-			if i < len(scrollbar) {
-				scrollbarChar = scrollbar[i]
-			}
-			combinedLines = append(combinedLines, line+scrollbarChar)
-		}
-		b.WriteString(strings.Join(combinedLines, "\n"))
-	} else {
-		b.WriteString("\n" + t.Muted.Render("No matching sessions"))
+		b.WriteString(tableStr)
 	}
 
 	b.WriteString("\n")
 	if len(m.selectedIDs) > 0 {
 		b.WriteString(t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedIDs))) + " ")
 	}
-	if len(m.filteredSessions) > viewportHeight {
-		scrollInfo := fmt.Sprintf("(%d-%d of %d)", startIdx+1, endIdx, len(m.filteredSessions))
+	if len(m.displayNodes) > viewportHeight {
+		scrollInfo := fmt.Sprintf("(%d-%d of %d)", startIdx+1, endIdx, len(m.displayNodes))
 		b.WriteString(t.Muted.Render(scrollInfo) + " ")
 	}
 	if m.statusMessage != "" {

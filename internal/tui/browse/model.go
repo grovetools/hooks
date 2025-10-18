@@ -209,9 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Preserve cursor position
 		var selectedID string
-		if m.viewMode == tableView && m.cursor >= 0 && m.cursor < len(m.filteredSessions) {
-			selectedID = m.filteredSessions[m.cursor].ID
-		} else if m.viewMode == treeView && m.cursor >= 0 && m.cursor < len(m.displayNodes) {
+		if m.cursor >= 0 && m.cursor < len(m.displayNodes) {
 			if m.displayNodes[m.cursor].isSession {
 				selectedID = m.displayNodes[m.cursor].session.ID
 			}
@@ -231,31 +229,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if selectedID != "" {
 			newCursor := -1
-			if m.viewMode == tableView {
-				for i, s := range m.filteredSessions {
-					if s.ID == selectedID {
-						newCursor = i
-						break
-					}
-				}
-			} else if m.viewMode == treeView {
-				for i, n := range m.displayNodes {
-					if n.isSession && n.session.ID == selectedID {
-						newCursor = i
-						break
-					}
+			for i, n := range m.displayNodes {
+				if n.isSession && n.session.ID == selectedID {
+					newCursor = i
+					break
 				}
 			}
 			if newCursor != -1 {
 				m.cursor = newCursor
 			} else {
 				// ID disappeared, reset cursor if out of bounds
-				var listLen int
-				if m.viewMode == tableView {
-					listLen = len(m.filteredSessions)
-				} else {
-					listLen = len(m.displayNodes)
-				}
+				listLen := len(m.displayNodes)
 				if m.cursor >= listLen {
 					if listLen > 0 {
 						m.cursor = listLen - 1
@@ -297,12 +281,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle 'G' for go to bottom
 		if key.Matches(msg, m.keys.GoToBottom) && !m.showDetails {
-			var listLen int
-			if m.viewMode == tableView {
-				listLen = len(m.filteredSessions)
-			} else {
-				listLen = len(m.displayNodes)
-			}
+			listLen := len(m.displayNodes)
 			if listLen > 0 {
 				m.cursor = listLen - 1
 				viewportHeight := m.getViewportHeight()
@@ -383,12 +362,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		listLen := 0
-		if m.viewMode == tableView {
-			listLen = len(m.filteredSessions)
-		} else {
-			listLen = len(m.displayNodes)
-		}
+		listLen := len(m.displayNodes)
 
 		if key.Matches(msg, m.keys.Up) {
 			if !m.showDetails && m.cursor > 0 {
@@ -932,14 +906,8 @@ func (m *Model) getViewportHeight() int {
 
 // getCurrentDisplayNode returns the currently selected displayNode
 func (m *Model) getCurrentDisplayNode() *displayNode {
-	if m.viewMode == treeView {
-		if m.cursor >= 0 && m.cursor < len(m.displayNodes) {
-			return m.displayNodes[m.cursor]
-		}
-	} else { // tableView only shows sessions
-		if m.cursor >= 0 && m.cursor < len(m.filteredSessions) {
-			return &displayNode{isSession: true, session: m.filteredSessions[m.cursor]}
-		}
+	if m.cursor >= 0 && m.cursor < len(m.displayNodes) {
+		return m.displayNodes[m.cursor]
 	}
 	return nil
 }
@@ -968,16 +936,10 @@ func (m Model) switchToTmuxSession(sessionName string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) getCurrentSession() *models.Session {
-	if m.viewMode == tableView {
-		if m.cursor >= 0 && m.cursor < len(m.filteredSessions) {
-			return m.filteredSessions[m.cursor]
-		}
-	} else if m.viewMode == treeView {
-		if m.cursor >= 0 && m.cursor < len(m.displayNodes) {
-			node := m.displayNodes[m.cursor]
-			if node.isSession {
-				return node.session
-			}
+	if m.cursor >= 0 && m.cursor < len(m.displayNodes) {
+		node := m.displayNodes[m.cursor]
+		if node.isSession {
+			return node.session
 		}
 	}
 	return nil

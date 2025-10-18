@@ -46,8 +46,8 @@ func NewKeyMap() KeyMap {
 	return KeyMap{
 		Base: base,
 		ToggleView: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "toggle view"),
+			key.WithKeys("t"),
+			key.WithHelp("t", "toggle view"),
 		),
 		ToggleFilter: key.NewBinding(
 			key.WithKeys("f"),
