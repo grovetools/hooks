@@ -100,14 +100,14 @@ func runInstall(targetDir string) error {
 				settings = make(ClaudeSettings)
 			} else {
 				log.Infof("Updating existing settings at %s", settingsPath)
-				prettyLog.InfoPretty(fmt.Sprintf("Updating existing settings at %s", settingsPath))
+				fmt.Printf("Updating existing settings at %s\n", settingsPath)
 			}
 		}
 	} else {
 		// File doesn't exist, create new settings
 		settings = make(ClaudeSettings)
 		log.Infof("Creating new settings at %s", settingsPath)
-		prettyLog.InfoPretty(fmt.Sprintf("Creating new settings at %s", settingsPath))
+		fmt.Printf("Creating new settings at %s\n", settingsPath)
 	}
 
 	// Define default hooks configuration
@@ -184,7 +184,7 @@ func runInstall(targetDir string) error {
 	}
 
 	log.Info("Grove hooks configuration installed successfully")
-	prettyLog.Success("Grove hooks configuration installed successfully!")
+	fmt.Println("Grove hooks configuration installed successfully")
 	log.Infof("Settings file: %s", settingsPath)
 	prettyLog.Success(fmt.Sprintf("Settings file: %s", settingsPath))
 	prettyLog.Blank()

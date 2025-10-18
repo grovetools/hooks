@@ -406,6 +406,20 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		}
 	}
 
+	// Skip flow jobs discovery if GROVE_SKIP_FLOW_DISCOVERY is set (for faster E2E tests)
+	if os.Getenv("GROVE_SKIP_FLOW_DISCOVERY") != "" {
+		// Return empty cache
+		cacheData := flowJobsCacheData{
+			Timestamp: time.Now(),
+			Sessions:  []*models.Session{},
+		}
+		if jsonData, err := json.Marshal(cacheData); err == nil {
+			os.MkdirAll(filepath.Dir(flowJobsCachePath), 0755)
+			os.WriteFile(flowJobsCachePath, jsonData, 0644)
+		}
+		return []*models.Session{}, nil
+	}
+
 	// Initialize workspace provider and NotebookLocator
 	logger := logrus.New()
 	logger.SetOutput(io.Discard) // Suppress discoverer's debug output
