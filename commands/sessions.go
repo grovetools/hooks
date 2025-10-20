@@ -119,35 +119,45 @@ func newSessionsListCmd() *cobra.Command {
 
 			// Output results
 			if jsonOutput {
-				// Enhance sessions with state duration info
-				type SessionWithStateDuration struct {
+				// Enhance sessions with comprehensive time-based fields
+				type EnhancedSession struct {
 					*models.Session
-					StateDuration        string `json:"state_duration"`
-					StateDurationSeconds int64  `json:"state_duration_seconds"`
+					DurationSeconds        *float64 `json:"duration_seconds,omitempty"`
+					DurationHuman          string   `json:"duration_human,omitempty"`
+					AgeSeconds             *float64 `json:"age_seconds,omitempty"`
+					AgeHuman               string   `json:"age_human,omitempty"`
+					LastActivitySecondsAgo *float64 `json:"last_activity_seconds_ago,omitempty"`
+					LastActivityHuman      string   `json:"last_activity_human,omitempty"`
 				}
 
-				enhancedSessions := make([]SessionWithStateDuration, len(sessions))
+				enhancedSessions := make([]EnhancedSession, len(sessions))
 				now := time.Now()
 
 				for i, s := range sessions {
-					enhanced := SessionWithStateDuration{Session: s}
+					enhanced := EnhancedSession{Session: s}
 
-					// Calculate time in current state
-					if s.Status == "running" || s.Status == "idle" {
-						// For active sessions, time since last activity
-						duration := now.Sub(s.LastActivity)
-						enhanced.StateDuration = duration.Round(time.Second).String()
-						enhanced.StateDurationSeconds = int64(duration.Seconds())
-					} else if s.EndedAt != nil {
-						// For completed sessions, show how long they ran
+					// Duration: total runtime for completed sessions
+					if s.EndedAt != nil && !s.StartedAt.IsZero() {
 						duration := s.EndedAt.Sub(s.StartedAt)
-						enhanced.StateDuration = duration.Round(time.Second).String()
-						enhanced.StateDurationSeconds = int64(duration.Seconds())
-					} else {
-						// Fallback to time since started
-						duration := now.Sub(s.StartedAt)
-						enhanced.StateDuration = duration.Round(time.Second).String()
-						enhanced.StateDurationSeconds = int64(duration.Seconds())
+						durationSecs := duration.Seconds()
+						enhanced.DurationSeconds = &durationSecs
+						enhanced.DurationHuman = utils.FormatDuration(duration)
+					}
+
+					// Age: time since session was created
+					if !s.StartedAt.IsZero() {
+						age := now.Sub(s.StartedAt)
+						ageSecs := age.Seconds()
+						enhanced.AgeSeconds = &ageSecs
+						enhanced.AgeHuman = utils.FormatDuration(age)
+					}
+
+					// LastActivity: time since last recorded activity
+					if !s.LastActivity.IsZero() {
+						lastActivity := now.Sub(s.LastActivity)
+						lastActivitySecs := lastActivity.Seconds()
+						enhanced.LastActivitySecondsAgo = &lastActivitySecs
+						enhanced.LastActivityHuman = utils.FormatDuration(lastActivity)
 					}
 
 					enhancedSessions[i] = enhanced
@@ -165,34 +175,42 @@ func newSessionsListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "SESSION ID\tTYPE\tSTATUS\tCONTEXT\tUSER\tDURATION\tIN STATE")
+			fmt.Fprintln(w, "SESSION ID\tTYPE\tSTATUS\tCONTEXT\tUSER\tAGE")
 
 			for _, s := range sessions {
-				// Derive status for oneshot jobs based on ended_at
+				// Use status from job file as source of truth
 				displayStatus := s.Status
-				if s.Type == "oneshot_job" && s.EndedAt == nil {
-					// For oneshot jobs, if ended_at is NULL, show as running
-					displayStatus = "running"
+
+				// Calculate AGE with context-aware logic
+				age := "n/a"
+				now := time.Now()
+
+				// Terminal states (completed, failed, interrupted, etc.)
+				terminalStates := map[string]bool{
+					"completed":   true,
+					"failed":      true,
+					"interrupted": true,
+					"error":       true,
+					"abandoned":   true,
 				}
 
-				duration := "running"
-				if s.EndedAt != nil {
-					duration = s.EndedAt.Sub(s.StartedAt).Round(time.Second).String()
-				} else if displayStatus == "idle" {
-					duration = "idle"
-				}
-
-				// Calculate time in current state
-				inState := ""
-				if displayStatus == "running" || displayStatus == "idle" {
-					// For active sessions, time since last activity
-					inState = time.Since(s.LastActivity).Round(time.Second).String()
-				} else if s.EndedAt != nil {
-					// For completed sessions, show how long they ran
-					inState = s.EndedAt.Sub(s.StartedAt).Round(time.Second).String()
-				} else {
-					// Fallback to time since started
-					inState = time.Since(s.StartedAt).Round(time.Second).String()
+				if terminalStates[displayStatus] {
+					// For terminal sessions, show total execution duration
+					if s.EndedAt != nil && !s.StartedAt.IsZero() {
+						age = utils.FormatDuration(s.EndedAt.Sub(s.StartedAt))
+					}
+				} else if displayStatus == "running" || displayStatus == "idle" || displayStatus == "pending_user" {
+					// For active sessions, show time since last activity
+					if !s.LastActivity.IsZero() {
+						age = utils.FormatDuration(now.Sub(s.LastActivity))
+					} else if !s.StartedAt.IsZero() {
+						age = utils.FormatDuration(now.Sub(s.StartedAt))
+					}
+				} else if displayStatus == "pending" || displayStatus == "todo" {
+					// For queued sessions, show time since creation
+					if !s.StartedAt.IsZero() {
+						age = utils.FormatDuration(now.Sub(s.StartedAt))
+					}
 				}
 
 				// Format context based on session type with enhanced worktree information
@@ -246,14 +264,13 @@ func newSessionsListCmd() *cobra.Command {
 					}
 				}
 
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 					truncate(s.ID, 12),
 					sessionType,
 					displayStatus,
 					truncate(context, 30),
 					s.User,
-					duration,
-					inState,
+					age,
 				)
 			}
 

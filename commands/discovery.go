@@ -367,6 +367,12 @@ func refreshFlowJobsCache() {
 				JobTitle:         job.Title,
 				JobFilePath:      path,
 			}
+
+			// Populate EndedAt if job has a valid, non-zero EndTime
+			if !job.EndTime.IsZero() {
+				session.EndedAt = &job.EndTime
+			}
+
 			sessions = append(sessions, session)
 			return nil
 		})
@@ -519,6 +525,12 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 				JobTitle:         job.Title,
 				JobFilePath:      path,
 			}
+
+			// Populate EndedAt if job has a valid, non-zero EndTime
+			if !job.EndTime.IsZero() {
+				session.EndedAt = &job.EndTime
+			}
+
 			sessions = append(sessions, session)
 			return nil
 		})
