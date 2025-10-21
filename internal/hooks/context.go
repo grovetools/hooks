@@ -13,6 +13,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/process"
+	"github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-hooks/internal/config"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
@@ -216,42 +217,23 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	// Get Claude PID
 	pid := getClaudePID()
 
-	// Create the session directory structure
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		return fmt.Errorf("failed to create session directory: %w", err)
-	}
-
-	// Write the PID lock file
-	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", pid)), 0644); err != nil {
-		return fmt.Errorf("failed to write pid.lock: %w", err)
-	}
-
 	// Create metadata structure
 	now := time.Now()
-	metadata := struct {
-		SessionID            string    `json:"session_id"`
-		ClaudeSessionID      string    `json:"claude_session_id,omitempty"`
-		PID                  int       `json:"pid"`
-		Repo                 string    `json:"repo,omitempty"`
-		Branch               string    `json:"branch,omitempty"`
-		TmuxKey              string    `json:"tmux_key,omitempty"`
-		WorkingDirectory     string    `json:"working_directory"`
-		User                 string    `json:"user"`
-		StartedAt            time.Time `json:"started_at"`
-		TranscriptPath       string    `json:"transcript_path,omitempty"`
-		ProjectName          string    `json:"project_name,omitempty"`
-		IsWorktree           bool      `json:"is_worktree,omitempty"`
-		ParentEcosystemPath  string    `json:"parent_ecosystem_path,omitempty"`
-		Type                 string    `json:"type,omitempty"`
-		JobTitle             string    `json:"job_title,omitempty"`
-		PlanName             string    `json:"plan_name,omitempty"`
-		JobFilePath          string    `json:"job_file_path,omitempty"`
-	}{
+
+	// Determine provider from environment, default to "claude"
+	provider := os.Getenv("GROVE_AGENT_PROVIDER")
+	if provider == "" {
+		provider = "claude"
+	}
+
+	// Build core session metadata for the registry
+	coreMetadata := sessions.SessionMetadata{
 		SessionID:        sessionID,
+		ClaudeSessionID:  sessionID,
+		Provider:         provider,
 		PID:              pid,
 		Repo:             repo,
 		Branch:           gitBranch,
-		TmuxKey:          tmuxKey,
 		WorkingDirectory: workingDir,
 		User:             username,
 		StartedAt:        now,
@@ -260,29 +242,21 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 
 	// Check for grove-flow integration environment variables
 	if flowJobID := os.Getenv("GROVE_FLOW_JOB_ID"); flowJobID != "" {
-		metadata.ClaudeSessionID = sessionID // Preserve the original claude_code UUID
-		metadata.SessionID = flowJobID       // Use the job ID as the session ID for unification
-		metadata.Type = "interactive_agent"
-		metadata.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
-		metadata.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
-		metadata.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
+		coreMetadata.ClaudeSessionID = sessionID // Preserve the original claude_code UUID
+		coreMetadata.SessionID = flowJobID       // Use the job ID as the session ID for unification
+		coreMetadata.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
+		coreMetadata.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
+		coreMetadata.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
 	}
 
-	// Populate workspace context fields if available
-	if projInfo != nil {
-		metadata.ProjectName = projInfo.Name
-		metadata.IsWorktree = projInfo.IsWorktree()
-		metadata.ParentEcosystemPath = projInfo.ParentEcosystemPath
-	}
-
-	// Write metadata.json
-	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
+	// Register the session with grove-core registry
+	registry, err := sessions.NewFileSystemRegistry()
 	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
+		return fmt.Errorf("failed to create session registry: %w", err)
 	}
 
-	if err := os.WriteFile(metadataFile, metadataJSON, 0644); err != nil {
-		return fmt.Errorf("failed to write metadata.json: %w", err)
+	if err := registry.Register(coreMetadata); err != nil {
+		return fmt.Errorf("failed to register session: %w", err)
 	}
 
 	// Create extended session with workspace context
@@ -300,6 +274,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 			LastActivity:     now,
 			IsTest:           false,
 		},
+		Provider: provider,
 	}
 
 	// Check for grove-flow integration environment variables

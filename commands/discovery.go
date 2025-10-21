@@ -75,9 +75,10 @@ type SessionMetadata struct {
 	JobFilePath         string    `json:"job_file_path,omitempty"`
 }
 
-// DiscoverLiveClaudeSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
+// DiscoverLiveInteractiveSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
+// from all interactive providers (Claude, Codex, etc.)
 // A session is considered live if its PID is still alive
-func DiscoverLiveClaudeSessions(storage interfaces.SessionStorer) ([]*models.Session, error) {
+func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*models.Session, error) {
 	groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
 
 	// Check if directory exists
@@ -557,14 +558,14 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 
 // GetAllSessions fetches sessions from all sources, merges them, and sorts them.
 func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*models.Session, error) {
-	// Discover live Claude sessions from filesystem (fast - just reads local files)
-	liveClaudeSessions, err := DiscoverLiveClaudeSessions(storage)
+	// Discover live interactive sessions from filesystem (fast - just reads local files)
+	liveInteractiveSessions, err := DiscoverLiveInteractiveSessions(storage)
 	if err != nil {
 		// Log error but continue
 		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Fprintf(os.Stderr, "Warning: failed to discover live Claude sessions: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to discover live interactive sessions: %v\n", err)
 		}
-		liveClaudeSessions = []*models.Session{}
+		liveInteractiveSessions = []*models.Session{}
 	}
 
 	// Discover flow jobs (now fast, as it uses cache + filesystem checks)
@@ -595,8 +596,8 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 		sessionsMap[session.ID] = session
 	}
 
-	// Add/update with live Claude sessions, which provide the most current "live" status
-	for _, session := range liveClaudeSessions {
+	// Add/update with live interactive sessions, which provide the most current "live" status
+	for _, session := range liveInteractiveSessions {
 		// If a session with this ID already exists (from flow jobs),
 		// update its status to reflect the live process.
 		if existing, ok := sessionsMap[session.ID]; ok {
