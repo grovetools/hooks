@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/mattsolo1/grove-core v0.4.0
-	github.com/mattsolo1/grove-flow v0.0.0
+	github.com/mattsolo1/grove-flow v0.3.0
 	github.com/mattsolo1/grove-notifications v0.1.0
 	github.com/mattsolo1/grove-tend v0.4.0
 	github.com/mattsolo1/grove-tmux v0.1.0
@@ -68,7 +68,3 @@ require (
 	google.golang.org/grpc v1.74.2 // indirect
 	google.golang.org/protobuf v1.36.7 // indirect
 )
-
-replace github.com/mattsolo1/grove-flow => /Users/solom4/Code/grove-ecosystem/grove-flow
-
-replace github.com/mattsolo1/grove-core => /Users/solom4/Code/grove-ecosystem/.grove-worktrees/codex-support/grove-core
