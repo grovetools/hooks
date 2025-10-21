@@ -71,4 +71,4 @@ require (
 
 replace github.com/mattsolo1/grove-flow => /Users/solom4/Code/grove-ecosystem/grove-flow
 
-replace github.com/mattsolo1/grove-core => /Users/solom4/Code/grove-ecosystem/grove-core
+replace github.com/mattsolo1/grove-core => /Users/solom4/Code/grove-ecosystem/.grove-worktrees/codex-support/grove-core

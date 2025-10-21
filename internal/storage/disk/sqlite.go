@@ -481,6 +481,7 @@ func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 
 		session.Type = sessionType
 		session.ClaudeSessionID = claudeSessionID
+		session.Provider = provider
 
 		if endedAt.Valid {
 			session.EndedAt = &endedAt.Time

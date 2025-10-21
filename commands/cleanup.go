@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/process"
+	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/spf13/cobra"
@@ -98,7 +99,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 							// Check if this is a flow job by reading metadata
 							metadataFile := filepath.Join(sessionDir, "metadata.json")
 							if metadataContent, err := os.ReadFile(metadataFile); err == nil {
-								var metadata SessionMetadata
+								var metadata coresessions.SessionMetadata
 								if err := json.Unmarshal(metadataContent, &metadata); err == nil {
 									// Check if it's a flow job
 									if (metadata.Type == "interactive_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {

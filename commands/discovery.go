@@ -14,6 +14,7 @@ import (
 	coreconfig "github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/process"
+	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-hooks/internal/config"
@@ -51,28 +52,6 @@ func GetCachedFlowJobs() ([]*models.Session, error) {
 		}
 	}
 	return []*models.Session{}, nil
-}
-
-// SessionMetadata represents the metadata.json structure for file-based sessions
-type SessionMetadata struct {
-	SessionID           string    `json:"session_id"`
-	ClaudeSessionID     string    `json:"claude_session_id,omitempty"`
-	PID                 int       `json:"pid"`
-	Repo                string    `json:"repo,omitempty"`
-	Branch              string    `json:"branch,omitempty"`
-	TmuxKey             string    `json:"tmux_key,omitempty"`
-	WorkingDirectory    string    `json:"working_directory"`
-	WorktreeRootPath    string    `json:"worktree_root_path,omitempty"`
-	User                string    `json:"user"`
-	StartedAt           time.Time `json:"started_at"`
-	TranscriptPath      string    `json:"transcript_path,omitempty"`
-	ProjectName         string    `json:"project_name,omitempty"`
-	IsWorktree          bool      `json:"is_worktree,omitempty"`
-	ParentEcosystemPath string    `json:"parent_ecosystem_path,omitempty"`
-	Type                string    `json:"type,omitempty"`
-	JobTitle            string    `json:"job_title,omitempty"`
-	PlanName            string    `json:"plan_name,omitempty"`
-	JobFilePath         string    `json:"job_file_path,omitempty"`
 }
 
 // DiscoverLiveInteractiveSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
@@ -127,8 +106,8 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 			continue
 		}
 
-		var metadata SessionMetadata
-		if err := json.Unmarshal(metadataContent, &metadata); err != nil {
+		var metadata coresessions.SessionMetadata
+		if err := json.Unmarshal(metadataContent, &metadata); err != nil{
 			// Skip if metadata is invalid
 			continue
 		}
@@ -222,7 +201,6 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 			PID:              pid,
 			Repo:             metadata.Repo,
 			Branch:           metadata.Branch,
-			TmuxKey:          metadata.TmuxKey,
 			WorkingDirectory: metadata.WorkingDirectory,
 			User:             metadata.User,
 			Status:           status,
@@ -230,10 +208,10 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 			LastActivity:     lastActivity, // Use the determined timestamp
 			EndedAt:          endedAt,
 			IsTest:           false,
-			Type:             metadata.Type,
 			JobTitle:         metadata.JobTitle,
 			PlanName:         metadata.PlanName,
 			JobFilePath:      metadata.JobFilePath,
+			Provider:         metadata.Provider,
 		}
 
 		sessions = append(sessions, session)
@@ -609,6 +587,9 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 			existing.PID = session.PID
 			existing.LastActivity = session.LastActivity
 			existing.ClaudeSessionID = session.ClaudeSessionID
+			if session.Provider != "" {
+				existing.Provider = session.Provider
+			}
 		} else {
 			// Check if this is a linked claude session for an interactive_agent job
 			// Interactive agents store the Claude UUID in ClaudeSessionID field

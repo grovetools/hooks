@@ -88,9 +88,14 @@ func (m Model) viewTable() string {
 			if node.isSession {
 				sessionType := node.session.Type
 				if sessionType == "" || sessionType == "claude_session" {
-					sessionType = "claude_code"
+					if node.session.Provider == "codex" {
+						sessionType = "codex"
+					} else {
+						sessionType = "claude_code"
+					}
 				}
 				typeCol = sessionType
+
 			} else if node.isPlan {
 				typeCol = fmt.Sprintf("(%d jobs)", node.plan.JobCount)
 			}
@@ -191,7 +196,11 @@ func (m Model) viewTree() string {
 				statusIcon := getStatusIcon(s.Status, s.Type)
 				sessionType := s.Type
 				if sessionType == "" || sessionType == "claude_session" {
-					sessionType = "claude_code"
+					if s.Provider == "codex" {
+						sessionType = "codex"
+					} else {
+						sessionType = "claude_code"
+					}
 				}
 
 				sessionID := s.ID
@@ -220,12 +229,18 @@ func (m Model) viewTree() string {
 						agentStatusStyle.Render("running"),
 					)
 
-					linkedStatusIcon := getStatusIcon(s.Status, "claude_code")
+					provider := "claude_code"
+					if s.Provider != "" {
+						provider = s.Provider
+					}
+					if provider == "claude" {
+						provider = "claude_code"
+					}
+					linkedStatusIcon := getStatusIcon(s.Status, provider)
 					linkedStatusStyle := getStatusStyle(s.Status)
-					augmentedInfo := fmt.Sprintf(" → %s %s (claude_code, %s)",
-						linkedStatusIcon,
-						utils.TruncateStr(s.ClaudeSessionID, 8),
-						linkedStatusStyle.Render(s.Status),
+					augmentedInfo := fmt.Sprintf(" → %s %s (%s, %s)",
+						linkedStatusIcon, utils.TruncateStr(s.ClaudeSessionID, 8),
+						provider, linkedStatusStyle.Render(s.Status),
 					)
 					line.WriteString(baseInfo + t.Muted.Render(augmentedInfo))
 				} else {
