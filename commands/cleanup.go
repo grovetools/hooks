@@ -108,7 +108,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 											fmt.Printf("Triggering auto-completion for dead flow job: %s\n", metadata.JobFilePath)
 										}
 										go func(jobPath, sessDir string) {
-											cmd := exec.Command("flow", "plan", "complete", jobPath)
+											cmd := exec.Command("grove", "flow", "plan", "complete", jobPath)
 											if os.Getenv("GROVE_DEBUG") != "" {
 												output, err := cmd.CombinedOutput()
 												if err != nil {

@@ -134,7 +134,7 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 				// Note: We keep the session directory so that flow plan complete can read the metadata
 				// to close the tmux window. The directory will be cleaned up after completion.
 				go func(jobPath, sessDir string) {
-					cmd := exec.Command("flow", "plan", "complete", jobPath)
+					cmd := exec.Command("grove", "flow", "plan", "complete", jobPath)
 					// We can log errors for debugging but don't need to block on them.
 					// This is a best-effort, self-healing mechanism.
 					if os.Getenv("GROVE_DEBUG") != "" {

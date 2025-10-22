@@ -315,7 +315,7 @@ func RunStopHook() {
 		// Only do this when the session is actually complete, not when it's just going idle
 		if jobFilePath != "" {
 			log.Printf("Session is linked to flow job: %s. Marking as complete.", jobFilePath)
-			cmd := exec.Command("flow", "plan", "complete", jobFilePath)
+			cmd := exec.Command("grove", "flow", "plan", "complete", jobFilePath)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				// This isn't a fatal error for the hook itself, so just log it.
 				// The command might fail if the job is already complete, which is fine.
