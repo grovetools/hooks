@@ -106,17 +106,16 @@ func (m Model) viewTable() string {
 			var statusCol string
 			if node.isSession {
 				s := node.session
-				sessionType := s.Type
-				if sessionType == "" || sessionType == "claude_session" {
-					if s.Provider == "codex" {
-						sessionType = "codex"
-					} else {
-						sessionType = "claude_code"
-					}
+				// Determine provider for display (claude_code, codex, etc.)
+				provider := "claude_code"
+				if s.Provider == "codex" {
+					provider = "codex"
+				} else if s.Provider != "" && s.Provider != "claude" {
+					provider = s.Provider
 				}
 				statusIcon := getStatusIcon(s.Status, s.Type)
 				statusStyle := getStatusStyle(s.Status)
-				statusCol = statusIcon + " " + statusStyle.Render(s.Status) + " " + t.Muted.Render(fmt.Sprintf("(%s)", sessionType))
+				statusCol = statusIcon + " " + statusStyle.Render(s.Status) + " " + t.Muted.Render(fmt.Sprintf("(%s)", provider))
 			} else if node.isPlan {
 				// Display plan status
 				statusIcon := getStatusIcon(node.plan.Status, "plan")
