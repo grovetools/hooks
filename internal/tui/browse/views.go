@@ -70,7 +70,7 @@ func (m Model) viewTable() string {
 				}
 				firstCol = node.prefix + utils.TruncateStr(sessionTitle, 40)
 			} else if node.isPlan {
-				firstCol = node.prefix + t.Bold.Render("Plan: "+node.plan.Name)
+				firstCol = node.prefix + t.Accent.Render("Plan:") + " " + t.Bold.Render(node.plan.Name)
 			} else { // Workspace
 				var nameStyle lipgloss.Style
 				if node.workspace.IsWorktree() {
@@ -87,16 +87,8 @@ func (m Model) viewTable() string {
 			// TYPE column
 			var typeCol string
 			if node.isSession {
-				sessionType := node.session.Type
-				if sessionType == "" || sessionType == "claude_session" {
-					if node.session.Provider == "codex" {
-						sessionType = "codex"
-					} else {
-						sessionType = "claude_code"
-					}
-				}
-				typeCol = sessionType
-
+				jobTypeIcon := getJobTypeIcon(node.session.Type)
+				typeCol = fmt.Sprintf("%s %s", jobTypeIcon, node.session.Type)
 			} else if node.isPlan {
 				typeCol = t.Muted.Render(fmt.Sprintf("(%d jobs)", node.plan.JobCount))
 			}
@@ -267,8 +259,9 @@ func (m Model) viewTree() string {
 				statusIcon := getStatusIcon(plan.Status, "plan")
 				statusStyle := getStatusStyle(plan.Status)
 
-				line.WriteString(fmt.Sprintf("%s Plan: %s (%d jobs, %s)",
+				line.WriteString(fmt.Sprintf("%s %s %s (%d jobs, %s)",
 					statusIcon,
+					t.Accent.Render("Plan:"),
 					t.Bold.Render(plan.Name),
 					plan.JobCount,
 					statusStyle.Render(plan.Status),
