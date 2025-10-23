@@ -42,7 +42,7 @@ func (m Model) viewTable() string {
 	b.WriteString(headerLine)
 	b.WriteString("\n")
 
-	headers := []string{"WORKSPACE / JOB", "TYPE", "STATUS", "LAST ACTIVITY"}
+	headers := []string{"WORKSPACE / JOB", "TYPE", "STATUS", "AGE"}
 	var rows [][]string
 
 	viewportHeight := m.getViewportHeight()
@@ -73,18 +73,14 @@ func (m Model) viewTable() string {
 				firstCol = node.prefix + t.Bold.Render("Plan: "+node.plan.Name)
 			} else { // Workspace
 				var nameStyle lipgloss.Style
-				var workspaceName string
 				if node.workspace.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
-					workspaceName = node.workspace.Name + " " + t.Muted.Render("(⑂)")
 				} else if node.workspace.IsEcosystem() {
 					nameStyle = t.WorkspaceEcosystem
-					workspaceName = node.workspace.Name
 				} else {
 					nameStyle = t.WorkspaceStandard
-					workspaceName = node.workspace.Name
 				}
-				firstCol = node.prefix + nameStyle.Render(workspaceName)
+				firstCol = node.prefix + nameStyle.Render(node.workspace.Name)
 			}
 			row = append(row, firstCol)
 
@@ -205,14 +201,16 @@ func (m Model) viewTree() string {
 			// 3. Render the node's content
 			if node.isSession {
 				s := node.session
-				statusIcon := getStatusIcon(s.Status, s.Type)
-				sessionType := s.Type
-				if sessionType == "" || sessionType == "claude_session" {
-					if s.Provider == "codex" {
-						sessionType = "codex"
-					} else {
-						sessionType = "claude_code"
-					}
+
+				// Get job type icon
+				jobTypeIcon := getJobTypeIcon(s.Type)
+
+				// Determine provider for display
+				provider := "claude_code"
+				if s.Provider == "codex" {
+					provider = "codex"
+				} else if s.Provider != "" && s.Provider != "claude" {
+					provider = s.Provider
 				}
 
 				sessionID := s.ID
@@ -222,37 +220,43 @@ func (m Model) viewTree() string {
 
 				statusStyle := getStatusStyle(s.Status)
 
-				baseInfo := fmt.Sprintf("%s %s %s %s",
+				// Format: [status icon] jobTypeIcon [jobType] title status (provider)
+				statusIcon := ""
+				if s.Status == "running" {
+					statusIcon = theme.IconStatusRunning + " "
+				}
+
+				baseInfo := fmt.Sprintf("%s%s [%s] %s %s %s",
 					statusIcon,
+					jobTypeIcon,
+					s.Type,
 					utils.TruncateStr(sessionID, 40),
 					statusStyle.Render(s.Status),
-					t.Muted.Render(fmt.Sprintf("(%s)", sessionType)),
+					t.Muted.Render(fmt.Sprintf("(%s)", provider)),
 				)
 
 				// Augment display for linked interactive_agent jobs
 				if s.Type == "interactive_agent" && s.ClaudeSessionID != "" {
-					// For display purposes, show 'running' for the agent, but use the live status for the linked session
+					// Show the agent as running, then show linked session details
 					agentStatusStyle := getStatusStyle("running")
-					agentStatusIcon := getStatusIcon("running", s.Type)
-					baseInfo = fmt.Sprintf("%s %s %s %s",
-						agentStatusIcon,
+					baseInfo = fmt.Sprintf("%s%s [%s] %s %s",
+						theme.IconStatusRunning + " ",
+						jobTypeIcon,
+						s.Type,
 						utils.TruncateStr(sessionID, 40),
 						agentStatusStyle.Render("running"),
-						t.Muted.Render("(interactive_agent)"),
 					)
 
-					provider := "claude_code"
-					if s.Provider != "" {
-						provider = s.Provider
-					}
-					if provider == "claude" {
-						provider = "claude_code"
-					}
-					linkedStatusIcon := getStatusIcon(s.Status, provider)
+					// Show linked Claude session info
 					linkedStatusStyle := getStatusStyle(s.Status)
-					augmentedInfo := fmt.Sprintf(" → %s %s %s %s",
-						linkedStatusIcon, utils.TruncateStr(s.ClaudeSessionID, 8),
-						linkedStatusStyle.Render(s.Status), t.Muted.Render(fmt.Sprintf("(%s)", provider)),
+					linkedStatusIcon := ""
+					if s.Status == "running" {
+						linkedStatusIcon = theme.IconStatusRunning + " "
+					}
+					augmentedInfo := fmt.Sprintf(" → %s%s %s",
+						linkedStatusIcon,
+						utils.TruncateStr(s.ClaudeSessionID, 8),
+						linkedStatusStyle.Render(s.Status) + " " + t.Muted.Render(fmt.Sprintf("(%s)", provider)),
 					)
 					line.WriteString(baseInfo + t.Muted.Render(augmentedInfo))
 				} else {
@@ -287,12 +291,7 @@ func (m Model) viewTree() string {
 					line.WriteString(statusIcon + " ")
 				}
 
-				// Render workspace name with worktree indicator in muted parens
-				if ws.IsWorktree() {
-					line.WriteString(nameStyle.Render(ws.Name) + " " + t.Muted.Render("(⑂)"))
-				} else {
-					line.WriteString(nameStyle.Render(ws.Name))
-				}
+				line.WriteString(nameStyle.Render(ws.Name))
 			}
 
 			b.WriteString(line.String() + "\n")
@@ -491,42 +490,42 @@ func getStatusIcon(status string, sessionType string) string {
 	} else if sessionType == "plan" {
 		switch status {
 		case "completed":
-			icon = "✔"
+			icon = theme.IconSuccess
 		case "running":
 			icon = "▶"
 		case "pending_user", "idle":
-			icon = "⏸"
+			icon = theme.IconStatusIdle
 		case "failed", "error":
-			icon = "✗"
+			icon = theme.IconStatusFailed
 		default:
 			icon = "…"
 		}
 	} else {
 		switch status {
 		case "completed":
-			icon = "●"
+			icon = theme.IconStatusCompleted
 		case "running":
-			icon = "◐"
+			icon = theme.IconStatusRunning
 		case "idle":
-			icon = "⏸"
+			icon = theme.IconStatusIdle
 		case "pending_user":
 			if sessionType == "chat" {
-				icon = "⏸"
+				icon = theme.IconStatusIdle
 			} else {
-				icon = "○"
+				icon = theme.IconStatusPendingUser
 			}
 		case "failed", "error":
-			icon = "✗"
+			icon = theme.IconStatusFailed
 		case "interrupted":
-			icon = "⊗"
+			icon = theme.IconStatusInterrupted
 		case "hold":
-			icon = "⏸"
+			icon = theme.IconStatusHold
 		case "todo":
-			icon = "○"
+			icon = theme.IconStatusTodo
 		case "abandoned":
-			icon = "⊗"
+			icon = theme.IconStatusAbandoned
 		default:
-			icon = "○"
+			icon = theme.IconStatusPendingUser
 		}
 	}
 
@@ -538,4 +537,21 @@ func getStatusIcon(status string, sessionType string) string {
 func max(a, b int) int {
 	if a > b { return a }
 	return b
+}
+
+func getJobTypeIcon(jobType string) string {
+	switch jobType {
+	case "chat":
+		return theme.IconChat
+	case "interactive_agent":
+		return theme.IconInteractiveAgent
+	case "oneshot":
+		return theme.IconOneshot
+	case "headless_agent", "agent":
+		return theme.IconHeadlessAgent
+	case "shell":
+		return theme.IconShell
+	default:
+		return theme.IconOneshot
+	}
 }
