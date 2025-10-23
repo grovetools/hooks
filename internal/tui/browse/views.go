@@ -98,7 +98,7 @@ func (m Model) viewTable() string {
 				typeCol = sessionType
 
 			} else if node.isPlan {
-				typeCol = fmt.Sprintf("(%d jobs)", node.plan.JobCount)
+				typeCol = t.Muted.Render(fmt.Sprintf("(%d jobs)", node.plan.JobCount))
 			}
 			row = append(row, typeCol)
 
