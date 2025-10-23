@@ -74,11 +74,11 @@ func (m Model) viewTable() string {
 			} else { // Workspace
 				var nameStyle lipgloss.Style
 				if node.workspace.IsWorktree() {
-					nameStyle = t.Accent
+					nameStyle = t.WorkspaceWorktree
 				} else if node.workspace.IsEcosystem() {
-					nameStyle = t.Info
+					nameStyle = t.WorkspaceEcosystem
 				} else {
-					nameStyle = t.Bold
+					nameStyle = t.WorkspaceStandard
 				}
 				firstCol = node.prefix + nameStyle.Render(node.workspace.Name)
 			}
@@ -273,11 +273,11 @@ func (m Model) viewTree() string {
 				// Style workspace name based on its type using theme styles
 				var nameStyle lipgloss.Style
 				if ws.IsWorktree() {
-					nameStyle = t.Accent
+					nameStyle = t.WorkspaceWorktree
 				} else if ws.IsEcosystem() {
-					nameStyle = t.Info
+					nameStyle = t.WorkspaceEcosystem
 				} else {
-					nameStyle = t.Bold
+					nameStyle = t.WorkspaceStandard
 				}
 
 				// Prepend status icon if workspace has active sessions
