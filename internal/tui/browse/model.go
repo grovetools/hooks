@@ -755,6 +755,24 @@ func (m *Model) buildDisplayTree() {
 
 	for _, ws := range m.workspaces {
 		if workspacesToShow[ws.Path] {
+			// Check if this workspace should actually be displayed
+			// Only show workspaces that either:
+			// 1. Have sessions (directly or via plans)
+			// 2. Are ancestors (parents) of other workspaces being shown
+			hasSessions := workspaceSessionMap[ws.Path] != nil
+			isAncestor := false
+			for otherWsPath := range workspacesToShow {
+				if ws.Path != otherWsPath && strings.HasPrefix(otherWsPath, ws.Path+string(filepath.Separator)) {
+					isAncestor = true
+					break
+				}
+			}
+
+			// Skip empty leaf workspaces
+			if !hasSessions && !isAncestor {
+				continue
+			}
+
 			// Calculate workspace status based on sessions
 			var wsStatus string
 			if planGroups, ok := workspaceSessionMap[ws.Path]; ok {
