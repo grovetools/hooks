@@ -73,14 +73,18 @@ func (m Model) viewTable() string {
 				firstCol = node.prefix + t.Bold.Render("Plan: "+node.plan.Name)
 			} else { // Workspace
 				var nameStyle lipgloss.Style
+				var workspaceName string
 				if node.workspace.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
+					workspaceName = "⑂ " + node.workspace.Name
 				} else if node.workspace.IsEcosystem() {
 					nameStyle = t.WorkspaceEcosystem
+					workspaceName = node.workspace.Name
 				} else {
 					nameStyle = t.WorkspaceStandard
+					workspaceName = node.workspace.Name
 				}
-				firstCol = node.prefix + nameStyle.Render(node.workspace.Name)
+				firstCol = node.prefix + nameStyle.Render(workspaceName)
 			}
 			row = append(row, firstCol)
 
@@ -269,12 +273,16 @@ func (m Model) viewTree() string {
 				ws := node.workspace
 				// Style workspace name based on its type using theme styles
 				var nameStyle lipgloss.Style
+				var workspaceName string
 				if ws.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
+					workspaceName = "⑂ " + ws.Name
 				} else if ws.IsEcosystem() {
 					nameStyle = t.WorkspaceEcosystem
+					workspaceName = ws.Name
 				} else {
 					nameStyle = t.WorkspaceStandard
+					workspaceName = ws.Name
 				}
 
 				// Prepend status icon if workspace has active sessions
@@ -282,7 +290,7 @@ func (m Model) viewTree() string {
 					statusIcon := getStatusIcon(node.workspaceStatus, "workspace")
 					line.WriteString(statusIcon + " ")
 				}
-				line.WriteString(nameStyle.Render(ws.Name))
+				line.WriteString(nameStyle.Render(workspaceName))
 			}
 
 			b.WriteString(line.String() + "\n")
