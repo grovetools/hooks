@@ -145,7 +145,7 @@ func NewModel(
 		hideCompleted:         hideCompleted,
 		statusFilters:         filterPrefs.StatusFilters,
 		typeFilters:           filterPrefs.TypeFilters,
-		viewMode:              treeView,
+		viewMode:              tableView,
 		getAllSessions:        getAllSessions,
 		dispatchNotifications: dispatchNotifications,
 		saveFilterPreferences: saveFilterPreferences,
