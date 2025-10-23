@@ -60,24 +60,25 @@ func (m Model) viewTable() string {
 			var row []string
 
 			// WORKSPACE / JOB column
+			// Use weight for hierarchy instead of explicit colors.
+			// See: plans/tui-updates/14-terminal-ui-styling-philosophy.md
 			var firstCol string
 			if node.isSession {
 				sessionTitle := node.session.JobTitle
 				if sessionTitle == "" {
 					sessionTitle = node.session.ID
 				}
-				titleStyle := lipgloss.NewStyle().Foreground(t.Colors.Pink).Bold(false)
-				firstCol = node.prefix + titleStyle.Render(utils.TruncateStr(sessionTitle, 40))
+				firstCol = node.prefix + utils.TruncateStr(sessionTitle, 40)
 			} else if node.isPlan {
-				firstCol = node.prefix + t.Highlight.Render("Plan: "+node.plan.Name)
+				firstCol = node.prefix + t.Bold.Render("Plan: "+node.plan.Name)
 			} else { // Workspace
 				var nameStyle lipgloss.Style
 				if node.workspace.IsWorktree() {
-					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Blue)
+					nameStyle = t.WorkspaceWorktree
 				} else if node.workspace.IsEcosystem() {
-					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Cyan).Bold(true)
+					nameStyle = t.WorkspaceEcosystem
 				} else {
-					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Cyan)
+					nameStyle = t.WorkspaceStandard
 				}
 				firstCol = node.prefix + nameStyle.Render(node.workspace.Name)
 			}
@@ -253,20 +254,20 @@ func (m Model) viewTree() string {
 
 				line.WriteString(fmt.Sprintf("%s Plan: %s (%d jobs, %s)",
 					statusIcon,
-					t.Highlight.Render(plan.Name),
+					t.Bold.Render(plan.Name),
 					plan.JobCount,
 					statusStyle.Render(plan.Status),
 				))
 			} else {
 				ws := node.workspace
-				// Style workspace name based on its type
+				// Style workspace name based on its type using workspace theme styles
 				var nameStyle lipgloss.Style
 				if ws.IsWorktree() {
-					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Blue)
+					nameStyle = t.WorkspaceWorktree
 				} else if ws.IsEcosystem() {
-					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Cyan).Bold(true)
+					nameStyle = t.WorkspaceEcosystem
 				} else {
-					nameStyle = lipgloss.NewStyle().Foreground(t.Colors.Cyan)
+					nameStyle = t.WorkspaceStandard
 				}
 				line.WriteString(nameStyle.Render(ws.Name))
 			}
@@ -384,7 +385,8 @@ func (m Model) viewFilterOptions() string {
 		}
 		statusText := status
 		if m.statusFilters[status] {
-			statusText = t.Success.Render(status)
+			// Use bold to indicate active filter, not explicit color
+			statusText = t.Bold.Render(status)
 		}
 		rows = append(rows, []string{"  " + checkbox, statusText})
 	}
@@ -398,7 +400,8 @@ func (m Model) viewFilterOptions() string {
 		}
 		typeText := typ
 		if m.typeFilters[typ] {
-			typeText = t.Info.Render(typ)
+			// Use bold to indicate active filter, not explicit color
+			typeText = t.Bold.Render(typ)
 		}
 		rows = append(rows, []string{"  " + checkbox, typeText})
 	}
@@ -446,7 +449,7 @@ func getStatusStyle(status string) lipgloss.Style {
 	case "completed": return t.Info
 	case "todo": return t.Muted
 	case "hold": return t.Warning
-	case "abandoned": return t.Faint
+	case "abandoned": return t.Muted
 	case "failed", "error": return t.Error
 	default: return t.Muted
 	}
