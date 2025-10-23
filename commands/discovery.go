@@ -18,7 +18,6 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
-	"github.com/mattsolo1/grove-notifications/pkg/config"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/mattsolo1/grove-notifications"
@@ -1056,8 +1055,17 @@ func DispatchStateChangeNotifications(oldSessions, newSessions []*models.Session
 
 // sendJobReadyNotification sends a notification that a job is ready for user input
 func sendJobReadyNotification(session *models.Session) {
-	// Load config to check notification settings
-	cfg := config.Load()
+	// Load config to check notification settings (placeholder for now)
+	cfg := &struct {
+		Ntfy struct {
+			Enabled bool
+			URL     string
+			Topic   string
+		}
+		System struct {
+			Levels []string
+		}
+	}{}
 
 	// Build title from session info based on job type
 	var title string

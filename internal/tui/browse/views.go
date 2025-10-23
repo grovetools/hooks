@@ -74,11 +74,11 @@ func (m Model) viewTable() string {
 			} else { // Workspace
 				var nameStyle lipgloss.Style
 				if node.workspace.IsWorktree() {
-					nameStyle = t.WorkspaceWorktree
+					nameStyle = t.Accent
 				} else if node.workspace.IsEcosystem() {
-					nameStyle = t.WorkspaceEcosystem
+					nameStyle = t.Info
 				} else {
-					nameStyle = t.WorkspaceStandard
+					nameStyle = t.Bold
 				}
 				firstCol = node.prefix + nameStyle.Render(node.workspace.Name)
 			}
@@ -109,6 +109,16 @@ func (m Model) viewTable() string {
 				statusIcon := getStatusIcon(s.Status, s.Type)
 				statusStyle := getStatusStyle(s.Status)
 				statusCol = statusIcon + " " + statusStyle.Render(s.Status)
+			} else if node.isPlan {
+				// Display plan status
+				statusIcon := getStatusIcon(node.plan.Status, "plan")
+				statusStyle := getStatusStyle(node.plan.Status)
+				statusCol = statusIcon + " " + statusStyle.Render(node.plan.Status)
+			} else if node.workspaceStatus == "running" {
+				// Display workspace status if active
+				statusIcon := getStatusIcon(node.workspaceStatus, "workspace")
+				statusStyle := getStatusStyle(node.workspaceStatus)
+				statusCol = statusIcon + " " + statusStyle.Render(node.workspaceStatus)
 			}
 			row = append(row, statusCol)
 
@@ -260,14 +270,20 @@ func (m Model) viewTree() string {
 				))
 			} else {
 				ws := node.workspace
-				// Style workspace name based on its type using workspace theme styles
+				// Style workspace name based on its type using theme styles
 				var nameStyle lipgloss.Style
 				if ws.IsWorktree() {
-					nameStyle = t.WorkspaceWorktree
+					nameStyle = t.Accent
 				} else if ws.IsEcosystem() {
-					nameStyle = t.WorkspaceEcosystem
+					nameStyle = t.Info
 				} else {
-					nameStyle = t.WorkspaceStandard
+					nameStyle = t.Bold
+				}
+
+				// Prepend status icon if workspace has active sessions
+				if node.workspaceStatus == "running" {
+					statusIcon := getStatusIcon(node.workspaceStatus, "workspace")
+					line.WriteString(statusIcon + " ")
 				}
 				line.WriteString(nameStyle.Render(ws.Name))
 			}
@@ -458,7 +474,14 @@ func getStatusStyle(status string) lipgloss.Style {
 func getStatusIcon(status string, sessionType string) string {
 	// First determine the icon character
 	var icon string
-	if sessionType == "plan" {
+	if sessionType == "workspace" {
+		// Simple activity icon for workspaces
+		if status == "running" {
+			icon = "▶"
+		} else {
+			icon = ""
+		}
+	} else if sessionType == "plan" {
 		switch status {
 		case "completed":
 			icon = "✔"

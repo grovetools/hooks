@@ -63,8 +63,9 @@ type displayNode struct {
 	plan      *PlanListItem
 
 	// Pre-calculated for rendering
-	prefix string // Tree structure prefix (e.g., "│   ├─ ")
-	depth  int
+	prefix          string // Tree structure prefix (e.g., "│   ├─ ")
+	depth           int
+	workspaceStatus string // Aggregated status for workspace nodes (e.g., "running" if any session is active)
 }
 
 // Model is the model for the interactive session browser
@@ -754,10 +755,27 @@ func (m *Model) buildDisplayTree() {
 
 	for _, ws := range m.workspaces {
 		if workspacesToShow[ws.Path] {
+			// Calculate workspace status based on sessions
+			var wsStatus string
+			if planGroups, ok := workspaceSessionMap[ws.Path]; ok {
+				for _, sessions := range planGroups {
+					for _, s := range sessions {
+						if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
+							wsStatus = "running"
+							break
+						}
+					}
+					if wsStatus == "running" {
+						break
+					}
+				}
+			}
+
 			nodes = append(nodes, &displayNode{
-				isSession: false,
-				workspace: ws,
-				prefix:    ws.TreePrefix,
+				isSession:       false,
+				workspace:       ws,
+				prefix:          ws.TreePrefix,
+				workspaceStatus: wsStatus,
 			})
 
 			if planGroups, ok := workspaceSessionMap[ws.Path]; ok {

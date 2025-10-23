@@ -69,3 +69,7 @@ require (
 	google.golang.org/grpc v1.74.2 // indirect
 	google.golang.org/protobuf v1.36.7 // indirect
 )
+
+replace github.com/mattsolo1/grove-core => ../grove-core
+
+replace github.com/mattsolo1/grove-notifications => ../grove-notifications
