@@ -221,11 +221,11 @@ func (m Model) viewTree() string {
 
 				statusStyle := getStatusStyle(s.Status)
 
-				baseInfo := fmt.Sprintf("%s %s (%s, %s)",
+				baseInfo := fmt.Sprintf("%s %s %s %s",
 					statusIcon,
 					utils.TruncateStr(sessionID, 40),
-					sessionType,
 					statusStyle.Render(s.Status),
+					t.Muted.Render(fmt.Sprintf("(%s)", sessionType)),
 				)
 
 				// Augment display for linked interactive_agent jobs
@@ -233,11 +233,11 @@ func (m Model) viewTree() string {
 					// For display purposes, show 'running' for the agent, but use the live status for the linked session
 					agentStatusStyle := getStatusStyle("running")
 					agentStatusIcon := getStatusIcon("running", s.Type)
-					baseInfo = fmt.Sprintf("%s %s (%s, %s)",
+					baseInfo = fmt.Sprintf("%s %s %s %s",
 						agentStatusIcon,
 						utils.TruncateStr(sessionID, 40),
-						"interactive_agent",
 						agentStatusStyle.Render("running"),
+						t.Muted.Render("(interactive_agent)"),
 					)
 
 					provider := "claude_code"
@@ -249,9 +249,9 @@ func (m Model) viewTree() string {
 					}
 					linkedStatusIcon := getStatusIcon(s.Status, provider)
 					linkedStatusStyle := getStatusStyle(s.Status)
-					augmentedInfo := fmt.Sprintf(" → %s %s (%s, %s)",
+					augmentedInfo := fmt.Sprintf(" → %s %s %s %s",
 						linkedStatusIcon, utils.TruncateStr(s.ClaudeSessionID, 8),
-						provider, linkedStatusStyle.Render(s.Status),
+						linkedStatusStyle.Render(s.Status), t.Muted.Render(fmt.Sprintf("(%s)", provider)),
 					)
 					line.WriteString(baseInfo + t.Muted.Render(augmentedInfo))
 				} else {
