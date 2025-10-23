@@ -102,7 +102,7 @@ func (m Model) viewTable() string {
 			}
 			row = append(row, typeCol)
 
-			// STATUS column
+			// STATUS column - only show for sessions, not for plans or workspaces
 			var statusCol string
 			if node.isSession {
 				s := node.session
@@ -116,16 +116,6 @@ func (m Model) viewTable() string {
 				statusIcon := getStatusIcon(s.Status, s.Type)
 				statusStyle := getStatusStyle(s.Status)
 				statusCol = statusIcon + " " + statusStyle.Render(s.Status) + " " + t.Muted.Render(fmt.Sprintf("(%s)", provider))
-			} else if node.isPlan {
-				// Display plan status
-				statusIcon := getStatusIcon(node.plan.Status, "plan")
-				statusStyle := getStatusStyle(node.plan.Status)
-				statusCol = statusIcon + " " + statusStyle.Render(node.plan.Status)
-			} else if node.workspaceStatus == "running" {
-				// Display workspace status if active
-				statusIcon := getStatusIcon(node.workspaceStatus, "workspace")
-				statusStyle := getStatusStyle(node.workspaceStatus)
-				statusCol = statusIcon + " " + statusStyle.Render(node.workspaceStatus)
 			}
 			row = append(row, statusCol)
 
