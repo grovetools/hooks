@@ -427,10 +427,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				windowName := fmt.Sprintf("plan-%s", planName)
 
 				if os.Getenv("TMUX") != "" {
-					// Switch to session, create new window, and run flow plan status
-					m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf(
-						"tmux switch-client -t %s & tmux display-popup -C 2>/dev/null; sleep 0.1; tmux new-window -t %s: -n '%s' 'flow plan status -t %s'",
-						sessionName, sessionName, windowName, planName))
+					tmuxClient, _ := tmux.NewClient()
+					cmd, err := tmuxClient.NewWindowAndClosePopup(context.Background(), sessionName, windowName, fmt.Sprintf("flow plan status -t %s", planName))
+					if err != nil {
+						m.statusMessage = fmt.Sprintf("Failed: %v", err)
+						return m, nil
+					}
+					m.CommandOnExit = cmd
 					return m, tea.Quit
 				}
 				m.MessageOnExit = fmt.Sprintf("Run: tmux attach -t %s; tmux new-window -n '%s' 'flow plan status -t %s'", sessionName, windowName, planName)
@@ -455,8 +458,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					if sessionType == "claude_code" && session.TmuxKey != "" && (session.Status == "running" || session.Status == "idle") {
 						if os.Getenv("TMUX") != "" {
-							// Run switch in background so it survives popup closing
-							m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf("tmux switch-client -t %s & tmux display-popup -C 2>/dev/null", session.TmuxKey))
+							tmuxClient, _ := tmux.NewClient()
+							if err := tmuxClient.SwitchClient(context.Background(), session.TmuxKey); err != nil {
+								m.statusMessage = fmt.Sprintf("Failed to switch to session: %v", err)
+								return m, nil
+							}
+							m.CommandOnExit = tmuxClient.ClosePopupCmd()
 							return m, tea.Quit
 						}
 						m.MessageOnExit = fmt.Sprintf("Attach to session with:\ntmux attach -t %s", session.TmuxKey)
@@ -482,8 +489,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}, windowName)
 
 						if os.Getenv("TMUX") != "" {
-							// Run switch in background so it survives popup closing
-							m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf("(tmux switch-client -t %s && tmux select-window -t :'%s') & tmux display-popup -C 2>/dev/null", sessionName, windowName))
+							tmuxClient, _ := tmux.NewClient()
+							cmd, err := tmuxClient.SelectWindowAndClosePopup(context.Background(), sessionName, windowName)
+							if err != nil {
+								m.statusMessage = fmt.Sprintf("Failed: %v", err)
+								return m, nil
+							}
+							m.CommandOnExit = cmd
 							return m, tea.Quit
 						}
 						m.MessageOnExit = fmt.Sprintf("Attach to session and window with:\ntmux attach -t %s\ntmux select-window -t :'%s'", sessionName, windowName)
@@ -961,12 +973,17 @@ func (m Model) switchToTmuxSession(sessionName string) (tea.Model, tea.Cmd) {
 	}
 
 	if os.Getenv("TMUX") != "" {
-		// Run switch in background so it survives popup closing
-		m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf("tmux switch-client -t %s & tmux display-popup -C 2>/dev/null", sessionName))
+		// Switch to the session and close popup (works regardless of -E flag)
+		if err := tmuxClient.SwitchClient(context.Background(), sessionName); err != nil {
+			m.statusMessage = fmt.Sprintf("Failed to switch to session: %v", err)
+			return m, nil
+		}
+		m.CommandOnExit = tmuxClient.ClosePopupCmd()
+		return m, tea.Quit
 	} else {
 		m.MessageOnExit = fmt.Sprintf("Attach to session with:\ntmux attach -t %s", sessionName)
+		return m, tea.Quit
 	}
-	return m, tea.Quit
 }
 
 func (m *Model) getCurrentSession() *models.Session {
