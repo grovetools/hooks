@@ -98,16 +98,20 @@ func (m Model) viewTable() string {
 			var statusCol string
 			if node.isSession {
 				s := node.session
-				// Determine provider for display (claude_code, codex, etc.)
-				provider := "claude_code"
-				if s.Provider == "codex" {
-					provider = "codex"
-				} else if s.Provider != "" && s.Provider != "claude" {
-					provider = s.Provider
-				}
 				statusIcon := getStatusIcon(s.Status, s.Type)
 				statusStyle := getStatusStyle(s.Status)
-				statusCol = statusIcon + " " + statusStyle.Render(s.Status) + " " + t.Muted.Render(fmt.Sprintf("(%s)", provider))
+				statusCol = statusIcon + " " + statusStyle.Render(s.Status)
+
+				// Only show provider for interactive session types
+				if s.Type == "interactive_agent" || s.Type == "" || s.Type == "claude_session" {
+					provider := "claude_code"
+					if s.Provider == "codex" {
+						provider = "codex"
+					} else if s.Provider != "" && s.Provider != "claude" {
+						provider = s.Provider
+					}
+					statusCol += " " + t.Muted.Render(fmt.Sprintf("(%s)", provider))
+				}
 			}
 			row = append(row, statusCol)
 
@@ -197,14 +201,6 @@ func (m Model) viewTree() string {
 				// Get job type icon
 				jobTypeIcon := getJobTypeIcon(s.Type)
 
-				// Determine provider for display
-				provider := "claude_code"
-				if s.Provider == "codex" {
-					provider = "codex"
-				} else if s.Provider != "" && s.Provider != "claude" {
-					provider = s.Provider
-				}
-
 				sessionID := s.ID
 				if s.JobTitle != "" {
 					sessionID = s.JobTitle
@@ -212,27 +208,32 @@ func (m Model) viewTree() string {
 
 				statusStyle := getStatusStyle(s.Status)
 
-				// Format: [status icon] jobTypeIcon [jobType] title status (provider)
-				statusIcon := ""
-				if s.Status == "running" {
-					statusIcon = theme.IconStatusRunning + " "
+				// Determine provider display only for interactive session types
+				providerDisplay := ""
+				if s.Type == "interactive_agent" || s.Type == "" || s.Type == "claude_session" {
+					provider := "claude_code"
+					if s.Provider == "codex" {
+						provider = "codex"
+					} else if s.Provider != "" && s.Provider != "claude" {
+						provider = s.Provider
+					}
+					providerDisplay = " " + t.Muted.Render(fmt.Sprintf("(%s)", provider))
 				}
 
-				baseInfo := fmt.Sprintf("%s%s [%s] %s %s %s",
-					statusIcon,
+				// Format: jobTypeIcon [jobType] title status (provider)
+				baseInfo := fmt.Sprintf("%s [%s] %s %s%s",
 					jobTypeIcon,
 					s.Type,
 					utils.TruncateStr(sessionID, 40),
 					statusStyle.Render(s.Status),
-					t.Muted.Render(fmt.Sprintf("(%s)", provider)),
+					providerDisplay,
 				)
 
 				// Augment display for linked interactive_agent jobs
 				if s.Type == "interactive_agent" && s.ClaudeSessionID != "" {
 					// Show the agent as running, then show linked session details
 					agentStatusStyle := getStatusStyle("running")
-					baseInfo = fmt.Sprintf("%s%s [%s] %s %s",
-						theme.IconStatusRunning + " ",
+					baseInfo = fmt.Sprintf("%s [%s] %s %s",
 						jobTypeIcon,
 						s.Type,
 						utils.TruncateStr(sessionID, 40),
@@ -241,14 +242,10 @@ func (m Model) viewTree() string {
 
 					// Show linked Claude session info
 					linkedStatusStyle := getStatusStyle(s.Status)
-					linkedStatusIcon := ""
-					if s.Status == "running" {
-						linkedStatusIcon = theme.IconStatusRunning + " "
-					}
-					augmentedInfo := fmt.Sprintf(" → %s%s %s",
-						linkedStatusIcon,
+					augmentedInfo := fmt.Sprintf(" → %s %s%s",
 						utils.TruncateStr(s.ClaudeSessionID, 8),
-						linkedStatusStyle.Render(s.Status) + " " + t.Muted.Render(fmt.Sprintf("(%s)", provider)),
+						linkedStatusStyle.Render(s.Status),
+						providerDisplay,
 					)
 					line.WriteString(baseInfo + t.Muted.Render(augmentedInfo))
 				} else {
