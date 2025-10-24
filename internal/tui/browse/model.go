@@ -419,28 +419,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil // Nothing selected
 			}
 
-			// Handle context-aware actions for workspaces and plans (in tree view only)
-			if m.viewMode == treeView {
-				if node.isPlan {
-					// Action for plan: switch to workspace session and open flow plan TUI in new window
-					sessionName := node.workspace.Identifier()
-					planName := node.plan.Name
-					windowName := fmt.Sprintf("plan-%s", planName)
+			// Handle context-aware actions for workspaces and plans
+			if node.isPlan {
+				// Action for plan: switch to workspace session and open flow plan TUI in new window
+				sessionName := node.workspace.Identifier()
+				planName := node.plan.Name
+				windowName := fmt.Sprintf("plan-%s", planName)
 
-					if os.Getenv("TMUX") != "" {
-						// Switch to session, create new window, and run flow plan status
-						m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf(
-							"tmux switch-client -t %s & tmux display-popup -C 2>/dev/null; sleep 0.1; tmux new-window -t %s: -n '%s' 'flow plan status -t %s'",
-							sessionName, sessionName, windowName, planName))
-						return m, tea.Quit
-					}
-					m.MessageOnExit = fmt.Sprintf("Run: tmux attach -t %s; tmux new-window -n '%s' 'flow plan status -t %s'", sessionName, windowName, planName)
+				if os.Getenv("TMUX") != "" {
+					// Switch to session, create new window, and run flow plan status
+					m.CommandOnExit = exec.Command("sh", "-c", fmt.Sprintf(
+						"tmux switch-client -t %s & tmux display-popup -C 2>/dev/null; sleep 0.1; tmux new-window -t %s: -n '%s' 'flow plan status -t %s'",
+						sessionName, sessionName, windowName, planName))
 					return m, tea.Quit
-				} else if !node.isSession { // It's a workspace
-					// Action for workspace: open tmux session
-					sessionName := node.workspace.Identifier()
-					return m.switchToTmuxSession(sessionName)
 				}
+				m.MessageOnExit = fmt.Sprintf("Run: tmux attach -t %s; tmux new-window -n '%s' 'flow plan status -t %s'", sessionName, windowName, planName)
+				return m, tea.Quit
+			} else if !node.isSession { // It's a workspace
+				// Action for workspace: open tmux session
+				sessionName := node.workspace.Identifier()
+				return m.switchToTmuxSession(sessionName)
 			}
 
 			// If it's a session (in either view), fall back to key-specific actions
