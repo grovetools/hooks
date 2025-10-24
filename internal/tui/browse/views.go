@@ -2,6 +2,7 @@ package browse
 
 import (
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -64,34 +65,50 @@ func (m Model) viewTable() string {
 			// See: plans/tui-updates/14-terminal-ui-styling-philosophy.md
 			var firstCol string
 			if node.isSession {
-				sessionTitle := node.session.JobTitle
-				if sessionTitle == "" {
+				sessionTitle := ""
+				if node.session.JobFilePath != "" {
+					sessionTitle = path.Base(node.session.JobFilePath)
+				} else if node.session.JobTitle != "" {
+					sessionTitle = node.session.JobTitle
+				} else {
 					sessionTitle = node.session.ID
 				}
-				firstCol = node.prefix + utils.TruncateStr(sessionTitle, 40)
+				jobTypeIcon := getJobTypeIcon(node.session.Type)
+				firstCol = node.prefix + jobTypeIcon + " " + utils.TruncateStr(sessionTitle, 40)
 			} else if node.isPlan {
-				firstCol = node.prefix + t.Accent.Render("Plan:") + " " + t.Bold.Render(node.plan.Name)
+				statusIcon := getStatusIcon(node.plan.Status, "plan")
+				firstCol = node.prefix + statusIcon + " " + t.Accent.Render("Plan:") + " " + t.Bold.Render(node.plan.Name) + " " + t.Muted.Render(fmt.Sprintf("(%d jobs)", node.plan.JobCount))
 			} else { // Workspace
 				var nameStyle lipgloss.Style
-				if node.workspace.IsWorktree() {
+				var gitSymbol string
+
+				// Determine symbol based on workspace type
+				// Check for ecosystem worktree first (both IsEcosystem and IsWorktree are true)
+				if node.workspace.IsEcosystem() && node.workspace.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
+					gitSymbol = theme.IconEcosystemWorktree
+				} else if node.workspace.IsWorktree() {
+					nameStyle = t.WorkspaceWorktree
+					gitSymbol = theme.IconWorktree
 				} else if node.workspace.IsEcosystem() {
 					nameStyle = t.WorkspaceEcosystem
+					gitSymbol = theme.IconEcosystem
 				} else {
 					nameStyle = t.WorkspaceStandard
+					gitSymbol = theme.IconRepo
 				}
-				firstCol = node.prefix + nameStyle.Render(node.workspace.Name)
+				firstCol = node.prefix + t.Muted.Render(gitSymbol) + " " + nameStyle.Render(node.workspace.Name)
 			}
 			row = append(row, firstCol)
 
 			// TYPE column
 			var typeCol string
 			if node.isSession {
-				jobTypeIcon := getJobTypeIcon(node.session.Type)
-				typeCol = fmt.Sprintf("%s %s", jobTypeIcon, node.session.Type)
-			} else if node.isPlan {
-				typeCol = t.Muted.Render(fmt.Sprintf("(%d jobs)", node.plan.JobCount))
+				s := node.session
+				statusStyle := getStatusStyle(s.Status)
+				typeCol = statusStyle.Render(fmt.Sprintf("[%s]", s.Type))
 			}
+			// Plans don't have a TYPE column entry anymore (job count moved to WORKSPACE col)
 			row = append(row, typeCol)
 
 			// STATUS column - only show for sessions, not for plans or workspaces
@@ -201,9 +218,13 @@ func (m Model) viewTree() string {
 				// Get job type icon
 				jobTypeIcon := getJobTypeIcon(s.Type)
 
-				sessionID := s.ID
-				if s.JobTitle != "" {
+				sessionID := ""
+				if s.JobFilePath != "" {
+					sessionID = path.Base(s.JobFilePath)
+				} else if s.JobTitle != "" {
 					sessionID = s.JobTitle
+				} else {
+					sessionID = s.ID
 				}
 
 				statusStyle := getStatusStyle(s.Status)
@@ -221,9 +242,9 @@ func (m Model) viewTree() string {
 				}
 
 				// Format: jobTypeIcon [jobType] title status (provider)
-				baseInfo := fmt.Sprintf("%s [%s] %s %s%s",
+				baseInfo := fmt.Sprintf("%s %s %s %s%s",
 					jobTypeIcon,
-					s.Type,
+					statusStyle.Render(fmt.Sprintf("[%s]", s.Type)),
 					utils.TruncateStr(sessionID, 40),
 					statusStyle.Render(s.Status),
 					providerDisplay,
@@ -231,56 +252,54 @@ func (m Model) viewTree() string {
 
 				// Augment display for linked interactive_agent jobs
 				if s.Type == "interactive_agent" && s.ClaudeSessionID != "" {
-					// Show the agent as running, then show linked session details
-					agentStatusStyle := getStatusStyle("running")
-					baseInfo = fmt.Sprintf("%s [%s] %s %s",
-						jobTypeIcon,
-						s.Type,
-						utils.TruncateStr(sessionID, 40),
-						agentStatusStyle.Render("running"),
-					)
-
-					// Show linked Claude session info
+					// Show only the Claude session state (not the agent's running state)
 					linkedStatusStyle := getStatusStyle(s.Status)
-					augmentedInfo := fmt.Sprintf(" → %s %s%s",
+					baseInfo = fmt.Sprintf("%s %s %s → %s %s%s",
+						jobTypeIcon,
+						linkedStatusStyle.Render(fmt.Sprintf("[%s]", s.Type)),
+						utils.TruncateStr(sessionID, 40),
 						utils.TruncateStr(s.ClaudeSessionID, 8),
 						linkedStatusStyle.Render(s.Status),
 						providerDisplay,
 					)
-					line.WriteString(baseInfo + t.Muted.Render(augmentedInfo))
+					line.WriteString(baseInfo)
 				} else {
 					line.WriteString(baseInfo)
 				}
 			} else if node.isPlan {
 				plan := node.plan
 				statusIcon := getStatusIcon(plan.Status, "plan")
-				statusStyle := getStatusStyle(plan.Status)
 
-				line.WriteString(fmt.Sprintf("%s %s %s (%d jobs, %s)",
+				line.WriteString(fmt.Sprintf("%s %s %s %s",
 					statusIcon,
 					t.Accent.Render("Plan:"),
 					t.Bold.Render(plan.Name),
-					plan.JobCount,
-					statusStyle.Render(plan.Status),
+					t.Muted.Render(fmt.Sprintf("(%d jobs)", plan.JobCount)),
 				))
 			} else {
 				ws := node.workspace
 				// Style workspace name based on its type using theme styles
 				var nameStyle lipgloss.Style
-				if ws.IsWorktree() {
+				var gitSymbol string
+
+				// Determine symbol based on workspace type
+				// Check for ecosystem worktree first (both IsEcosystem and IsWorktree are true)
+				if ws.IsEcosystem() && ws.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
+					gitSymbol = theme.IconEcosystemWorktree
+				} else if ws.IsWorktree() {
+					nameStyle = t.WorkspaceWorktree
+					gitSymbol = theme.IconWorktree
 				} else if ws.IsEcosystem() {
 					nameStyle = t.WorkspaceEcosystem
+					gitSymbol = theme.IconEcosystem
 				} else {
 					nameStyle = t.WorkspaceStandard
+					gitSymbol = theme.IconRepo
 				}
 
-				// Prepend status icon if workspace has active sessions
-				if node.workspaceStatus == "running" {
-					statusIcon := getStatusIcon(node.workspaceStatus, "workspace")
-					line.WriteString(statusIcon + " ")
-				}
-
+				// Prepend git symbol
+				line.WriteString(t.Muted.Render(gitSymbol) + " ")
 				line.WriteString(nameStyle.Render(ws.Name))
 			}
 
@@ -473,7 +492,7 @@ func getStatusIcon(status string, sessionType string) string {
 	if sessionType == "workspace" {
 		// Simple activity icon for workspaces
 		if status == "running" {
-			icon = "▶"
+			icon = theme.IconStatusRunning
 		} else {
 			icon = ""
 		}
@@ -482,7 +501,7 @@ func getStatusIcon(status string, sessionType string) string {
 		case "completed":
 			icon = theme.IconSuccess
 		case "running":
-			icon = "▶"
+			icon = theme.IconStatusRunning
 		case "pending_user", "idle":
 			icon = theme.IconStatusIdle
 		case "failed", "error":
