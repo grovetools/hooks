@@ -19,6 +19,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
 )
@@ -713,11 +714,17 @@ func (m *Model) buildDisplayTree() {
 		var bestMatch *workspace.WorkspaceNode
 		bestMatchDepth := -1
 
-		// Normalize paths for case-insensitive comparison (macOS filesystem is case-insensitive)
-		sessionWorkDir := strings.ToLower(session.WorkingDirectory)
+		// Normalize paths for case-insensitive comparison on macOS/Windows
+		sessionWorkDir, err := pathutil.NormalizeForLookup(session.WorkingDirectory)
+		if err != nil {
+			continue // Skip if path normalization fails
+		}
 
 		for _, ws := range m.workspaces {
-			wsPath := strings.ToLower(ws.Path)
+			wsPath, err := pathutil.NormalizeForLookup(ws.Path)
+			if err != nil {
+				continue // Skip if path normalization fails
+			}
 			if strings.HasPrefix(sessionWorkDir+"/", wsPath+"/") || sessionWorkDir == wsPath {
 				if ws.Depth > bestMatchDepth {
 					bestMatch = ws
