@@ -968,8 +968,23 @@ func (m Model) switchToTmuxSession(sessionName string) (tea.Model, tea.Cmd) {
 	sessionExists, _ := tmuxClient.SessionExists(context.Background(), sessionName)
 
 	if !sessionExists {
-		m.statusMessage = fmt.Sprintf("Tmux session '%s' not found.", sessionName)
-		return m, nil
+		// Session doesn't exist, so create it
+		node := m.getCurrentDisplayNode()
+		if node == nil || node.workspace == nil {
+			m.statusMessage = "Error: no workspace selected to create session."
+			return m, nil
+		}
+
+		opts := tmux.LaunchOptions{
+			SessionName:      sessionName,
+			WorkingDirectory: node.workspace.Path,
+		}
+
+		if err := tmuxClient.Launch(context.Background(), opts); err != nil {
+			m.statusMessage = fmt.Sprintf("Failed to create session: %v", err)
+			return m, nil
+		}
+		m.statusMessage = fmt.Sprintf("Created session '%s'", sessionName)
 	}
 
 	if os.Getenv("TMUX") != "" {
