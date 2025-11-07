@@ -66,6 +66,7 @@ type displayNode struct {
 	prefix          string // Tree structure prefix (e.g., "│   ├─ ")
 	depth           int
 	workspaceStatus string // Aggregated status for workspace nodes (e.g., "running" if any session is active)
+	jumpKey         rune   // Keyboard shortcut for quick navigation (1-9)
 }
 
 // Model is the model for the interactive session browser
@@ -99,6 +100,7 @@ type Model struct {
 	searchActive    bool // Whether search input is active
 	viewMode        viewMode
 	gPressed        bool // Track first 'g' press for 'gg' chord
+	jumpMap         map[rune]int // Maps keyboard shortcuts (1-9) to displayNode indices
 
 	// Exit actions
 	CommandOnExit *exec.Cmd
@@ -146,6 +148,7 @@ func NewModel(
 		statusFilters:         filterPrefs.StatusFilters,
 		typeFilters:           filterPrefs.TypeFilters,
 		viewMode:              tableView,
+		jumpMap:               make(map[rune]int),
 		getAllSessions:        getAllSessions,
 		dispatchNotifications: dispatchNotifications,
 		saveFilterPreferences: saveFilterPreferences,
@@ -262,6 +265,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle numeric jump keys (1-9) when search is not active
+		if !m.searchActive && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+			keyRune := msg.Runes[0]
+			if keyRune >= '1' && keyRune <= '9' {
+				if targetIndex, ok := m.jumpMap[keyRune]; ok {
+					if targetIndex < len(m.displayNodes) {
+						m.cursor = targetIndex
+						// Ensure the new cursor position is visible
+						viewportHeight := m.getViewportHeight()
+						if m.cursor < m.scrollOffset {
+							m.scrollOffset = m.cursor
+						} else if m.cursor >= m.scrollOffset+viewportHeight {
+							m.scrollOffset = m.cursor - viewportHeight + 1
+						}
+						return m, nil // Key press handled
+					}
+				}
+			}
+		}
+
 		// Handle 'gg' chord for go to top
 		if m.gPressed {
 			m.gPressed = false
@@ -912,6 +935,20 @@ func (m *Model) buildDisplayTree() {
 			session:   s,
 			prefix:    "",
 		})
+	}
+
+	// Assign jump keys to sub-projects (workspaces with depth > 0)
+	m.jumpMap = make(map[rune]int)
+	jumpCounter := '1'
+	for i, node := range nodes {
+		// Assign jump keys to sub-projects (depth > 0)
+		if !node.isSession && !node.isPlan && node.workspace != nil && node.workspace.Depth > 0 {
+			if jumpCounter <= '9' {
+				nodes[i].jumpKey = jumpCounter
+				m.jumpMap[jumpCounter] = i
+				jumpCounter++
+			}
+		}
 	}
 
 	m.displayNodes = nodes

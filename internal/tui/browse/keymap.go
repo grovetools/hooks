@@ -8,21 +8,22 @@ import (
 // KeyMap is the custom keymap for the session browser
 type KeyMap struct {
 	keymap.Base
-	ToggleView   key.Binding
-	Archive      key.Binding
-	CopyID       key.Binding
-	OpenDir      key.Binding
-	ExportJSON   key.Binding
-	SelectAll    key.Binding
-	ScrollDown   key.Binding
-	ScrollUp     key.Binding
-	Kill         key.Binding
-	ToggleFilter key.Binding
-	SearchFilter key.Binding
-	GoToTop      key.Binding
-	GoToBottom   key.Binding
-	Edit         key.Binding
-	Open         key.Binding
+	ToggleView      key.Binding
+	Archive         key.Binding
+	CopyID          key.Binding
+	OpenDir         key.Binding
+	ExportJSON      key.Binding
+	SelectAll       key.Binding
+	ScrollDown      key.Binding
+	ScrollUp        key.Binding
+	Kill            key.Binding
+	ToggleFilter    key.Binding
+	SearchFilter    key.Binding
+	GoToTop         key.Binding
+	GoToBottom      key.Binding
+	Edit            key.Binding
+	Open            key.Binding
+	JumpToWorkspace key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -31,7 +32,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.ScrollUp, k.ScrollDown, k.GoToTop, k.GoToBottom},
+		{k.Up, k.Down, k.ScrollUp, k.ScrollDown, k.GoToTop, k.GoToBottom, k.JumpToWorkspace},
 		{key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "action"),
@@ -104,6 +105,10 @@ func NewKeyMap() KeyMap {
 		Open: key.NewBinding(
 			key.WithKeys("o"),
 			key.WithHelp("o", "action"),
+		),
+		JumpToWorkspace: key.NewBinding(
+			key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),
+			key.WithHelp("1-9", "jump"),
 		),
 	}
 }

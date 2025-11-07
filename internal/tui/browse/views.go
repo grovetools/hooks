@@ -97,7 +97,14 @@ func (m Model) viewTable() string {
 					nameStyle = t.WorkspaceStandard
 					gitSymbol = theme.IconRepo
 				}
-				firstCol = node.prefix + t.Muted.Render(gitSymbol) + " " + nameStyle.Render(node.workspace.Name)
+
+				if node.jumpKey != 0 {
+					trimmedPrefix := strings.TrimRight(node.prefix, " ")
+					jumpLabel := t.Muted.Render(fmt.Sprintf("(%c)", node.jumpKey))
+					firstCol = trimmedPrefix + jumpLabel + " " + t.Muted.Render(gitSymbol) + " " + nameStyle.Render(node.workspace.Name)
+				} else {
+					firstCol = node.prefix + t.Muted.Render(gitSymbol) + " " + nameStyle.Render(node.workspace.Name)
+				}
 			}
 			row = append(row, firstCol)
 
@@ -298,9 +305,18 @@ func (m Model) viewTree() string {
 					gitSymbol = theme.IconRepo
 				}
 
-				// Prepend git symbol
-				line.WriteString(t.Muted.Render(gitSymbol) + " ")
-				line.WriteString(nameStyle.Render(ws.Name))
+				if node.jumpKey != 0 {
+					trimmedPrefix := strings.TrimRight(node.prefix, " ")
+					jumpLabel := t.Muted.Render(fmt.Sprintf("(%c)", node.jumpKey))
+					line.WriteString(trimmedPrefix)
+					line.WriteString(jumpLabel)
+					line.WriteString(" " + t.Muted.Render(gitSymbol) + " ")
+					line.WriteString(nameStyle.Render(ws.Name))
+				} else {
+					line.WriteString(node.prefix)
+					line.WriteString(t.Muted.Render(gitSymbol) + " ")
+					line.WriteString(nameStyle.Render(ws.Name))
+				}
 			}
 
 			b.WriteString(line.String() + "\n")
