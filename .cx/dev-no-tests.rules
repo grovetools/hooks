@@ -1,12 +1,6 @@
-# Development rules: Code only, no tests
-
 **/*.go
 Makefile
 go.mod
 grove.yml
 
-!go.sum
 !tests/**
-!test/**
-!**/*_test.go
-!docs
