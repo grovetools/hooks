@@ -155,7 +155,7 @@ func refreshAllSessions(coreCfg *coreconfig.Config) {
 		}()
 	}
 	// Perform full discovery scan
-	sessions, err := doFullDiscoveryScan(coreCfg)
+	sessions, err := doFullDiscoveryScan()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[Error] Full background refresh failed: %v\n", err)
 		return
@@ -378,7 +378,13 @@ type flowJobsCacheData struct {
 }
 
 // doFullDiscoveryScan performs a complete directory walk and job parsing
-func doFullDiscoveryScan(coreCfg *coreconfig.Config) ([]*models.Session, error) {
+func doFullDiscoveryScan() ([]*models.Session, error) {
+	// Load configuration
+	coreCfg, err := coreconfig.LoadDefault()
+	if err != nil {
+		coreCfg = &coreconfig.Config{} // Proceed with defaults on error
+	}
+
 	// Initialize workspace provider and NotebookLocator
 	debugTiming := os.Getenv("GROVE_DEBUG_TIMING") != ""
 	startTime := time.Now()
@@ -732,17 +738,16 @@ func processJobFile(work jobFileWork, provider *workspace.Provider, genericNoteG
 
 // DiscoverFlowJobs implements a stale-while-revalidate strategy for fast TUI startup.
 func DiscoverFlowJobs() ([]*models.Session, error) {
-	// Load config
-	coreCfg, err := coreconfig.LoadDefault()
-	if err != nil {
-		coreCfg = &coreconfig.Config{} // Proceed with defaults
-	}
-
 	// FAST PATH: Always return cached data immediately if available.
 	if cachedSessions := tryLoadCacheIgnoreTTL(); cachedSessions != nil {
 		// In TUI mode, start the progressive refresh loop in the background.
 		// This will only run once per application start.
 		if flowJobsBackgroundRefresh {
+			// Load config for background refresh
+			coreCfg, err := coreconfig.LoadDefault()
+			if err != nil {
+				coreCfg = &coreconfig.Config{} // Proceed with defaults
+			}
 			progressiveRefreshOnce.Do(func() {
 				startProgressiveRefreshLoop(coreCfg)
 			})
@@ -760,7 +765,7 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		}()
 	}
 
-	sessions, err := doFullDiscoveryScan(coreCfg)
+	sessions, err := doFullDiscoveryScan()
 	if err != nil {
 		return nil, err
 	}
