@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	coreconfig "github.com/mattsolo1/grove-core/config"
@@ -17,6 +18,7 @@ import (
 	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	hooksconfig "github.com/mattsolo1/grove-hooks/config"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
@@ -226,8 +228,8 @@ type flowJobsCacheData struct {
 }
 
 // startBackgroundRefresh starts a goroutine that periodically refreshes the flow jobs cache
-func startBackgroundRefresh() {
-	if flowJobsRefreshStarted || !flowJobsBackgroundRefresh {
+func startBackgroundRefresh(cacheEnabled bool) {
+	if flowJobsRefreshStarted || !flowJobsBackgroundRefresh || !cacheEnabled {
 		return
 	}
 	flowJobsRefreshStarted = true
@@ -247,6 +249,27 @@ func startBackgroundRefresh() {
 
 // refreshFlowJobsCache fetches fresh data and updates the cache file using NotebookLocator
 func refreshFlowJobsCache() {
+	// Load config to check if caching is enabled. This is re-checked on every tick
+	// to handle config changes while the TUI is running.
+	coreCfg, err := coreconfig.LoadDefault()
+	if err != nil {
+		coreCfg = &coreconfig.Config{}
+	}
+	var hooksCfg hooksconfig.Config
+	if coreCfg != nil {
+		_ = coreCfg.UnmarshalExtension("hooks", &hooksCfg)
+	}
+	cacheEnabled := true
+	if hooksCfg.TUI.CacheEnabled != nil {
+		cacheEnabled = *hooksCfg.TUI.CacheEnabled
+	}
+	if !cacheEnabled {
+		// If cache is now disabled, we can clear the cache file to ensure
+		// the next TUI launch starts fresh.
+		os.Remove(flowJobsCachePath)
+		return
+	}
+
 	// Initialize workspace provider and NotebookLocator
 	logger := logrus.New()
 	logger.SetOutput(io.Discard) // Suppress discoverer's debug output
@@ -257,10 +280,6 @@ func refreshFlowJobsCache() {
 	}
 	provider := workspace.NewProvider(discoveryResult)
 
-	coreCfg, err := coreconfig.LoadDefault()
-	if err != nil {
-		coreCfg = &coreconfig.Config{}
-	}
 	locator := workspace.NewNotebookLocator(coreCfg)
 
 	// Scan for all plan and chat directories
@@ -269,14 +288,27 @@ func refreshFlowJobsCache() {
 
 	allScanDirs := append(planDirs, chatDirs...)
 
-	var sessions []*models.Session
+	sessions := []*models.Session{} // Initialize as empty slice, not nil
 	seenJobs := make(map[string]bool)
 
 	// Walk each directory and load jobs
 	for _, scannedDir := range allScanDirs {
 		ownerNode := scannedDir.Owner
 		filepath.Walk(scannedDir.Path, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
+			if err != nil {
+				return nil
+			}
+
+			// Skip archive directories entirely
+			if info.IsDir() {
+				name := info.Name()
+				if name == "archive" || name == ".archive" || strings.HasPrefix(name, "archive-") || strings.HasPrefix(name, ".archive-") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			if !strings.HasSuffix(info.Name(), ".md") {
 				return nil
 			}
 
@@ -315,6 +347,34 @@ func refreshFlowJobsCache() {
 					effectiveOwnerNode = resolvedNode
 				}
 				// If resolvedNode is nil, we gracefully fall back to the base project node.
+			}
+
+			// Build map of generic note groups from core config defaults
+			genericNoteGroups := make(map[string]bool)
+			for _, noteType := range coreconfig.DefaultNoteTypes {
+				genericNoteGroups[noteType] = true
+			}
+
+			// If this is a generic note and its owner is a worktree, re-assign to the parent.
+			planName := filepath.Base(filepath.Dir(path))
+			if genericNoteGroups[planName] && effectiveOwnerNode.IsWorktree() {
+				// Keep walking up the parent chain until we find a non-worktree
+				current := effectiveOwnerNode
+				for current != nil && current.IsWorktree() {
+					if current.ParentProjectPath != "" {
+						parentNode := provider.FindByPath(current.ParentProjectPath)
+						if parentNode != nil {
+							current = parentNode
+						} else {
+							break
+						}
+					} else {
+						break
+					}
+				}
+				if current != nil && !current.IsWorktree() {
+					effectiveOwnerNode = current
+				}
 			}
 
 			// Now, determine repo name and worktree from the correctly resolved effectiveOwnerNode.
@@ -357,27 +417,139 @@ func refreshFlowJobsCache() {
 	}
 
 	// Update cache file
-	cacheData := flowJobsCacheData{
-		Timestamp: time.Now(),
-		Sessions:  sessions,
+	if cacheEnabled {
+		cacheData := flowJobsCacheData{
+			Timestamp: time.Now(),
+			Sessions:  sessions,
+		}
+		if jsonData, err := json.Marshal(cacheData); err == nil {
+			os.MkdirAll(filepath.Dir(flowJobsCachePath), 0755)
+			os.WriteFile(flowJobsCachePath, jsonData, 0644)
+		}
 	}
-	if jsonData, err := json.Marshal(cacheData); err == nil {
-		os.MkdirAll(filepath.Dir(flowJobsCachePath), 0755)
-		os.WriteFile(flowJobsCachePath, jsonData, 0644)
+}
+
+// jobFileWork represents a job file to be processed
+type jobFileWork struct {
+	path      string
+	ownerNode *workspace.WorkspaceNode
+}
+
+// processJobFile processes a single job file and returns a session or nil
+func processJobFile(work jobFileWork, provider *workspace.Provider, genericNoteGroups map[string]bool) *models.Session {
+	path := work.path
+	ownerNode := work.ownerNode
+
+	job, loadErr := orchestration.LoadJob(path)
+	if loadErr != nil {
+		return nil
 	}
+
+	// Only process valid jobs
+	if job.Type != "chat" && job.Type != "oneshot" && job.Type != "agent" && job.Type != "interactive_agent" && job.Type != "headless_agent" && job.Type != "shell" {
+		return nil
+	}
+
+	// Start with the owner of the plan directory as the default context
+	effectiveOwnerNode := ownerNode
+
+	// If the job's frontmatter specifies a worktree, resolve it
+	if job.Worktree != "" {
+		resolvedNode := provider.FindByWorktree(ownerNode, job.Worktree)
+		if resolvedNode != nil {
+			effectiveOwnerNode = resolvedNode
+		}
+	}
+
+	// If this is a generic note and its owner is a worktree, re-assign to the parent
+	planName := filepath.Base(filepath.Dir(path))
+	if genericNoteGroups[planName] && effectiveOwnerNode.IsWorktree() {
+		current := effectiveOwnerNode
+		for current != nil && current.IsWorktree() {
+			if current.ParentProjectPath != "" {
+				parentNode := provider.FindByPath(current.ParentProjectPath)
+				if parentNode != nil {
+					current = parentNode
+				} else {
+					break
+				}
+			} else {
+				break
+			}
+		}
+		if current != nil && !current.IsWorktree() {
+			effectiveOwnerNode = current
+		}
+	}
+
+	// Determine repo name and worktree
+	repoName := effectiveOwnerNode.Name
+	worktreeName := ""
+	if effectiveOwnerNode.IsWorktree() {
+		if effectiveOwnerNode.ParentProjectPath != "" {
+			repoName = filepath.Base(effectiveOwnerNode.ParentProjectPath)
+		}
+		if string(effectiveOwnerNode.Kind) == "EcosystemWorktreeSubProjectWorktree" {
+			worktreeName = filepath.Base(effectiveOwnerNode.ParentEcosystemPath)
+		} else {
+			worktreeName = effectiveOwnerNode.Name
+		}
+	}
+
+	session := &models.Session{
+		ID:               job.ID,
+		Type:             string(job.Type),
+		Status:           string(job.Status),
+		Repo:             repoName,
+		Branch:           worktreeName,
+		WorkingDirectory: effectiveOwnerNode.Path,
+		StartedAt:        job.StartTime,
+		LastActivity:     job.UpdatedAt,
+		PlanName:         filepath.Base(filepath.Dir(path)),
+		JobTitle:         job.Title,
+		JobFilePath:      path,
+	}
+
+	if !job.EndTime.IsZero() {
+		session.EndedAt = &job.EndTime
+	}
+
+	return session
 }
 
 // DiscoverFlowJobs discovers all flow jobs by directly scanning plan directories using NotebookLocator.
 // This eliminates the subprocess call to `flow plan list` for better performance and reliability.
 func DiscoverFlowJobs() ([]*models.Session, error) {
+	// Load config to check if caching is enabled
+	coreCfg, err := coreconfig.LoadDefault()
+	if err != nil {
+		coreCfg = &coreconfig.Config{} // Proceed with defaults
+	}
+	var hooksCfg hooksconfig.Config
+	if coreCfg != nil {
+		_ = coreCfg.UnmarshalExtension("hooks", &hooksCfg)
+	}
+
+	cacheEnabled := true
+	if hooksCfg.TUI.CacheEnabled != nil {
+		cacheEnabled = *hooksCfg.TUI.CacheEnabled
+	}
+
+	// Get cache TTL from config, default to 60 seconds
+	cacheTTL := flowJobsCacheTTL // Default
+	if hooksCfg.TUI.CacheTTLSeconds != nil {
+		cacheTTL = time.Duration(*hooksCfg.TUI.CacheTTLSeconds) * time.Second
+	}
+
 	// Start background refresh if enabled (only starts once)
-	startBackgroundRefresh()
+	startBackgroundRefresh(cacheEnabled)
 
 	// Try to load from file cache
-	if cacheData, err := os.ReadFile(flowJobsCachePath); err == nil {
-		var cached flowJobsCacheData
-		if err := json.Unmarshal(cacheData, &cached); err == nil {
-			if time.Since(cached.Timestamp) < flowJobsCacheTTL {
+	if cacheEnabled {
+		if cacheData, err := os.ReadFile(flowJobsCachePath); err == nil {
+			var cached flowJobsCacheData
+			if err := json.Unmarshal(cacheData, &cached); err == nil {
+				if time.Since(cached.Timestamp) < cacheTTL {
 				// Update real-time status for cached sessions before returning
 				for _, session := range cached.Sessions {
 					// Check if it's a flow job (not a claude_code session)
@@ -385,7 +557,8 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 						updateSessionStatusFromFilesystem(session)
 					}
 				}
-				return cached.Sessions, nil
+					return cached.Sessions, nil
+				}
 			}
 		}
 	}
@@ -405,6 +578,9 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 	}
 
 	// Initialize workspace provider and NotebookLocator
+	debugTiming := os.Getenv("GROVE_DEBUG_TIMING") != ""
+	startTime := time.Now()
+
 	logger := logrus.New()
 	logger.SetOutput(io.Discard) // Suppress discoverer's debug output
 	discoveryService := workspace.NewDiscoveryService(logger)
@@ -413,121 +589,133 @@ func DiscoverFlowJobs() ([]*models.Session, error) {
 		// Can't discover workspaces, so can't find jobs.
 		return []*models.Session{}, nil
 	}
-	provider := workspace.NewProvider(discoveryResult)
-
-	coreCfg, err := coreconfig.LoadDefault()
-	if err != nil {
-		coreCfg = &coreconfig.Config{} // Proceed with defaults
+	if debugTiming {
+		fmt.Fprintf(os.Stderr, "[TIMING] Workspace discovery: %v\n", time.Since(startTime))
 	}
+
+	provider := workspace.NewProvider(discoveryResult)
 	locator := workspace.NewNotebookLocator(coreCfg)
 
 	// Scan for all plan and chat directories
+	scanStart := time.Now()
 	planDirs, _ := locator.ScanForAllPlans(provider)
 	chatDirs, _ := locator.ScanForAllChats(provider)
+	if debugTiming {
+		fmt.Fprintf(os.Stderr, "[TIMING] Directory scanning: %v\n", time.Since(scanStart))
+	}
 
 	allScanDirs := append(planDirs, chatDirs...)
 
-	var sessions []*models.Session
+	// Walk each directory and load jobs in parallel
+	walkStart := time.Now()
+
+	// Build generic note groups map once and reuse it
+	genericNoteGroups := make(map[string]bool)
+	for _, noteType := range coreconfig.DefaultNoteTypes {
+		genericNoteGroups[noteType] = true
+	}
+
+	// Collect all job file paths first
+	jobWorkChan := make(chan jobFileWork, 500)
+	var collectWg sync.WaitGroup
+	collectWg.Add(1)
+
+	go func() {
+		defer collectWg.Done()
+		for _, scannedDir := range allScanDirs {
+			ownerNode := scannedDir.Owner
+			filepath.Walk(scannedDir.Path, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return nil
+				}
+
+				// Skip archive directories entirely
+				if info.IsDir() {
+					name := info.Name()
+					if name == "archive" || name == ".archive" || strings.HasPrefix(name, "archive-") || strings.HasPrefix(name, ".archive-") {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+
+				if !strings.HasSuffix(info.Name(), ".md") {
+					return nil
+				}
+				// Skip spec.md and README.md
+				if info.Name() == "spec.md" || info.Name() == "README.md" {
+					return nil
+				}
+				jobWorkChan <- jobFileWork{path: path, ownerNode: ownerNode}
+				return nil
+			})
+		}
+		close(jobWorkChan)
+	}()
+
+	// Process jobs in parallel with worker pool
+	const numWorkers = 10
+	sessionsChan := make(chan *models.Session, 500)
+	var processWg sync.WaitGroup
+
+	for i := 0; i < numWorkers; i++ {
+		processWg.Add(1)
+		go func() {
+			defer processWg.Done()
+			for work := range jobWorkChan {
+				if session := processJobFile(work, provider, genericNoteGroups); session != nil {
+					sessionsChan <- session
+				}
+			}
+		}()
+	}
+
+	// Close sessions channel when all workers are done
+	go func() {
+		processWg.Wait()
+		close(sessionsChan)
+	}()
+
+	// Collect results and deduplicate
+	sessions := []*models.Session{}
 	seenJobs := make(map[string]bool)
-
-	// Walk each directory and load jobs
-	for _, scannedDir := range allScanDirs {
-		ownerNode := scannedDir.Owner
-		filepath.Walk(scannedDir.Path, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
-				return nil
-			}
-
-			// Skip spec.md and README.md
-			if info.Name() == "spec.md" || info.Name() == "README.md" {
-				return nil
-			}
-
-			job, loadErr := orchestration.LoadJob(path)
-			if loadErr != nil {
-				// This is expected for non-job markdown files, so we skip them silently.
-				return nil
-			}
-
-			// Only process valid jobs (plan or chat)
-			if job.Type != "chat" && job.Type != "oneshot" && job.Type != "agent" && job.Type != "interactive_agent" && job.Type != "headless_agent" && job.Type != "shell" {
-				return nil
-			}
-
-			// Deduplicate by job file path (more reliable than ID which can clash across plans)
-			if seenJobs[path] {
-				return nil
-			}
-			seenJobs[path] = true
-
-			// Start with the owner of the plan directory as the default context.
-			effectiveOwnerNode := ownerNode
-
-			// If the job's frontmatter specifies a worktree, resolve it to a more specific node.
-			if job.Worktree != "" {
-				// The ownerNode is the "base project" (e.g., main grove-core).
-				// The job.Worktree is the name of the ecosystem worktree (e.g., "test444").
-				resolvedNode := provider.FindByWorktree(ownerNode, job.Worktree)
-				if resolvedNode != nil {
-					// We found the correct workspace node! Use this as the effective owner.
-					effectiveOwnerNode = resolvedNode
-				}
-				// If resolvedNode is nil, we gracefully fall back to the base project node.
-			}
-
-			// Now, determine repo name and worktree from the correctly resolved effectiveOwnerNode.
-			repoName := effectiveOwnerNode.Name
-			worktreeName := ""
-			if effectiveOwnerNode.IsWorktree() {
-				if effectiveOwnerNode.ParentProjectPath != "" {
-					repoName = filepath.Base(effectiveOwnerNode.ParentProjectPath)
-				}
-				// For EcosystemWorktreeSubProjectWorktree, extract worktree name from parent path
-				if string(effectiveOwnerNode.Kind) == "EcosystemWorktreeSubProjectWorktree" {
-					worktreeName = filepath.Base(effectiveOwnerNode.ParentEcosystemPath)
-				} else {
-					worktreeName = effectiveOwnerNode.Name
-				}
-			}
-
-			session := &models.Session{
-				ID:               job.ID,
-				Type:             string(job.Type),
-				Status:           string(job.Status),
-				Repo:             repoName,
-				Branch:           worktreeName, // Branch and Worktree are synonymous here
-				WorkingDirectory: effectiveOwnerNode.Path, // CRITICAL: This path is used for TUI grouping.
-				StartedAt:        job.StartTime,
-				LastActivity:     job.UpdatedAt,
-				PlanName:         filepath.Base(filepath.Dir(path)),
-				JobTitle:         job.Title,
-				JobFilePath:      path,
-			}
-
-			// Populate EndedAt if job has a valid, non-zero EndTime
-			if !job.EndTime.IsZero() {
-				session.EndedAt = &job.EndTime
-			}
-
+	for session := range sessionsChan {
+		if !seenJobs[session.JobFilePath] {
+			seenJobs[session.JobFilePath] = true
 			sessions = append(sessions, session)
-			return nil
-		})
+		}
+	}
+
+	// Wait for collection to finish
+	collectWg.Wait()
+	if debugTiming {
+		fmt.Fprintf(os.Stderr, "[TIMING] Job walking/loading: %v\n", time.Since(walkStart))
 	}
 
 	// Update file cache
-	cacheData := flowJobsCacheData{
-		Timestamp: time.Now(),
-		Sessions:  sessions,
-	}
-	if jsonData, err := json.Marshal(cacheData); err == nil {
-		os.MkdirAll(filepath.Dir(flowJobsCachePath), 0755)
-		os.WriteFile(flowJobsCachePath, jsonData, 0644)
+	if cacheEnabled {
+		cacheData := flowJobsCacheData{
+			Timestamp: time.Now(),
+			Sessions:  sessions,
+		}
+		if jsonData, err := json.Marshal(cacheData); err == nil {
+			os.MkdirAll(filepath.Dir(flowJobsCachePath), 0755)
+			os.WriteFile(flowJobsCachePath, jsonData, 0644)
+		}
 	}
 
+	updateStart := time.Now()
+	// Skip status updates for terminal states - no need to re-check filesystem
+	terminalStates := map[string]bool{
+		"completed": true, "failed": true, "error": true, "abandoned": true,
+	}
 	for _, session := range sessions {
-		if session.Type != "" && session.Type != "claude_session" {
+		if session.Type != "" && session.Type != "claude_session" && !terminalStates[session.Status] {
 			updateSessionStatusFromFilesystem(session)
 		}
+	}
+	if debugTiming {
+		fmt.Fprintf(os.Stderr, "[TIMING] Status updates: %v\n", time.Since(updateStart))
+		fmt.Fprintf(os.Stderr, "[TIMING] TOTAL DiscoverFlowJobs: %v\n", time.Since(startTime))
 	}
 
 	return sessions, nil
