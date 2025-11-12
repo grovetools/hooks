@@ -48,11 +48,12 @@ const (
 
 // PlanListItem holds aggregated data for a plan group
 type PlanListItem struct {
-	Name        string
-	JobCount    int
-	Status      string
-	StatusParts map[string]int
-	LastUpdated time.Time
+	Name         string
+	JobCount     int
+	Status       string
+	StatusParts  map[string]int
+	LastUpdated  time.Time
+	IsActualPlan bool
 }
 
 // displayNode represents a single line in the TUI, which can be a workspace, a plan, or a session.
@@ -670,9 +671,18 @@ func (m *Model) updateFilteredAndDisplayNodes() {
 
 func createPlanListItem(planName string, sessions []*models.Session) PlanListItem {
 	item := PlanListItem{
-		Name:        planName,
-		JobCount:    len(sessions),
-		StatusParts: make(map[string]int),
+		Name:         planName,
+		JobCount:     len(sessions),
+		StatusParts:  make(map[string]int),
+		IsActualPlan: false,
+	}
+
+	if len(sessions) > 0 {
+		// A real plan will have its job files inside a "plans" directory.
+		jobPath := sessions[0].JobFilePath
+		if strings.Contains(jobPath, "/plans/") {
+			item.IsActualPlan = true
+		}
 	}
 
 	var latestUpdate time.Time

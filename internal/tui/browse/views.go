@@ -77,7 +77,13 @@ func (m Model) viewTable() string {
 				firstCol = node.prefix + jobTypeIcon + " " + utils.TruncateStr(sessionTitle, 40)
 			} else if node.isPlan {
 				statusIcon := getStatusIcon(node.plan.Status, "plan")
-				firstCol = node.prefix + statusIcon + " " + t.Accent.Render("Plan:") + " " + t.Bold.Render(node.plan.Name) + " " + t.Muted.Render(fmt.Sprintf("(%d jobs)", node.plan.JobCount))
+				label := "Plan:"
+				labelStyle := t.Accent
+				if !node.plan.IsActualPlan {
+					label = "Group:"
+					labelStyle = t.Muted
+				}
+				firstCol = node.prefix + statusIcon + " " + labelStyle.Render(label) + " " + t.Bold.Render(node.plan.Name) + " " + t.Muted.Render(fmt.Sprintf("(%d jobs)", node.plan.JobCount))
 			} else { // Workspace
 				var nameStyle lipgloss.Style
 				var gitSymbol string
@@ -277,9 +283,16 @@ func (m Model) viewTree() string {
 				plan := node.plan
 				statusIcon := getStatusIcon(plan.Status, "plan")
 
+				label := "Plan:"
+				labelStyle := t.Accent
+				if !plan.IsActualPlan {
+					label = "Group:"
+					labelStyle = t.Muted
+				}
+
 				line.WriteString(fmt.Sprintf("%s %s %s %s",
 					statusIcon,
-					t.Accent.Render("Plan:"),
+					labelStyle.Render(label),
 					t.Bold.Render(plan.Name),
 					t.Muted.Render(fmt.Sprintf("(%d jobs)", plan.JobCount)),
 				))
