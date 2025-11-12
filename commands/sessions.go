@@ -11,8 +11,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-core/pkg/process"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/spf13/cobra"
@@ -512,56 +514,59 @@ This updates the job frontmatter files directly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			updated := 0
 
-			// Common locations to search for plans
-			planDirs := []string{
-				utils.ExpandPath("~/Documents/nb/repos"),
-				utils.ExpandPath("~/Code/nb/repos"),
-				utils.ExpandPath("~/Code"),
+			// Discover all workspaces using grove-core
+			discoveryService := workspace.NewDiscoveryService(nil)
+			discoveryResult, err := discoveryService.DiscoverAll()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to discover workspaces: %v\n", err)
+				return fmt.Errorf("failed to discover workspaces: %w", err)
 			}
 
-			for _, baseDir := range planDirs {
-				if _, err := os.Stat(baseDir); os.IsNotExist(err) {
+			provider := workspace.NewProvider(discoveryResult)
+
+			// Load config and create notebook locator
+			cfg, err := config.LoadDefault()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load config: %v\n", err)
+				cfg = &config.Config{}
+			}
+			locator := workspace.NewNotebookLocator(cfg)
+
+			// Get all plan directories across all workspaces
+			scannedDirs, err := locator.ScanForAllPlans(provider)
+			if err != nil {
+				return fmt.Errorf("failed to scan for plans: %w", err)
+			}
+
+			if len(scannedDirs) == 0 {
+				fmt.Println("No plan directories found")
+				return nil
+			}
+
+			// Process each base plans directory
+			for _, scannedDir := range scannedDirs {
+				plansBaseDir := scannedDir.Path
+
+				// Check subdirectories of the plans directory (each is a plan)
+				planEntries, err := os.ReadDir(plansBaseDir)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: cannot read plans dir %s: %v\n", plansBaseDir, err)
 					continue
 				}
 
-				// Walk the directory tree looking for plan directories
-				err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+				for _, planEntry := range planEntries {
+					if !planEntry.IsDir() {
+						continue
+					}
+
+					planDir := filepath.Join(plansBaseDir, planEntry.Name())
+					count, err := markInterruptedJobsInPlan(planDir, dryRun)
 					if err != nil {
-						return nil // Skip errors
+						// Log error but continue
+						fmt.Fprintf(os.Stderr, "Warning: error processing plan %s: %v\n", planDir, err)
+						continue
 					}
-
-					// Look for "plans" directories
-					if !info.IsDir() || info.Name() != "plans" {
-						return nil
-					}
-
-					// Check subdirectories of the plans directory
-					planEntries, err := os.ReadDir(path)
-					if err != nil {
-						return nil
-					}
-
-					for _, planEntry := range planEntries {
-						if !planEntry.IsDir() {
-							continue
-						}
-
-						planDir := filepath.Join(path, planEntry.Name())
-						count, err := markInterruptedJobsInPlan(planDir, dryRun)
-						if err != nil {
-							// Log error but continue
-							fmt.Fprintf(os.Stderr, "Warning: error processing plan %s: %v\n", planDir, err)
-							continue
-						}
-						updated += count
-					}
-
-					return filepath.SkipDir // Don't descend into plans directories
-				})
-
-				if err != nil {
-					// Continue with other base directories
-					continue
+					updated += count
 				}
 			}
 
@@ -670,7 +675,7 @@ func newSetStatusCmd() *cobra.Command {
 Valid statuses: pending, running, completed, failed, interrupted
 
 Example:
-  grove-hooks sessions set-status ~/Code/nb/repos/my-repo/main/plans/my-plan/01-job.md interrupted`,
+  grove-hooks sessions set-status /path/to/notebook/repos/my-repo/main/plans/my-plan/01-job.md interrupted`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			jobFilePath := args[0]
