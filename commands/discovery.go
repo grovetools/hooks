@@ -27,7 +27,7 @@ import (
 
 // Cache for flow jobs discovery to avoid expensive flow plan list calls
 var (
-	flowJobsCacheTTL  = 1 * time.Minute // Cache for 1 minute
+	flowJobsCacheTTL  = 15 * time.Second // Cache for 15 seconds
 	flowJobsCachePath = utils.ExpandPath("~/.grove/hooks/flow_jobs_cache.json")
 	// Background refresh disabled by default (CLI commands exit too quickly).
 	// Can be enabled for long-running commands like `browse` TUI.
@@ -106,7 +106,7 @@ func writeCacheFile(sessions []*models.Session) error {
 }
 
 // refreshActiveSessions quickly updates only running/pending_user/idle sessions
-func refreshActiveSessions(coreCfg *coreconfig.Config) {
+func refreshActiveSessions() {
 	debugTiming := os.Getenv("GROVE_DEBUG_TIMING") != ""
 	if debugTiming {
 		startTime := time.Now()
@@ -146,7 +146,7 @@ func refreshActiveSessions(coreCfg *coreconfig.Config) {
 }
 
 // refreshAllSessions performs full directory scan and update
-func refreshAllSessions(coreCfg *coreconfig.Config) {
+func refreshAllSessions() {
 	debugTiming := os.Getenv("GROVE_DEBUG_TIMING") != ""
 	if debugTiming {
 		startTime := time.Now()
@@ -166,9 +166,9 @@ func refreshAllSessions(coreCfg *coreconfig.Config) {
 }
 
 // progressiveRefreshLoop performs multi-stage refresh in background
-func progressiveRefreshLoop(coreCfg *coreconfig.Config) {
+func progressiveRefreshLoop() {
 	// Perform an initial active refresh immediately on startup to get quick updates
-	refreshActiveSessions(coreCfg)
+	refreshActiveSessions()
 
 	// Then start the main refresh cycle
 	ticker := time.NewTicker(activeSessionsRefreshInterval)
@@ -185,24 +185,31 @@ func progressiveRefreshLoop(coreCfg *coreconfig.Config) {
 			lastFullRefresh = now
 			lastActiveRefresh = now // Reset active refresh timer too
 			progressiveRefreshMutex.Unlock()
-			go refreshAllSessions(coreCfg)
+			go refreshAllSessions()
 			continue // Skip active refresh on this tick
 		}
 
 		// Stage 1: Quick refresh of active sessions
 		lastActiveRefresh = now
 		progressiveRefreshMutex.Unlock()
-		go refreshActiveSessions(coreCfg)
+		go refreshActiveSessions()
 	}
 }
 
 // startProgressiveRefreshLoop starts a goroutine that performs progressive refreshing
-func startProgressiveRefreshLoop(coreCfg *coreconfig.Config) {
+func startProgressiveRefreshLoop() {
 	if flowJobsRefreshStarted || !flowJobsBackgroundRefresh {
 		return
 	}
 	flowJobsRefreshStarted = true
-	go progressiveRefreshLoop(coreCfg)
+	go progressiveRefreshLoop()
+}
+
+// StartBackgroundRefresh safely starts the background refresh loop once.
+func StartBackgroundRefresh() {
+	progressiveRefreshOnce.Do(func() {
+		startProgressiveRefreshLoop()
+	})
 }
 
 // DiscoverLiveInteractiveSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
@@ -738,25 +745,18 @@ func processJobFile(work jobFileWork, provider *workspace.Provider, genericNoteG
 
 // DiscoverFlowJobs implements a stale-while-revalidate strategy for fast TUI startup.
 func DiscoverFlowJobs() ([]*models.Session, error) {
-	// FAST PATH: Always return cached data immediately if available.
-	if cachedSessions := tryLoadCacheIgnoreTTL(); cachedSessions != nil {
-		// In TUI mode, start the progressive refresh loop in the background.
-		// This will only run once per application start.
-		if flowJobsBackgroundRefresh {
-			// Load config for background refresh
-			coreCfg, err := coreconfig.LoadDefault()
-			if err != nil {
-				coreCfg = &coreconfig.Config{} // Proceed with defaults
+	// TTL-aware fast path.
+	if cacheData, err := os.ReadFile(flowJobsCachePath); err == nil {
+		var cached flowJobsCacheData
+		if err := json.Unmarshal(cacheData, &cached); err == nil {
+			if time.Since(cached.Timestamp) <= flowJobsCacheTTL {
+				// Cache is fresh, return it.
+				return cached.Sessions, nil
 			}
-			progressiveRefreshOnce.Do(func() {
-				startProgressiveRefreshLoop(coreCfg)
-			})
 		}
-		// Return the (potentially stale) cached data right away.
-		return cachedSessions, nil
 	}
 
-	// COLD START: No cache available. Perform a full blocking scan.
+	// COLD START or STALE CACHE: Perform a full blocking scan.
 	debugTiming := os.Getenv("GROVE_DEBUG_TIMING") != ""
 	if debugTiming {
 		startTime := time.Now()

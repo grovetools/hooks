@@ -93,6 +93,7 @@ func NewBrowseCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Enable background cache refresh for the TUI (long-running)
 			EnableBackgroundRefresh()
+			StartBackgroundRefresh()
 
 			// Create storage for session cleanup
 			storage, err := disk.NewSQLiteStore()
