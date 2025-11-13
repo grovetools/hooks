@@ -22,6 +22,7 @@ import (
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/mattsolo1/grove-notifications"
+	notificationsconfig "github.com/mattsolo1/grove-notifications/pkg/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -424,8 +425,24 @@ func doFullDiscoveryScan() ([]*models.Session, error) {
 	walkStart := time.Now()
 
 	// Build generic note groups map once and reuse it
+	// These are standard note type directories that should be associated with the parent
+	// repository rather than worktrees when discovered.
+	defaultNoteTypes := []string{
+		"inbox",     // new default
+		"current",   // legacy
+		"llm",
+		"learn",
+		"daily",
+		"issues",
+		"architecture",
+		"todos",
+		"quick",
+		"archive",
+		"prompts",
+		"blog",
+	}
 	genericNoteGroups := make(map[string]bool)
-	for _, noteType := range coreconfig.DefaultNoteTypes {
+	for _, noteType := range defaultNoteTypes {
 		genericNoteGroups[noteType] = true
 	}
 
@@ -1296,17 +1313,8 @@ func DispatchStateChangeNotifications(oldSessions, newSessions []*models.Session
 
 // sendJobReadyNotification sends a notification that a job is ready for user input
 func sendJobReadyNotification(session *models.Session) {
-	// Load config to check notification settings (placeholder for now)
-	cfg := &struct {
-		Ntfy struct {
-			Enabled bool
-			URL     string
-			Topic   string
-		}
-		System struct {
-			Levels []string
-		}
-	}{}
+	// Load config to check notification settings
+	cfg := notificationsconfig.Load()
 
 	// Build title from session info based on job type
 	var title string
