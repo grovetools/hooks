@@ -120,7 +120,7 @@ func (m Model) viewTable() string {
 				// Check for ecosystem worktree first (both IsEcosystem and IsWorktree are true)
 				if node.workspace.IsEcosystem() && node.workspace.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
-					gitSymbol = theme.IconEcosystemWorktree
+					gitSymbol = theme.IconEcosystem
 				} else if node.workspace.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
 					gitSymbol = theme.IconWorktree
@@ -216,14 +216,14 @@ func (m Model) viewTable() string {
 
 				if age != "" {
 					if shouldHighlight {
-						ageCol = t.Highlight.Render("● " + age)
+						ageCol = t.Highlight.Render(theme.IconStatusRunning + " " + age)
 					} else {
 						ageCol = age
 					}
 
 					// Add "new" indicator after age
 					if isNew {
-						ageCol = ageCol + " ✨"
+						ageCol = ageCol + " " + lipgloss.NewStyle().Foreground(t.Colors.Yellow).Render(theme.IconSparkle)
 					}
 				}
 			}
@@ -286,7 +286,7 @@ func (m Model) viewTree() string {
 
 			// 1. Render cursor
 			if i == m.cursor {
-				line.WriteString("▶ ")
+				line.WriteString(theme.IconSelect + " ")
 			} else {
 				line.WriteString("  ")
 			}
@@ -410,14 +410,14 @@ func (m Model) viewTree() string {
 				if age != "" {
 					var ageStr string
 					if shouldHighlight {
-						ageStr = t.Success.Render("● " + age)
+						ageStr = t.Success.Render(theme.IconStatusRunning + " " + age)
 					} else {
 						ageStr = t.Muted.Render(age)
 					}
 
 					// Add "new" indicator after age
 					if isNew {
-						ageStr = ageStr + " ✨"
+						ageStr = ageStr + " " + lipgloss.NewStyle().Foreground(t.Colors.Yellow).Render(theme.IconSparkle)
 					}
 
 					ageDisplay = " | " + ageStr
@@ -452,7 +452,7 @@ func (m Model) viewTree() string {
 				// Check for ecosystem worktree first (both IsEcosystem and IsWorktree are true)
 				if ws.IsEcosystem() && ws.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
-					gitSymbol = theme.IconEcosystemWorktree
+					gitSymbol = theme.IconEcosystem
 				} else if ws.IsWorktree() {
 					nameStyle = t.WorkspaceWorktree
 					gitSymbol = theme.IconWorktree
@@ -585,7 +585,7 @@ func (m Model) viewFilterOptions() string {
 	for _, status := range statusOptions {
 		checkbox := "[ ]"
 		if m.statusFilters[status] {
-			checkbox = "[✓]"
+			checkbox = "[" + theme.IconSuccess + "]"
 		}
 		statusText := status
 		if m.statusFilters[status] {
@@ -600,7 +600,7 @@ func (m Model) viewFilterOptions() string {
 	for _, typ := range typeOptions {
 		checkbox := "[ ]"
 		if m.typeFilters[typ] {
-			checkbox = "[✓]"
+			checkbox = "[" + theme.IconSuccess + "]"
 		}
 		typeText := typ
 		if m.typeFilters[typ] {
@@ -688,7 +688,7 @@ func getStatusIcon(status string, sessionType string) string {
 		case "running":
 			icon = theme.IconStatusRunning
 		case "pending_user", "idle":
-			icon = theme.IconStatusIdle
+			icon = theme.IconStatusPendingUser
 		case "failed", "error":
 			icon = theme.IconStatusFailed
 		default:
@@ -701,10 +701,10 @@ func getStatusIcon(status string, sessionType string) string {
 		case "running":
 			icon = theme.IconStatusRunning
 		case "idle":
-			icon = theme.IconStatusIdle
+			icon = theme.IconStatusPendingUser
 		case "pending_user":
 			if sessionType == "chat" {
-				icon = theme.IconStatusIdle
+				icon = theme.IconStatusPendingUser
 			} else {
 				icon = theme.IconStatusPendingUser
 			}
