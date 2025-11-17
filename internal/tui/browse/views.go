@@ -64,6 +64,34 @@ func (m Model) viewTable() string {
 			// Use weight for hierarchy instead of explicit colors.
 			// See: plans/tui-updates/14-terminal-ui-styling-philosophy.md
 			var firstCol string
+
+			// Determine if session is "new"
+			isNew := false
+			if node.isSession && node.workspace != nil {
+				s := node.session
+				lastAccessed, found := m.accessHistory[node.workspace.Path]
+
+				terminalStates := map[string]bool{
+					"completed":   true,
+					"failed":      true,
+					"interrupted": true,
+					"error":       true,
+					"abandoned":   true,
+				}
+
+				if terminalStates[s.Status] && s.EndedAt != nil {
+					if !found || lastAccessed.Before(*s.EndedAt) {
+						isNew = true
+					}
+				} else if s.Status == "idle" || s.Status == "pending_user" {
+					if !s.LastActivity.IsZero() {
+						if !found || lastAccessed.Before(s.LastActivity) {
+							isNew = true
+						}
+					}
+				}
+			}
+
 			if node.isSession {
 				sessionTitle := ""
 				if node.session.JobFilePath != "" {
@@ -145,19 +173,61 @@ func (m Model) viewTable() string {
 			}
 			row = append(row, statusCol)
 
-			// LAST ACTIVITY column
-			var lastActivityCol string
+			// LAST ACTIVITY column (AGE)
+			var ageCol string
 			if node.isSession {
 				s := node.session
-				if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
+				now := time.Now()
+				age := ""
+				shouldHighlight := false
+				highlightThreshold := 1 * time.Minute
+
+				terminalStates := map[string]bool{
+					"completed":   true,
+					"failed":      true,
+					"interrupted": true,
+					"error":       true,
+					"abandoned":   true,
+				}
+
+				if terminalStates[s.Status] {
+					if s.EndedAt != nil && !s.StartedAt.IsZero() {
+						age = utils.FormatDuration(s.EndedAt.Sub(s.StartedAt))
+						if now.Sub(*s.EndedAt) < highlightThreshold {
+							shouldHighlight = true
+						}
+					}
+				} else if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
 					if !s.LastActivity.IsZero() {
-						lastActivityCol = utils.FormatDuration(time.Since(s.LastActivity))
+						age = utils.FormatDuration(now.Sub(s.LastActivity))
+						if s.Status == "idle" || s.Status == "pending_user" {
+							if now.Sub(s.LastActivity) < highlightThreshold {
+								shouldHighlight = true
+							}
+						}
 					} else if !s.StartedAt.IsZero() {
-						lastActivityCol = utils.FormatDuration(time.Since(s.StartedAt))
+						age = utils.FormatDuration(now.Sub(s.StartedAt))
+					}
+				} else if s.Status == "pending" || s.Status == "todo" {
+					if !s.StartedAt.IsZero() {
+						age = utils.FormatDuration(now.Sub(s.StartedAt))
+					}
+				}
+
+				if age != "" {
+					if shouldHighlight {
+						ageCol = t.Highlight.Render("● " + age)
+					} else {
+						ageCol = age
+					}
+
+					// Add "new" indicator after age
+					if isNew {
+						ageCol = ageCol + " ✨"
 					}
 				}
 			}
-			row = append(row, lastActivityCol)
+			row = append(row, ageCol)
 
 			rows = append(rows, row)
 		}
@@ -189,26 +259,26 @@ func (m Model) viewTable() string {
 }
 
 func (m Model) viewTree() string {
-    t := theme.DefaultTheme
-    var b strings.Builder
+	t := theme.DefaultTheme
+	var b strings.Builder
 
-    headerLine := ""
-    if m.searchActive {
-        headerLine += t.Muted.Render(m.filterInput.View()) + "  "
-    }
-    b.WriteString(headerLine)
-    b.WriteString("\n")
+	headerLine := ""
+	if m.searchActive {
+		headerLine += t.Muted.Render(m.filterInput.View()) + "  "
+	}
+	b.WriteString(headerLine)
+	b.WriteString("\n")
 
-    viewportHeight := m.getViewportHeight()
-    startIdx := m.scrollOffset
-    endIdx := m.scrollOffset + viewportHeight
-    if endIdx > len(m.displayNodes) {
-        endIdx = len(m.displayNodes)
-    }
+	viewportHeight := m.getViewportHeight()
+	startIdx := m.scrollOffset
+	endIdx := m.scrollOffset + viewportHeight
+	if endIdx > len(m.displayNodes) {
+		endIdx = len(m.displayNodes)
+	}
 
-    if len(m.displayNodes) == 0 {
-        b.WriteString("\n" + t.Muted.Render("No matching sessions or workspaces"))
-    } else {
+	if len(m.displayNodes) == 0 {
+		b.WriteString("\n" + t.Muted.Render("No matching sessions or workspaces"))
+	} else {
 		// Render visible rows
 		for i := startIdx; i < endIdx; i++ {
 			node := m.displayNodes[i]
@@ -227,6 +297,28 @@ func (m Model) viewTree() string {
 			// 3. Render the node's content
 			if node.isSession {
 				s := node.session
+
+				// Determine if session is "new"
+				isNew := false
+				if node.workspace != nil {
+					lastAccessed, found := m.accessHistory[node.workspace.Path]
+
+					terminalStates := map[string]bool{
+						"completed": true, "failed": true, "interrupted": true, "error": true, "abandoned": true,
+					}
+
+					if terminalStates[s.Status] && s.EndedAt != nil {
+						if !found || lastAccessed.Before(*s.EndedAt) {
+							isNew = true
+						}
+					} else if s.Status == "idle" || s.Status == "pending_user" {
+						if !s.LastActivity.IsZero() {
+							if !found || lastAccessed.Before(s.LastActivity) {
+								isNew = true
+							}
+						}
+					}
+				}
 
 				// Get job type icon
 				jobTypeIcon := getJobTypeIcon(s.Type)
@@ -279,6 +371,60 @@ func (m Model) viewTree() string {
 				} else {
 					line.WriteString(baseInfo)
 				}
+
+				// Add age and highlighting
+				now := time.Now()
+				age := ""
+				shouldHighlight := false
+				highlightThreshold := 1 * time.Minute
+
+				terminalStates := map[string]bool{
+					"completed": true, "failed": true, "interrupted": true, "error": true, "abandoned": true,
+				}
+
+				if terminalStates[s.Status] {
+					if s.EndedAt != nil && !s.StartedAt.IsZero() {
+						age = utils.FormatDuration(s.EndedAt.Sub(s.StartedAt))
+						if now.Sub(*s.EndedAt) < highlightThreshold {
+							shouldHighlight = true
+						}
+					}
+				} else if s.Status == "running" || s.Status == "idle" || s.Status == "pending_user" {
+					if !s.LastActivity.IsZero() {
+						age = utils.FormatDuration(now.Sub(s.LastActivity))
+						if s.Status == "idle" || s.Status == "pending_user" {
+							if now.Sub(s.LastActivity) < highlightThreshold {
+								shouldHighlight = true
+							}
+						}
+					} else if !s.StartedAt.IsZero() {
+						age = utils.FormatDuration(now.Sub(s.StartedAt))
+					}
+				} else if s.Status == "pending" || s.Status == "todo" {
+					if !s.StartedAt.IsZero() {
+						age = utils.FormatDuration(now.Sub(s.StartedAt))
+					}
+				}
+
+				ageDisplay := ""
+				if age != "" {
+					var ageStr string
+					if shouldHighlight {
+						ageStr = t.Success.Render("● " + age)
+					} else {
+						ageStr = t.Muted.Render(age)
+					}
+
+					// Add "new" indicator after age
+					if isNew {
+						ageStr = ageStr + " ✨"
+					}
+
+					ageDisplay = " | " + ageStr
+				}
+
+				line.WriteString(ageDisplay)
+
 			} else if node.isPlan {
 				plan := node.plan
 				statusIcon := getStatusIcon(plan.Status, "plan")
@@ -336,26 +482,24 @@ func (m Model) viewTree() string {
 		}
 	}
 
-
-    b.WriteString("\n")
-    if len(m.selectedIDs) > 0 {
-        b.WriteString(t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedIDs))) + " ")
-    }
-    if len(m.displayNodes) > viewportHeight {
-        scrollInfo := fmt.Sprintf("(%d-%d of %d)", startIdx+1, endIdx, len(m.displayNodes))
-        b.WriteString(t.Muted.Render(scrollInfo) + " ")
-    }
-    if m.statusMessage != "" {
-        if strings.HasPrefix(m.statusMessage, "Error:") {
-            b.WriteString(t.Error.Render(m.statusMessage) + " ")
-        } else {
-            b.WriteString(t.Success.Render(m.statusMessage) + " ")
-        }
-    }
-    b.WriteString(m.help.View())
-    return b.String()
+	b.WriteString("\n")
+	if len(m.selectedIDs) > 0 {
+		b.WriteString(t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedIDs))) + " ")
+	}
+	if len(m.displayNodes) > viewportHeight {
+		scrollInfo := fmt.Sprintf("(%d-%d of %d)", startIdx+1, endIdx, len(m.displayNodes))
+		b.WriteString(t.Muted.Render(scrollInfo) + " ")
+	}
+	if m.statusMessage != "" {
+		if strings.HasPrefix(m.statusMessage, "Error:") {
+			b.WriteString(t.Error.Render(m.statusMessage) + " ")
+		} else {
+			b.WriteString(t.Success.Render(m.statusMessage) + " ")
+		}
+	}
+	b.WriteString(m.help.View())
+	return b.String()
 }
-
 
 func (m Model) viewDetails() string {
 	s := m.selectedSession
@@ -488,8 +632,12 @@ func (m Model) generateScrollbar(viewHeight, totalItems int) []string {
 	if maxScroll > 0 {
 		scrollProgress = float64(m.scrollOffset) / float64(maxScroll)
 	}
-	if scrollProgress < 0 { scrollProgress = 0 }
-	if scrollProgress > 1 { scrollProgress = 1 }
+	if scrollProgress < 0 {
+		scrollProgress = 0
+	}
+	if scrollProgress > 1 {
+		scrollProgress = 1
+	}
 	thumbStart := int(scrollProgress * float64(viewHeight-thumbSize))
 	for i := 0; i < viewHeight; i++ {
 		if i >= thumbStart && i < thumbStart+thumbSize {
@@ -504,14 +652,22 @@ func (m Model) generateScrollbar(viewHeight, totalItems int) []string {
 func getStatusStyle(status string) lipgloss.Style {
 	t := theme.DefaultTheme
 	switch status {
-	case "running": return t.Success
-	case "idle", "pending_user": return t.Warning
-	case "completed": return t.Info
-	case "todo": return t.Muted
-	case "hold": return t.Warning
-	case "abandoned": return t.Muted
-	case "failed", "error": return t.Error
-	default: return t.Muted
+	case "running":
+		return t.Success
+	case "idle", "pending_user":
+		return t.Warning
+	case "completed":
+		return t.Info
+	case "todo":
+		return t.Muted
+	case "hold":
+		return t.Warning
+	case "abandoned":
+		return t.Muted
+	case "failed", "error":
+		return t.Error
+	default:
+		return t.Muted
 	}
 }
 
@@ -573,7 +729,9 @@ func getStatusIcon(status string, sessionType string) string {
 }
 
 func max(a, b int) int {
-	if a > b { return a }
+	if a > b {
+		return a
+	}
 	return b
 }
 

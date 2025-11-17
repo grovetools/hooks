@@ -104,6 +104,9 @@ type Model struct {
 	gPressed        bool // Track first 'g' press for 'gg' chord
 	jumpMap         map[rune]int // Maps keyboard shortcuts (1-9) to displayNode indices
 
+	// For "new" indicator
+	accessHistory map[string]time.Time
+
 	// Exit actions
 	CommandOnExit *exec.Cmd
 	MessageOnExit string
@@ -151,6 +154,7 @@ func NewModel(
 		typeFilters:           filterPrefs.TypeFilters,
 		viewMode:              tableView,
 		jumpMap:               make(map[rune]int),
+		accessHistory:         make(map[string]time.Time),
 		getAllSessions:        getAllSessions,
 		dispatchNotifications: dispatchNotifications,
 		saveFilterPreferences: saveFilterPreferences,
@@ -188,11 +192,31 @@ type gChordTimeoutMsg struct{}
 
 type editFileAndQuitMsg struct{ filePath string }
 
+type accessHistoryMsg map[string]time.Time
+
 const gChordTimeout = 400 * time.Millisecond
+
+func loadAccessHistoryCmd() tea.Cmd {
+	return func() tea.Msg {
+		configDir := utils.ExpandPath("~/.grove")
+		historyMap, err := workspace.LoadAccessHistoryAsMap(configDir)
+		if err != nil {
+			return accessHistoryMsg{} // Return empty map on error
+		}
+		return accessHistoryMsg(historyMap)
+	}
+}
+
+// updateAccessHistory updates the gmux access-history.json file for a workspace
+func updateAccessHistory(workspacePath string) error {
+	configDir := utils.ExpandPath("~/.grove")
+	return workspace.UpdateAccessHistory(configDir, workspacePath)
+}
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
+		loadAccessHistoryCmd(),
 		tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		}),
@@ -205,6 +229,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case gChordTimeoutMsg:
 		m.gPressed = false
+		return m, nil
+
+	case accessHistoryMsg:
+		m.accessHistory = msg
 		return m, nil
 
 	case editFileAndQuitMsg:
@@ -256,9 +284,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		return m, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-			return tickMsg(t)
-		})
+		return m, tea.Batch(
+			loadAccessHistoryCmd(),
+			tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+				return tickMsg(t)
+			}),
+		)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -451,6 +482,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				planName := node.plan.Name
 				windowName := fmt.Sprintf("plan-%s", planName)
 
+				// Update access history for this workspace
+				if node.workspace != nil {
+					if err := updateAccessHistory(node.workspace.Path); err != nil {
+						m.statusMessage = fmt.Sprintf("Warning: failed to update access history: %v", err)
+					}
+				}
+
 				if os.Getenv("TMUX") != "" {
 					tmuxClient, _ := tmux.NewClient()
 					cmd, err := tmuxClient.NewWindowAndClosePopup(context.Background(), sessionName, windowName, fmt.Sprintf("flow plan status -t %s", planName))
@@ -482,6 +520,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 					if sessionType == "claude_code" && session.TmuxKey != "" && (session.Status == "running" || session.Status == "idle") {
+						// Update access history for this workspace
+						if node.workspace != nil {
+							if err := updateAccessHistory(node.workspace.Path); err != nil {
+								m.statusMessage = fmt.Sprintf("Warning: failed to update access history: %v", err)
+							}
+						}
+
 						if os.Getenv("TMUX") != "" {
 							tmuxClient, _ := tmux.NewClient()
 							if err := tmuxClient.SwitchClient(context.Background(), session.TmuxKey); err != nil {
@@ -501,6 +546,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if err != nil {
 							m.statusMessage = fmt.Sprintf("Error: could not find workspace for %s", workDir)
 							return m, nil
+						}
+
+						// Update access history for this workspace
+						if err := updateAccessHistory(projInfo.Path); err != nil {
+							m.statusMessage = fmt.Sprintf("Warning: failed to update access history: %v", err)
 						}
 
 						sessionName := projInfo.Identifier()
@@ -1021,9 +1071,15 @@ func (m Model) switchToTmuxSession(sessionName string) (tea.Model, tea.Cmd) {
 	}
 	sessionExists, _ := tmuxClient.SessionExists(context.Background(), sessionName)
 
+	// Get workspace path for access history update
+	node := m.getCurrentDisplayNode()
+	var workspacePath string
+	if node != nil && node.workspace != nil {
+		workspacePath = node.workspace.Path
+	}
+
 	if !sessionExists {
 		// Session doesn't exist, so create it
-		node := m.getCurrentDisplayNode()
 		if node == nil || node.workspace == nil {
 			m.statusMessage = "Error: no workspace selected to create session."
 			return m, nil
@@ -1039,6 +1095,14 @@ func (m Model) switchToTmuxSession(sessionName string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.statusMessage = fmt.Sprintf("Created session '%s'", sessionName)
+	}
+
+	// Update access history for this workspace
+	if workspacePath != "" {
+		if err := updateAccessHistory(workspacePath); err != nil {
+			// Don't fail the operation, just log the error
+			m.statusMessage = fmt.Sprintf("Warning: failed to update access history: %v", err)
+		}
 	}
 
 	if os.Getenv("TMUX") != "" {
