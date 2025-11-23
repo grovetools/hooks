@@ -97,15 +97,11 @@ build-all:
 
 # --- E2E Testing ---
 # Build the custom tend binary for grove-hooks E2E tests.
-test-e2e-build:
-	@echo "Building E2E test binary $(E2E_BINARY_NAME)..."
-	@go build $(LDFLAGS) -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e
-
 # Run E2E tests. Depends on the main 'hooks' binary and the test runner.
 # Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
-test-e2e: build test-e2e-build
+test-e2e: build
 	@echo "Running E2E tests..."
-	@$(BIN_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
+	@tend run $(ARGS)
 
 # Show available targets
 help:
@@ -121,5 +117,5 @@ help:
 	@echo "  make dev         - Build with race detector"
 	@echo "  make build-all   - Build for multiple platforms"
 	@echo "  make generate-docs     - Generate documentation using docgen"
-	@echo "  make test-e2e-build   - Build the E2E test runner binary"
+	@echo "  make test-e2e ARGS=...- Run E2E test runner binary"
 	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i hooks-basic-generation\")"
