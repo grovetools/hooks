@@ -415,11 +415,13 @@ func doFullDiscoveryScan() ([]*models.Session, error) {
 	scanStart := time.Now()
 	planDirs, _ := locator.ScanForAllPlans(provider)
 	chatDirs, _ := locator.ScanForAllChats(provider)
+	noteDirs, _ := locator.ScanForAllNotes(provider)
 	if debugTiming {
 		fmt.Fprintf(os.Stderr, "[TIMING] Directory scanning: %v\n", time.Since(scanStart))
 	}
 
 	allScanDirs := append(planDirs, chatDirs...)
+	allScanDirs = append(allScanDirs, noteDirs...)
 
 	// Walk each directory and load jobs in parallel
 	walkStart := time.Now()
@@ -605,9 +607,17 @@ func parseJobFile(path string, ownerNode *workspace.WorkspaceNode, provider *wor
 		return nil
 	}
 
-	// Only process valid jobs
-	if job.Type != "chat" && job.Type != "oneshot" && job.Type != "agent" && job.Type != "interactive_agent" && job.Type != "headless_agent" && job.Type != "shell" {
+	// Only process valid jobs or active notes
+	isActiveStatus := job.Status == "running" || job.Status == "pending_user" || job.Status == "idle"
+	isValidJobType := job.Type == "chat" || job.Type == "oneshot" || job.Type == "agent" || job.Type == "interactive_agent" || job.Type == "headless_agent" || job.Type == "shell"
+
+	if !isValidJobType && !isActiveStatus {
 		return nil
+	}
+
+	sessionType := string(job.Type)
+	if sessionType == "" && isActiveStatus {
+		sessionType = "note"
 	}
 
 	// Start with the owner of the plan directory as the default context
@@ -736,7 +746,7 @@ func parseJobFile(path string, ownerNode *workspace.WorkspaceNode, provider *wor
 
 	session := &models.Session{
 		ID:               job.ID,
-		Type:             string(job.Type),
+		Type:             sessionType,
 		Status:           string(job.Status),
 		Repo:             repoName,
 		Branch:           worktreeName,

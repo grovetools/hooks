@@ -737,6 +737,8 @@ func max(a, b int) int {
 
 func getJobTypeIcon(jobType string) string {
 	switch jobType {
+	case "note":
+		return theme.IconNote
 	case "chat":
 		return theme.IconChat
 	case "interactive_agent":
