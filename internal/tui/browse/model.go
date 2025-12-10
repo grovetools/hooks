@@ -20,6 +20,7 @@ import (
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-core/util/pathutil"
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
 )
@@ -234,6 +235,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case accessHistoryMsg:
 		m.accessHistory = msg
 		return m, nil
+
+	case noteCompleteMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+			return m, nil
+		}
+		m.statusMessage = fmt.Sprintf("Marked '%s' as completed", msg.filename)
+		// Trigger a refresh to remove the note from the list
+		return m, tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+			return tickMsg(t)
+		})
 
 	case editFileAndQuitMsg:
 		// Print protocol string and quit - Neovim plugin will handle the file opening
@@ -677,6 +689,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.statusMessage = "Error: Can only kill Claude sessions, not flow jobs"
 				}
+			}
+		} else if key.Matches(msg, m.keys.MarkComplete) {
+			if session := m.getCurrentSession(); session != nil && !m.showDetails {
+				return m, m.markNoteComplete(session)
 			}
 		} else if m.searchActive && !m.showDetails {
 			prevValue := m.filterInput.Value()
@@ -1171,4 +1187,39 @@ func (m Model) updateFilterView(msg tea.Msg) (tea.Model, tea.Cmd) {
 // SelectedSession returns the currently selected session (if any)
 func (m Model) SelectedSession() *models.Session {
 	return m.selectedSession
+}
+
+// markNoteComplete marks the given note as completed by updating its frontmatter
+func (m *Model) markNoteComplete(session *models.Session) tea.Cmd {
+	return func() tea.Msg {
+		// Read the note file
+		content, err := os.ReadFile(session.JobFilePath)
+		if err != nil {
+			return noteCompleteMsg{err: fmt.Errorf("failed to read note: %w", err)}
+		}
+
+		// Update the status to completed
+		updatedContent, err := orchestration.UpdateFrontmatter(content, map[string]interface{}{
+			"status": "completed",
+		})
+		if err != nil {
+			return noteCompleteMsg{err: fmt.Errorf("failed to update frontmatter: %w", err)}
+		}
+
+		// Write back to file
+		if err := os.WriteFile(session.JobFilePath, updatedContent, 0644); err != nil {
+			return noteCompleteMsg{err: fmt.Errorf("failed to write note: %w", err)}
+		}
+
+		return noteCompleteMsg{
+			sessionID: session.ID,
+			filename:  filepath.Base(session.JobFilePath),
+		}
+	}
+}
+
+type noteCompleteMsg struct {
+	sessionID string
+	filename  string
+	err       error
 }

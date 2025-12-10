@@ -24,6 +24,7 @@ type KeyMap struct {
 	Edit            key.Binding
 	Open            key.Binding
 	JumpToWorkspace key.Binding
+	MarkComplete    key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -38,7 +39,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			key.WithHelp("enter", "action"),
 		), k.Back, k.Select, k.SelectAll},
 		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.Edit, k.Open, k.CopyID, k.OpenDir, k.ExportJSON},
-		{k.Kill, k.Help, k.Quit},
+		{k.MarkComplete, k.Kill, k.Help, k.Quit},
 	}
 }
 
@@ -109,6 +110,10 @@ func NewKeyMap() KeyMap {
 		JumpToWorkspace: key.NewBinding(
 			key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),
 			key.WithHelp("1-9", "jump"),
+		),
+		MarkComplete: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "mark complete"),
 		),
 	}
 }
