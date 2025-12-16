@@ -77,6 +77,8 @@ github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuE
 github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
 github.com/mattsolo1/grove-context v0.5.0 h1:laQuLrg22GP9HyRGiOKlI6rmcsXtQ5hjUyfL4SPRmMo=
 github.com/mattsolo1/grove-context v0.5.0/go.mod h1:HMVUOpANNFE9ADG01JMyUcD5CvD4SSmID0ojzpf+AXM=
+github.com/mattsolo1/grove-core v0.4.0 h1:3Ggg/njGye9QFhf0j3F7oMMf/naaYKBV8zwfwvDxJz8=
+github.com/mattsolo1/grove-flow v0.3.0 h1:OdB2VPWNB4NV1DJOqcfaHiuuF/k1j/AzASTdrLy0qRE=
 github.com/mattsolo1/grove-gemini v0.2.0 h1:4jGgZdMRWJfcJ1IcUkKM0yNSMJS9eWViwvhUscLmsTA=
 github.com/mattsolo1/grove-gemini v0.2.0/go.mod h1:ZrZnVs2OhYhdhcP7dpGjhtiqmSbBeA2XvP0e4Yv36pQ=
 github.com/mattsolo1/grove-notifications v0.1.0 h1:H8NQaHLvrSF4+aDAWlV2GijcH24UG2S0VElM5b4UvJ8=

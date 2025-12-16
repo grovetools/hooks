@@ -6,7 +6,6 @@ require (
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/invopop/jsonschema v0.13.0
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/mattsolo1/grove-core v0.4.0
 	github.com/mattsolo1/grove-flow v0.3.0
@@ -35,7 +34,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
