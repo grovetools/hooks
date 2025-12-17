@@ -72,7 +72,8 @@ func ExpandPath(path string) string {
 			}
 		}
 
-		return filepath.Join(os.Getenv("HOME"), expandedPath)
+		homeDir, _ := os.UserHomeDir() // Intentionally ignoring error to match existing behavior
+		return filepath.Join(homeDir, expandedPath)
 	}
 	return path
 }

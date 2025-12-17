@@ -6,13 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/process"
 	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
+	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -73,7 +73,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	cleaned := 0
 
 	// 1. Clean up stale interactive Claude session directories
-	groveSessionsDir := ExpandPath("~/.grove/hooks/sessions")
+	groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
 	if _, err := os.Stat(groveSessionsDir); err == nil {
 		entries, err := os.ReadDir(groveSessionsDir)
 		if err == nil {
@@ -216,24 +216,6 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	}
 
 	return cleaned, nil
-}
-
-// ExpandPath expands ~ to home directory, respecting XDG_DATA_HOME for .grove paths
-func ExpandPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		expandedPath := path[2:]
-
-		// If the path is for .grove, respect XDG_DATA_HOME
-		if strings.HasPrefix(expandedPath, ".grove/") {
-			if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
-				// Use XDG_DATA_HOME/... (strip .grove/ prefix since XDG_DATA_HOME already points to .grove)
-				return filepath.Join(xdgDataHome, expandedPath[7:]) // Strip ".grove/"
-			}
-		}
-
-		return filepath.Join(os.Getenv("HOME"), expandedPath)
-	}
-	return path
 }
 
 // CleanupStaleFlowJobs discovers grove-flow jobs with stale lock files and updates their status

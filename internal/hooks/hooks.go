@@ -12,6 +12,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
+	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -218,7 +219,7 @@ func RunStopHook() {
 	// For interactive_agent sessions, the session directory is named with the Claude UUID,
 	// but the actual session_id is the flow job ID. Read metadata to get the correct ID.
 	actualSessionID := data.SessionID
-	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
 	metadataFile := filepath.Join(groveSessionsDir, data.SessionID, "metadata.json")
 	if metadataContent, err := os.ReadFile(metadataFile); err == nil {
 		var metadata struct {

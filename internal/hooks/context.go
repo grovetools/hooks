@@ -17,6 +17,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
+	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/mattsolo1/grove-tmux/pkg/tmux"
 )
 
@@ -124,7 +125,7 @@ func getCurrentBranch(workingDir string) string {
 // EnsureSessionExists creates a session if it doesn't exist
 func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath string) error {
 	// Create ~/.grove/hooks/sessions directory if it doesn't exist
-	groveSessionsDir := expandPath("~/.grove/hooks/sessions")
+	groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
 	if err := os.MkdirAll(groveSessionsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
@@ -219,7 +220,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	tmuxKey := ""
 
 	// Detect tmux key using tmux manager
-	configDir := expandPath("~/.config/tmux-claude-hud")
+	configDir := utils.ExpandPath("~/.config/tmux-claude-hud")
 	tmuxMgr, err := tmux.NewManager(configDir)
 	if err == nil && tmuxMgr != nil {
 		tmuxKey = tmuxMgr.DetectTmuxKeyForPath(workingDir)
@@ -347,22 +348,4 @@ func (hc *HookContext) GetSession(sessionID string) (*models.Session, error) {
 	}
 
 	return nil, fmt.Errorf("unexpected session type: %T", sessionData)
-}
-
-// expandPath expands ~ to home directory, respecting XDG_DATA_HOME for .grove paths
-func expandPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		expandedPath := path[2:]
-
-		// If the path is for .grove, respect XDG_DATA_HOME
-		if strings.HasPrefix(expandedPath, ".grove/") {
-			if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
-				// Use XDG_DATA_HOME/... (strip .grove/ prefix since XDG_DATA_HOME already points to .grove)
-				return filepath.Join(xdgDataHome, expandedPath[7:]) // Strip ".grove/"
-			}
-		}
-
-		return filepath.Join(os.Getenv("HOME"), expandedPath)
-	}
-	return path
 }
