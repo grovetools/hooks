@@ -119,10 +119,9 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 											} else {
 												cmd.Run()
 											}
-											// After completion, wait a bit then clean up the session directory
-											// This gives time for any retries or manual completions to read the metadata
+											// After completion, wait a bit for completion to finish
+											// Session directory is now preserved as permanent historical record
 											time.Sleep(10 * time.Second)
-											os.RemoveAll(sessDir)
 										}(metadata.JobFilePath, sessionDir)
 										cleaned++
 										continue // Skip the removal below
@@ -130,14 +129,11 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 								}
 							}
 
-							// Not a flow job, or couldn't read metadata - remove the directory
-							if err := os.RemoveAll(sessionDir); err == nil {
-								cleaned++
-								if os.Getenv("GROVE_DEBUG") != "" {
-									fmt.Printf("Cleaned up stale session directory: %s\n", sessionDir)
-								}
-							} else if os.Getenv("GROVE_DEBUG") != "" {
-								fmt.Fprintf(os.Stderr, "Warning: failed to remove session directory %s: %v\n", sessionDir, err)
+							// Not a flow job, or couldn't read metadata - preserve as historical record
+							// Session directories are now permanent and never deleted
+							cleaned++
+							if os.Getenv("GROVE_DEBUG") != "" {
+								fmt.Printf("Marked stale session as historical: %s\n", sessionDir)
 							}
 						}
 					}
