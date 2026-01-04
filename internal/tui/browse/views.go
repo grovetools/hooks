@@ -165,6 +165,8 @@ func (m Model) viewTable() string {
 					provider := "claude_code"
 					if s.Provider == "codex" {
 						provider = "codex"
+					} else if s.Provider == "opencode" {
+						provider = "opencode"
 					} else if s.Provider != "" && s.Provider != "claude" {
 						provider = s.Provider
 					}
