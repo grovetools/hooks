@@ -385,6 +385,138 @@ type flowJobsCacheData struct {
 	Sessions  []*models.Session `json:"sessions"`
 }
 
+// DiscoverOpenCodeSessions scans ~/.local/share/opencode/storage/ for OpenCode sessions.
+// This provides discovery for sessions started outside of grove-flow.
+func DiscoverOpenCodeSessions() ([]*models.Session, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("getting home directory: %w", err)
+	}
+
+	storageDir := filepath.Join(homeDir, ".local", "share", "opencode", "storage")
+	projectsDir := filepath.Join(storageDir, "project")
+	sessionsDir := filepath.Join(storageDir, "session")
+
+	// Check if OpenCode storage exists
+	if _, err := os.Stat(storageDir); os.IsNotExist(err) {
+		return []*models.Session{}, nil
+	}
+
+	// Load all projects to map project IDs to working directories
+	projectMap := make(map[string]string) // projectID -> worktree path
+	projectEntries, err := os.ReadDir(projectsDir)
+	if err == nil {
+		for _, entry := range projectEntries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+				projectPath := filepath.Join(projectsDir, entry.Name())
+				data, err := os.ReadFile(projectPath)
+				if err != nil {
+					continue
+				}
+
+				var project struct {
+					ID       string `json:"id"`
+					Worktree string `json:"worktree"`
+				}
+				if err := json.Unmarshal(data, &project); err != nil {
+					continue
+				}
+				projectMap[project.ID] = project.Worktree
+			}
+		}
+	}
+
+	var sessions []*models.Session
+
+	// Scan session directories (organized by project hash)
+	projectHashDirs, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return sessions, nil // Return empty if we can't read
+	}
+
+	for _, projectHashDir := range projectHashDirs {
+		if !projectHashDir.IsDir() {
+			continue
+		}
+
+		projectSessionsPath := filepath.Join(sessionsDir, projectHashDir.Name())
+		sessionFiles, err := os.ReadDir(projectSessionsPath)
+		if err != nil {
+			continue
+		}
+
+		for _, sessionFile := range sessionFiles {
+			if !strings.HasPrefix(sessionFile.Name(), "ses_") || !strings.HasSuffix(sessionFile.Name(), ".json") {
+				continue
+			}
+
+			sessionPath := filepath.Join(projectSessionsPath, sessionFile.Name())
+			data, err := os.ReadFile(sessionPath)
+			if err != nil {
+				continue
+			}
+
+			var session struct {
+				ID        string `json:"id"`
+				Version   string `json:"version"`
+				ProjectID string `json:"projectID"`
+				Directory string `json:"directory"`
+				Title     string `json:"title"`
+				Time      struct {
+					Created int64 `json:"created"`
+					Updated int64 `json:"updated"`
+				} `json:"time"`
+			}
+			if err := json.Unmarshal(data, &session); err != nil {
+				continue
+			}
+
+			// Determine the working directory
+			workDir := session.Directory
+			if workDir == "" {
+				workDir = projectMap[session.ProjectID]
+			}
+
+			// Parse repo and branch from working directory
+			repo := ""
+			branch := ""
+			if workDir != "" {
+				pathParts := strings.Split(workDir, string(filepath.Separator))
+				for i, part := range pathParts {
+					if part == ".grove-worktrees" && i > 0 && i+1 < len(pathParts) {
+						repo = pathParts[i-1]
+						branch = pathParts[i+1]
+						break
+					}
+				}
+				if repo == "" {
+					repo = filepath.Base(workDir)
+				}
+			}
+
+			// Convert timestamp (milliseconds to time.Time)
+			startedAt := time.Unix(0, session.Time.Created*int64(time.Millisecond))
+			lastActivity := time.Unix(0, session.Time.Updated*int64(time.Millisecond))
+
+			sessions = append(sessions, &models.Session{
+				ID:               session.ID,
+				Type:             "opencode_session",
+				Status:           "completed", // OpenCode sessions are read-only for now
+				Repo:             repo,
+				Branch:           branch,
+				WorkingDirectory: workDir,
+				User:             os.Getenv("USER"),
+				StartedAt:        startedAt,
+				LastActivity:     lastActivity,
+				JobTitle:         session.Title,
+				Provider:         "opencode",
+			})
+		}
+	}
+
+	return sessions, nil
+}
+
 // doFullDiscoveryScan performs a complete directory walk and job parsing
 func doFullDiscoveryScan() ([]*models.Session, error) {
 	// Load configuration
@@ -822,6 +954,15 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 		flowJobs = []*models.Session{}
 	}
 
+	// Discover OpenCode sessions
+	opencodeSessions, err := DiscoverOpenCodeSessions()
+	if err != nil {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "Warning: failed to discover OpenCode sessions: %v\n", err)
+		}
+		opencodeSessions = []*models.Session{}
+	}
+
 	// Get archived sessions from database
 	dbSessions, err := storage.GetAllSessions()
 	if err != nil {
@@ -833,6 +974,11 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 
 	// Add DB sessions first as a baseline
 	for _, session := range dbSessions {
+		sessionsMap[session.ID] = session
+	}
+
+	// Add OpenCode sessions
+	for _, session := range opencodeSessions {
 		sessionsMap[session.ID] = session
 	}
 
