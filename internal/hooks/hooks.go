@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/models"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
@@ -204,17 +206,33 @@ func RunPostToolUseHook() {
 }
 
 func RunStopHook() {
+	slog := logging.NewLogger("hooks.stop")
+	slog.Info("RunStopHook() called")
+
 	ctx, err := NewHookContext()
 	if err != nil {
-		log.Printf("Error initializing hook context: %v", err)
+		slog.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("Error initializing hook context")
 		os.Exit(1)
 	}
+	slog.WithFields(logrus.Fields{
+		"raw_input_length": len(ctx.RawInput),
+	}).Debug("HookContext initialized")
 
 	var data StopInput
 	if err := json.Unmarshal(ctx.RawInput, &data); err != nil {
-		log.Printf("Error parsing JSON: %v", err)
+		slog.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("Error parsing JSON")
 		os.Exit(1)
 	}
+
+	slog.WithFields(logrus.Fields{
+		"session_id":  data.SessionID,
+		"exit_reason": data.ExitReason,
+		"duration_ms": data.DurationMs,
+	}).Info("StopHook invoked")
 
 	// For interactive_agent sessions, the session directory is named with the Claude UUID,
 	// but the actual session_id is the flow job ID. Read metadata to get the correct ID.
@@ -227,7 +245,10 @@ func RunStopHook() {
 		}
 		if err := json.Unmarshal(metadataContent, &metadata); err == nil && metadata.SessionID != "" {
 			actualSessionID = metadata.SessionID
-			log.Printf("Using actual session ID from metadata: %s (directory: %s)", actualSessionID, data.SessionID)
+			slog.WithFields(logrus.Fields{
+				"actual_session_id": actualSessionID,
+				"directory":         data.SessionID,
+			}).Debug("Using session ID from metadata")
 		}
 	}
 
@@ -235,11 +256,15 @@ func RunStopHook() {
 	var sessionType string = "claude_session" // default
 	var workingDir string
 	var jobFilePath string
+	var provider string
 
 	// Get session data from storage directly to access type information
 	sessionData, err := ctx.Storage.GetSession(actualSessionID)
 	if err != nil {
-		log.Printf("Failed to get session details: %v", err)
+		slog.WithFields(logrus.Fields{
+			"session_id": actualSessionID,
+			"error":      err.Error(),
+		}).Warn("Failed to get session details")
 	} else if sessionData != nil {
 		// Check if it's an extended session with a type
 		if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
@@ -248,8 +273,22 @@ func RunStopHook() {
 			}
 			workingDir = extSession.WorkingDirectory
 			jobFilePath = extSession.JobFilePath
+			provider = extSession.Provider
+
+			slog.WithFields(logrus.Fields{
+				"session_id":    actualSessionID,
+				"session_type":  sessionType,
+				"provider":      provider,
+				"job_file_path": jobFilePath,
+				"working_dir":   workingDir,
+			}).Info("Session details retrieved")
 		} else if session, ok := sessionData.(*models.Session); ok {
 			workingDir = session.WorkingDirectory
+			slog.WithFields(logrus.Fields{
+				"session_id":   actualSessionID,
+				"session_type": sessionType,
+				"working_dir":  workingDir,
+			}).Info("Session details retrieved (basic session)")
 		}
 
 		// Execute repository-specific hook commands if we have a working directory
@@ -286,19 +325,83 @@ func RunStopHook() {
 	finalStatus := "idle"
 	isComplete := false
 
+	slog.WithFields(logrus.Fields{
+		"session_type": sessionType,
+		"provider":     provider,
+		"exit_reason":  data.ExitReason,
+	}).Debug("Determining session status")
+
 	if sessionType == "oneshot_job" {
 		// For oneshot jobs, always mark as completed when stop hook is called
 		finalStatus = "completed"
 		isComplete = true
-		log.Printf("Marking oneshot job session as completed")
+		slog.WithFields(logrus.Fields{
+			"session_type": sessionType,
+			"final_status": finalStatus,
+			"is_complete":  isComplete,
+			"reason":       "oneshot_job always completes on stop",
+		}).Info("Status decision: oneshot job completed")
+	} else if provider == "opencode" && (sessionType == "interactive_agent" || sessionType == "agent") {
+		// OpenCode agent exits after every turn. Don't mark as complete unless there's an error.
+		if data.ExitReason == "error" || data.ExitReason == "killed" || data.ExitReason == "interrupted" {
+			finalStatus = "failed"
+			isComplete = true
+			slog.WithFields(logrus.Fields{
+				"session_type": sessionType,
+				"provider":     provider,
+				"exit_reason":  data.ExitReason,
+				"final_status": finalStatus,
+				"is_complete":  isComplete,
+				"reason":       "opencode session failed",
+			}).Info("Status decision: opencode session failed")
+		} else if data.ExitReason == "completed" {
+			finalStatus = "completed"
+			isComplete = true
+			slog.WithFields(logrus.Fields{
+				"session_type": sessionType,
+				"provider":     provider,
+				"exit_reason":  data.ExitReason,
+				"final_status": finalStatus,
+				"is_complete":  isComplete,
+				"reason":       "opencode session explicitly completed",
+			}).Info("Status decision: opencode session completed")
+		} else {
+			// Normal end-of-turn exit - set to idle, not complete
+			finalStatus = "idle"
+			isComplete = false
+			slog.WithFields(logrus.Fields{
+				"session_type": sessionType,
+				"provider":     provider,
+				"exit_reason":  data.ExitReason,
+				"final_status": finalStatus,
+				"is_complete":  isComplete,
+				"reason":       "opencode end-of-turn, keeping idle",
+			}).Info("Status decision: opencode session idle (end-of-turn)")
+		}
 	} else {
-		// For regular claude sessions, use exit reason to determine status
+		// For regular claude/codex sessions, use exit reason to determine status
 		if data.ExitReason == "completed" || data.ExitReason == "error" || data.ExitReason == "interrupted" || data.ExitReason == "killed" {
 			finalStatus = "completed"
 			isComplete = true
+			slog.WithFields(logrus.Fields{
+				"session_type": sessionType,
+				"provider":     provider,
+				"exit_reason":  data.ExitReason,
+				"final_status": finalStatus,
+				"is_complete":  isComplete,
+				"reason":       "terminal exit reason",
+			}).Info("Status decision: session completed")
 		} else {
 			// Normal end-of-turn stop (empty exit_reason or other) - set to idle
 			finalStatus = "idle"
+			slog.WithFields(logrus.Fields{
+				"session_type": sessionType,
+				"provider":     provider,
+				"exit_reason":  data.ExitReason,
+				"final_status": finalStatus,
+				"is_complete":  isComplete,
+				"reason":       "non-terminal exit reason",
+			}).Info("Status decision: session idle")
 		}
 	}
 
@@ -307,37 +410,57 @@ func RunStopHook() {
 		log.Printf("Failed to update session status: %v", err)
 	}
 
-	// Handle session directory cleanup based on completion status
-	// Note: directory is always named with the original Claude UUID (data.SessionID)
-	sessionDir := filepath.Join(groveSessionsDir, data.SessionID)
+	// Handle session completion
+	// Note: session directory is always named with the original Claude UUID (data.SessionID)
+	// Session directory path would be: filepath.Join(groveSessionsDir, data.SessionID)
 
 	if isComplete {
+		slog.WithFields(logrus.Fields{
+			"session_id":    actualSessionID,
+			"final_status":  finalStatus,
+			"job_file_path": jobFilePath,
+		}).Info("Session marked as complete, processing completion actions")
+
 		// If this session is linked to a grove-flow job, automatically complete it
 		// Only do this when the session is actually complete, not when it's just going idle
 		if jobFilePath != "" {
-			log.Printf("Session is linked to flow job: %s. Marking as complete.", jobFilePath)
+			slog.WithFields(logrus.Fields{
+				"job_file_path": jobFilePath,
+			}).Info("Auto-completing linked flow job")
 			cmd := exec.Command("grove", "flow", "plan", "complete", jobFilePath)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				// This isn't a fatal error for the hook itself, so just log it.
 				// The command might fail if the job is already complete, which is fine.
-				log.Printf("Failed to auto-complete flow job (this may be expected): %v\nOutput: %s", err, string(output))
+				slog.WithFields(logrus.Fields{
+					"job_file_path": jobFilePath,
+					"error":         err.Error(),
+					"output":        string(output),
+				}).Warn("Failed to auto-complete flow job (may be expected)")
 			} else {
-				log.Printf("Successfully marked flow job as complete.")
+				slog.WithFields(logrus.Fields{
+					"job_file_path": jobFilePath,
+				}).Info("Successfully auto-completed flow job")
 			}
 		}
 
-		// Session is complete - archive metadata to DB and delete directory
+		// Session is complete - archive metadata to DB
 		// The metadata has already been written to the DB by previous hooks
-		// Now we can safely delete the session directory
-		if err := os.RemoveAll(sessionDir); err != nil {
-			log.Printf("Warning: failed to remove session directory %s: %v", sessionDir, err)
-		} else {
-			log.Printf("Removed session directory for completed session: %s (actual ID: %s)", data.SessionID, actualSessionID)
-		}
+		// -----------------------------------------------------------------------
+		// DELETION LOGIC REMOVED TO PREVENT RACE CONDITION WITH TRANSCRIPT ARCHIVING
+		// Cleanup is now handled by 'grove-hooks sessions cleanup'
+		// -----------------------------------------------------------------------
+		slog.WithFields(logrus.Fields{
+			"session_id":        data.SessionID,
+			"actual_session_id": actualSessionID,
+		}).Debug("Session directory preserved for transcript archiving")
 
 		// Send ntfy notification for completed sessions
 		sendNtfyNotification(ctx, data, "completed")
 	} else {
+		slog.WithFields(logrus.Fields{
+			"session_id":   actualSessionID,
+			"final_status": finalStatus,
+		}).Info("Session set to idle, preserving directory for resumption")
 		// Session is idle - keep directory for later resumption
 		// Just send notification
 		sendNtfyNotification(ctx, data, "stopped")
