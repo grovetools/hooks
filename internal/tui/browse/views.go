@@ -342,6 +342,8 @@ func (m Model) viewTree() string {
 					provider := "claude_code"
 					if s.Provider == "codex" {
 						provider = "codex"
+					} else if s.Provider == "opencode" {
+						provider = "opencode"
 					} else if s.Provider != "" && s.Provider != "claude" {
 						provider = s.Provider
 					}
@@ -523,6 +525,20 @@ func (m Model) viewDetails() string {
 	statusStyle := getStatusStyle(s.Status)
 	content.WriteString(components.RenderKeyValue("Status", statusStyle.Render(s.Status)))
 	content.WriteString("\n")
+
+	// Show provider for interactive session types
+	if s.Type == "interactive_agent" || s.Type == "" || s.Type == "claude_session" {
+		provider := "claude_code"
+		if s.Provider == "codex" {
+			provider = "codex"
+		} else if s.Provider == "opencode" {
+			provider = "opencode"
+		} else if s.Provider != "" && s.Provider != "claude" {
+			provider = s.Provider
+		}
+		content.WriteString(components.RenderKeyValue("Provider", provider))
+		content.WriteString("\n")
+	}
 
 	if s.Repo != "" {
 		content.WriteString(components.RenderKeyValue("Repository", s.Repo))

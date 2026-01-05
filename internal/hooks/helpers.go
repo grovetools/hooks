@@ -269,11 +269,77 @@ func getWorkingDirectory(session interface{}) string {
 	if extSession, ok := session.(*disk.ExtendedSession); ok {
 		return extSession.WorkingDirectory
 	}
-	
+
 	// Check if it's a regular session
 	if baseSession, ok := session.(*models.Session); ok {
 		return baseSession.WorkingDirectory
 	}
-	
+
 	return ""
+}
+
+// updateJobFileStatus updates the status field in a grove-flow job file's YAML frontmatter
+func updateJobFileStatus(jobFilePath, newStatus string) error {
+	if jobFilePath == "" {
+		return fmt.Errorf("job file path is empty")
+	}
+
+	// Read the file
+	content, err := os.ReadFile(jobFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read job file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	// Find the frontmatter boundaries and the status line
+	inFrontmatter := false
+	frontmatterStart := -1
+	frontmatterEnd := -1
+	statusLineIdx := -1
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+				frontmatterStart = i
+			} else {
+				frontmatterEnd = i
+				break
+			}
+		} else if inFrontmatter && strings.HasPrefix(trimmed, "status:") {
+			statusLineIdx = i
+		}
+	}
+
+	if frontmatterStart == -1 || frontmatterEnd == -1 {
+		return fmt.Errorf("could not find YAML frontmatter in job file")
+	}
+
+	if statusLineIdx == -1 {
+		return fmt.Errorf("could not find status field in frontmatter")
+	}
+
+	// Get the indentation from the original line
+	originalLine := lines[statusLineIdx]
+	indent := ""
+	for _, ch := range originalLine {
+		if ch == ' ' || ch == '\t' {
+			indent += string(ch)
+		} else {
+			break
+		}
+	}
+
+	// Update the status line
+	lines[statusLineIdx] = fmt.Sprintf("%sstatus: %s", indent, newStatus)
+
+	// Write the file back
+	newContent := strings.Join(lines, "\n")
+	if err := os.WriteFile(jobFilePath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write job file: %w", err)
+	}
+
+	return nil
 }

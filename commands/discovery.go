@@ -287,8 +287,14 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 
 		if !isAlive {
 			// Process is dead. Check if this is a flow job that should be auto-completed.
-			if (metadata.Type == "interactive_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {
-				// This is a dead flow job. Delegate to 'flow plan complete' in the background
+			// IMPORTANT: Never auto-complete opencode sessions - they use --prompt mode and
+			// stay running between turns. The PID check doesn't work reliably for opencode.
+			if metadata.Provider == "opencode" {
+				// Don't auto-complete opencode sessions. The user must explicitly complete them.
+				// Just mark as interrupted for display purposes.
+				status = "interrupted"
+			} else if (metadata.Type == "interactive_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {
+				// This is a dead flow job (non-opencode). Delegate to 'flow plan complete' in the background
 				// to avoid blocking the session list command.
 				// Note: We keep the session directory so that flow plan complete can read the metadata
 				// to close the tmux window. The directory will be cleaned up after completion.
@@ -325,9 +331,17 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 			// Process is alive, enrich with DB data if available
 			// For interactive_agent sessions, check both the flow job ID and Claude UUID
 			dbSessionData, err := storage.GetSession(sessionID)
+			logrus.WithFields(logrus.Fields{
+				"session_id":    sessionID,
+				"db_lookup_err": err != nil,
+			}).Debug("DB lookup for session")
 			if err != nil && claudeSessionID != "" && claudeSessionID != sessionID {
 				// Try the Claude UUID if the flow job ID lookup failed
 				dbSessionData, err = storage.GetSession(claudeSessionID)
+				logrus.WithFields(logrus.Fields{
+					"claude_session_id": claudeSessionID,
+					"db_lookup_err":     err != nil,
+				}).Debug("DB lookup by Claude UUID")
 			}
 
 			if err == nil {
@@ -350,12 +364,21 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 				if !dbLastActivity.IsZero() {
 					lastActivity = dbLastActivity // Use DB value
 				}
+			} else if metadata.JobFilePath != "" {
+				// Fallback: Read job file status directly from YAML frontmatter
+				// This handles cases where the session isn't in the DB yet (e.g., opencode sessions)
+				// We parse manually instead of using orchestration.LoadJob() to avoid version
+				// compatibility issues with newer status values like "idle"
+				if jobStatus := readJobFileStatus(metadata.JobFilePath); jobStatus == "idle" {
+					status = "idle"
+				}
 			}
 		}
 
 		// Create session object
 		session := &models.Session{
 			ID:               sessionID,
+			Type:             metadata.Type,
 			ClaudeSessionID:  claudeSessionID,
 			PID:              pid,
 			Repo:             metadata.Repo,
@@ -1551,4 +1574,42 @@ func sendJobReadyNotification(session *models.Session) {
 	if len(cfg.System.Levels) > 0 {
 		_ = notifications.SendSystem(title, message, "info")
 	}
+}
+
+// readJobFileStatus reads just the status field from a job file's YAML frontmatter.
+// This is a lightweight alternative to orchestration.LoadJob() that avoids status validation
+// issues when newer status values (like "idle") aren't recognized by older grove-flow versions.
+func readJobFileStatus(jobFilePath string) string {
+	content, err := os.ReadFile(jobFilePath)
+	if err != nil {
+		return ""
+	}
+
+	// Parse YAML frontmatter (between --- markers)
+	contentStr := string(content)
+	if !strings.HasPrefix(contentStr, "---") {
+		return ""
+	}
+
+	// Find the end of frontmatter
+	endIdx := strings.Index(contentStr[3:], "\n---")
+	if endIdx == -1 {
+		return ""
+	}
+
+	frontmatter := contentStr[3 : 3+endIdx]
+
+	// Look for status: line
+	for _, line := range strings.Split(frontmatter, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "status:") {
+			status := strings.TrimPrefix(line, "status:")
+			status = strings.TrimSpace(status)
+			// Remove quotes if present
+			status = strings.Trim(status, "\"'")
+			return status
+		}
+	}
+
+	return ""
 }
