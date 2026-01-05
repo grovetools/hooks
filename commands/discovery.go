@@ -294,36 +294,54 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 				// Just mark as interrupted for display purposes.
 				status = "interrupted"
 			} else if (metadata.Type == "interactive_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {
-				// This is a dead flow job (non-opencode). Delegate to 'flow plan complete' in the background
-				// to avoid blocking the session list command.
-				// Note: We keep the session directory so that flow plan complete can read the metadata
-				// to close the tmux window. The directory will be cleaned up after completion.
-				go func(jobPath, sessDir string) {
-					cmd := exec.Command("grove", "flow", "plan", "complete", jobPath)
-					// We can log errors for debugging but don't need to block on them.
-					// This is a best-effort, self-healing mechanism.
-					if os.Getenv("GROVE_DEBUG") != "" {
-						output, err := cmd.CombinedOutput()
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "Debug: Auto-completion of dead flow job %s failed: %v\nOutput: %s\n", jobPath, err, string(output))
+				// Check grace period before auto-completing
+				// Sessions that just started may have PID 0 briefly during initialization
+				gracePeriod := 30 * time.Second
+				sessionAge := time.Since(metadata.StartedAt)
+				if sessionAge < gracePeriod {
+					// Session is very new, likely still initializing. Mark as interrupted but don't auto-complete.
+					logrus.WithFields(logrus.Fields{
+						"session_id":   sessionID,
+						"session_age":  sessionAge.String(),
+						"grace_period": gracePeriod.String(),
+						"job_path":     metadata.JobFilePath,
+					}).Debug("Session within grace period, skipping auto-completion")
+					status = "interrupted"
+				} else {
+					// This is a dead flow job (non-opencode) past the grace period.
+					// Delegate to 'flow plan complete' in the background to avoid blocking the session list command.
+					// Note: We keep the session directory so that flow plan complete can read the metadata
+					// to close the tmux window. The directory will be cleaned up after completion.
+					go func(jobPath, sessDir string) {
+						cmd := exec.Command("grove", "flow", "plan", "complete", jobPath)
+						// We can log errors for debugging but don't need to block on them.
+						// This is a best-effort, self-healing mechanism.
+						if os.Getenv("GROVE_DEBUG") != "" {
+							output, err := cmd.CombinedOutput()
+							if err != nil {
+								fmt.Fprintf(os.Stderr, "Debug: Auto-completion of dead flow job %s failed: %v\nOutput: %s\n", jobPath, err, string(output))
+							} else {
+								fmt.Fprintf(os.Stderr, "Debug: Auto-completed dead flow job %s\n", jobPath)
+							}
 						} else {
-							fmt.Fprintf(os.Stderr, "Debug: Auto-completed dead flow job %s\n", jobPath)
+							cmd.Run()
 						}
-					} else {
-						cmd.Run()
-					}
-					// After completion, wait a bit then clean up the session directory
-					// This gives time for any retries or manual completions to read the metadata
-					time.Sleep(10 * time.Second)
-					os.RemoveAll(sessDir)
-				}(metadata.JobFilePath, sessionDir)
+						// After completion, wait a bit then clean up the session directory
+						// This gives time for any retries or manual completions to read the metadata
+						time.Sleep(10 * time.Second)
+						os.RemoveAll(sessDir)
+					}(metadata.JobFilePath, sessionDir)
+					status = "interrupted"
+				}
 			} else {
 				// This is a standard Claude session that died unexpectedly. Clean up its directory.
 				go os.RemoveAll(sessionDir)
 			}
 
 			// For the current view, show the session as interrupted. It will be updated on the next refresh.
-			status = "interrupted"
+			if status != "interrupted" {
+				status = "interrupted"
+			}
 			now := time.Now()
 			endedAt = &now
 			lastActivity = now
