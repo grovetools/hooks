@@ -306,9 +306,9 @@ func (s *SQLiteStore) EnsureSessionExists(session interface{}) error {
 // GetSession retrieves a session by ID
 func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 	query := `
-	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, COALESCE(tmux_key, ''), working_directory, user,
 		status, started_at, ended_at, last_activity, is_test,
-		tool_stats, session_summary,
+		COALESCE(tool_stats, ''), COALESCE(session_summary, ''),
 		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
 		COALESCE(job_title, ''), COALESCE(job_file_path, ''), COALESCE(claude_session_id, ''),
 		COALESCE(project_name, ''), COALESCE(is_worktree, 0), COALESCE(is_ecosystem, 0), COALESCE(parent_ecosystem_path, ''),
@@ -366,9 +366,9 @@ func (s *SQLiteStore) GetSession(sessionID string) (interface{}, error) {
 // GetAllExtendedSessions retrieves all sessions as ExtendedSession objects
 func (s *SQLiteStore) GetAllExtendedSessions() ([]*ExtendedSession, error) {
 	query := `
-	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, COALESCE(tmux_key, ''), working_directory, user,
 		status, started_at, ended_at, last_activity, is_test,
-		tool_stats, session_summary,
+		COALESCE(tool_stats, ''), COALESCE(session_summary, ''),
 		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
 		COALESCE(job_title, ''), COALESCE(job_file_path, ''), COALESCE(claude_session_id, ''),
 		COALESCE(project_name, ''), COALESCE(is_worktree, 0), COALESCE(is_ecosystem, 0), COALESCE(parent_ecosystem_path, ''),
@@ -438,9 +438,9 @@ func (s *SQLiteStore) GetAllExtendedSessions() ([]*ExtendedSession, error) {
 // GetAllSessions retrieves all sessions
 func (s *SQLiteStore) GetAllSessions() ([]*models.Session, error) {
 	query := `
-	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, tmux_key, working_directory, user,
+	SELECT id, COALESCE(type, 'claude_session'), pid, repo, branch, COALESCE(tmux_key, ''), working_directory, user,
 		status, started_at, ended_at, last_activity, is_test,
-		tool_stats, session_summary,
+		COALESCE(tool_stats, ''), COALESCE(session_summary, ''),
 		COALESCE(plan_name, ''), COALESCE(plan_directory, ''),
 		COALESCE(job_title, ''), COALESCE(job_file_path, ''), COALESCE(claude_session_id, ''),
 		COALESCE(project_name, ''), COALESCE(is_worktree, 0), COALESCE(is_ecosystem, 0), COALESCE(parent_ecosystem_path, ''),

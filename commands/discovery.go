@@ -983,7 +983,11 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 	}
 
 	// Add/update with flow jobs, which are more authoritative for job-related metadata
+	// But preserve Provider from existing sessions since flow job files don't store provider info
 	for _, session := range flowJobs {
+		if existing, ok := sessionsMap[session.ID]; ok && existing.Provider != "" && session.Provider == "" {
+			session.Provider = existing.Provider
+		}
 		sessionsMap[session.ID] = session
 	}
 

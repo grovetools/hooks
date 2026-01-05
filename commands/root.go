@@ -23,6 +23,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewInstallCmd())
 	rootCmd.AddCommand(NewVersionCmd())
 	rootCmd.AddCommand(NewDebugWorkspacesCmd())
+	rootCmd.AddCommand(NewOpencodeCmd())
 
 	tuiCmd := NewBrowseCmd()
 	tuiCmd.Use = "tui"

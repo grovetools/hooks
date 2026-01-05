@@ -41,6 +41,7 @@ func loadFilterPreferences() browse.FilterPreferences {
 			"headless_agent":    true,
 			"agent":             true,
 			"shell":             true,
+			"opencode_session":  true,
 		},
 	}
 

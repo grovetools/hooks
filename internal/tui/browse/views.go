@@ -580,7 +580,7 @@ func (m Model) viewFilterOptions() string {
 	content.WriteString(t.Header.Render("Filter Options") + "\n\n")
 
 	statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error", "hold", "todo", "abandoned"}
-	typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
+	typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell", "opencode_session"}
 
 	var rows [][]string
 	rows = append(rows, []string{t.Muted.Render("STATUS FILTERS"), ""})
@@ -751,6 +751,8 @@ func getJobTypeIcon(jobType string) string {
 		return theme.IconHeadlessAgent
 	case "shell":
 		return theme.IconShell
+	case "opencode_session":
+		return theme.IconCode
 	default:
 		return theme.IconOneshot
 	}
