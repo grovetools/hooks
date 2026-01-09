@@ -318,6 +318,7 @@ func getClaudePID() int {
 	if pidStr := os.Getenv("CLAUDE_PID"); pidStr != "" {
 		if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
 			if os.Getenv("GROVE_DEBUG") != "" {
+				// Debug output - using simple fmt for GROVE_DEBUG mode
 				fmt.Printf("Using CLAUDE_PID from env: %d\n", pid)
 			}
 			return pid
@@ -328,6 +329,7 @@ func getClaudePID() int {
 	// In the future, we could use more sophisticated process tree walking
 	ppid := os.Getppid()
 	if os.Getenv("GROVE_DEBUG") != "" {
+		// Debug output - using simple fmt for GROVE_DEBUG mode
 		fmt.Printf("Using parent PID: %d (current PID: %d)\n", ppid, os.Getpid())
 	}
 	return ppid

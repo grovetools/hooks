@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/process"
 	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
@@ -19,11 +21,15 @@ import (
 func NewCleanupCmd() *cobra.Command {
 	var inactivityMinutes int
 
+	ulog := grovelogging.NewUnifiedLogger("grove-hooks.cleanup")
+
 	cmd := &cobra.Command{
 		Use:   "cleanup",
 		Short: "Clean up inactive sessions",
 		Long:  `Check all running and idle sessions and mark those that have been inactive for too long as completed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+
 			// Create storage
 			storage, err := disk.NewSQLiteStore()
 			if err != nil {
@@ -46,9 +52,15 @@ func NewCleanupCmd() *cobra.Command {
 			// Output summary
 			totalCleaned := cleanedSessions + cleanedJobs
 			if totalCleaned > 0 {
-				fmt.Printf("Cleaned up %d dead session(s) and %d stale job(s)\n", cleanedSessions, cleanedJobs)
+				ulog.Success("Cleanup completed").
+					Field("cleaned_sessions", cleanedSessions).
+					Field("cleaned_jobs", cleanedJobs).
+					Pretty(fmt.Sprintf("Cleaned up %d dead session(s) and %d stale job(s)", cleanedSessions, cleanedJobs)).
+					Log(ctx)
 			} else {
-				fmt.Println("No dead sessions or stale jobs found")
+				ulog.Info("No cleanup needed").
+					Pretty("No dead sessions or stale jobs found").
+					Log(ctx)
 			}
 
 			return nil

@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-hooks/internal/opencode/plugin"
 	"github.com/spf13/cobra"
 )
@@ -33,6 +35,9 @@ automatically appear in the grove-hooks TUI with live status updates.`,
 }
 
 func runOpencodeInstall(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	ulog := grovelogging.NewUnifiedLogger("grove-hooks.opencode")
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("could not get home directory: %w", err)
@@ -50,8 +55,13 @@ func runOpencodeInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write opencode plugin: %w", err)
 	}
 
-	fmt.Printf("✓ Grove integration plugin for opencode installed at: %s\n", pluginPath)
-	fmt.Println("Please restart opencode for the plugin to take effect.")
+	ulog.Success("Grove integration plugin installed").
+		Field("plugin_path", pluginPath).
+		Pretty(fmt.Sprintf("✓ Grove integration plugin for opencode installed at: %s", pluginPath)).
+		Log(ctx)
+	ulog.Info("Restart required").
+		Pretty("Please restart opencode for the plugin to take effect.").
+		Log(ctx)
 
 	return nil
 }

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/tui/browse"
@@ -86,12 +88,16 @@ func saveFilterPreferences(prefs browse.FilterPreferences) error {
 func NewBrowseCmd() *cobra.Command {
 	var hideCompleted bool
 
+	ulog := grovelogging.NewUnifiedLogger("grove-hooks.browse")
+
 	cmd := &cobra.Command{
 		Use:     "browse",
 		Aliases: []string{"b"},
 		Short:   "Browse sessions interactively",
 		Long:    `Launch an interactive terminal UI to browse all sessions (Claude sessions and grove-flow jobs). Navigate with arrow keys, search by typing, and select sessions to view details.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+
 			// Enable background cache refresh for the TUI (long-running)
 			EnableBackgroundRefresh()
 			StartBackgroundRefresh()
@@ -113,7 +119,7 @@ func NewBrowseCmd() *cobra.Command {
 			}
 
 			if len(sessions) == 0 {
-				fmt.Println("No sessions found")
+				ulog.Info("No sessions found").Log(ctx)
 				return nil
 			}
 
@@ -162,12 +168,16 @@ func NewBrowseCmd() *cobra.Command {
 					bm.CommandOnExit.Stdout = os.Stdout
 					bm.CommandOnExit.Stderr = os.Stderr
 					if err := bm.CommandOnExit.Run(); err != nil {
-						fmt.Fprintf(os.Stderr, "Error executing command on exit: %v\n", err)
+						ulog.Error("Error executing command on exit").
+							Err(err).
+							Log(ctx)
 					}
 					return nil // Exit cleanly after command.
 				}
 				if bm.MessageOnExit != "" {
-					fmt.Println(bm.MessageOnExit)
+					ulog.Info("Exit message").
+						Pretty(bm.MessageOnExit).
+						Log(ctx)
 					return nil
 				}
 
@@ -175,13 +185,23 @@ func NewBrowseCmd() *cobra.Command {
 				if bm.SelectedSession() != nil {
 					// Output the selected session details
 					s := bm.SelectedSession()
-					fmt.Printf("\nSelected Session: %s\n", s.ID)
-					fmt.Printf("Status: %s\n", s.Status)
-					fmt.Printf("Type: %s\n", s.Type)
-					if s.Repo != "" {
-						fmt.Printf("Repo: %s/%s\n", s.Repo, s.Branch)
-					}
-					fmt.Printf("Working Directory: %s\n", s.WorkingDirectory)
+					ulog.Info("Session selected").
+						Field("session_id", s.ID).
+						Field("status", s.Status).
+						Field("type", s.Type).
+						Field("repo", s.Repo).
+						Field("branch", s.Branch).
+						Field("working_directory", s.WorkingDirectory).
+						Pretty(fmt.Sprintf("\nSelected Session: %s\nStatus: %s\nType: %s\n%sWorking Directory: %s",
+							s.ID, s.Status, s.Type,
+							func() string {
+								if s.Repo != "" {
+									return fmt.Sprintf("Repo: %s/%s\n", s.Repo, s.Branch)
+								}
+								return ""
+							}(),
+							s.WorkingDirectory)).
+						Log(ctx)
 				}
 			}
 
