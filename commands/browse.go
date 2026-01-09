@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,7 +95,6 @@ func NewBrowseCmd() *cobra.Command {
 		Short:   "Browse sessions interactively",
 		Long:    `Launch an interactive terminal UI to browse all sessions (Claude sessions and grove-flow jobs). Navigate with arrow keys, search by typing, and select sessions to view details.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
 
 			// Enable background cache refresh for the TUI (long-running)
 			EnableBackgroundRefresh()
@@ -119,7 +117,7 @@ func NewBrowseCmd() *cobra.Command {
 			}
 
 			if len(sessions) == 0 {
-				ulog.Info("No sessions found").Log(ctx)
+				ulog.Info("No sessions found").Emit()
 				return nil
 			}
 
@@ -170,14 +168,14 @@ func NewBrowseCmd() *cobra.Command {
 					if err := bm.CommandOnExit.Run(); err != nil {
 						ulog.Error("Error executing command on exit").
 							Err(err).
-							Log(ctx)
+							Emit()
 					}
 					return nil // Exit cleanly after command.
 				}
 				if bm.MessageOnExit != "" {
 					ulog.Info("Exit message").
 						Pretty(bm.MessageOnExit).
-						Log(ctx)
+						Emit()
 					return nil
 				}
 
@@ -201,7 +199,7 @@ func NewBrowseCmd() *cobra.Command {
 								return ""
 							}(),
 							s.WorkingDirectory)).
-						Log(ctx)
+						Emit()
 				}
 			}
 

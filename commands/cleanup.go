@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,7 +27,6 @@ func NewCleanupCmd() *cobra.Command {
 		Short: "Clean up inactive sessions",
 		Long:  `Check all running and idle sessions and mark those that have been inactive for too long as completed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
 
 			// Create storage
 			storage, err := disk.NewSQLiteStore()
@@ -56,11 +54,11 @@ func NewCleanupCmd() *cobra.Command {
 					Field("cleaned_sessions", cleanedSessions).
 					Field("cleaned_jobs", cleanedJobs).
 					Pretty(fmt.Sprintf("Cleaned up %d dead session(s) and %d stale job(s)", cleanedSessions, cleanedJobs)).
-					Log(ctx)
+					Emit()
 			} else {
 				ulog.Info("No cleanup needed").
 					Pretty("No dead sessions or stale jobs found").
-					Log(ctx)
+					Emit()
 			}
 
 			return nil

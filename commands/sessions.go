@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -176,8 +175,7 @@ func newSessionsListCmd() *cobra.Command {
 
 			// Table output
 			if len(sessions) == 0 {
-				ctx := context.Background()
-				ulog.Info("No sessions found").Log(ctx)
+				ulog.Info("No sessions found").Emit()
 				return nil
 			}
 
@@ -353,13 +351,12 @@ func newSessionsGetCmd() *cobra.Command {
 			}
 
 			// Detailed text output
-			ctx := context.Background()
 			ulog.Info("Session details retrieved").
 				Field("session_id", baseSession.ID).
 				Field("type", sessionType).
 				Field("status", baseSession.Status).
 				Pretty(fmt.Sprintf("Session ID: %s\nType: %s\nStatus: %s", baseSession.ID, sessionType, baseSession.Status)).
-				Log(ctx)
+				Emit()
 
 			if sessionType == "job" {
 				// Oneshot job specific fields
@@ -367,25 +364,25 @@ func newSessionsGetCmd() *cobra.Command {
 					ulog.Info("Session plan").
 						Field("plan", planName).
 						Pretty(fmt.Sprintf("Plan: %s", planName)).
-						Log(ctx)
+						Emit()
 				}
 				if planDirectory != "" {
 					ulog.Info("Session plan directory").
 						Field("plan_directory", planDirectory).
 						Pretty(fmt.Sprintf("Plan Directory: %s", planDirectory)).
-						Log(ctx)
+						Emit()
 				}
 				if jobTitle != "" {
 					ulog.Info("Session job title").
 						Field("job_title", jobTitle).
 						Pretty(fmt.Sprintf("Job Title: %s", jobTitle)).
-						Log(ctx)
+						Emit()
 				}
 				if jobFilePath != "" {
 					ulog.Info("Session job file").
 						Field("job_file", jobFilePath).
 						Pretty(fmt.Sprintf("Job File: %s", jobFilePath)).
-						Log(ctx)
+						Emit()
 				}
 			} else {
 				// Claude session specific fields
@@ -393,7 +390,7 @@ func newSessionsGetCmd() *cobra.Command {
 					Field("repository", baseSession.Repo).
 					Field("branch", baseSession.Branch).
 					Pretty(fmt.Sprintf("Repository: %s\nBranch: %s", baseSession.Repo, baseSession.Branch)).
-					Log(ctx)
+					Emit()
 			}
 
 			ulog.Info("Session user and environment").
@@ -401,12 +398,12 @@ func newSessionsGetCmd() *cobra.Command {
 				Field("working_directory", baseSession.WorkingDirectory).
 				Field("pid", baseSession.PID).
 				Pretty(fmt.Sprintf("User: %s\nWorking Directory: %s\nPID: %d", baseSession.User, baseSession.WorkingDirectory, baseSession.PID)).
-				Log(ctx)
+				Emit()
 
 			ulog.Info("Session started").
 				Field("started_at", baseSession.StartedAt).
 				Pretty(fmt.Sprintf("Started: %s", baseSession.StartedAt.Format(time.RFC3339))).
-				Log(ctx)
+				Emit()
 
 			if baseSession.EndedAt != nil {
 				duration := baseSession.EndedAt.Sub(baseSession.StartedAt).Round(time.Second)
@@ -414,14 +411,14 @@ func newSessionsGetCmd() *cobra.Command {
 					Field("ended_at", baseSession.EndedAt).
 					Field("duration_seconds", duration.Seconds()).
 					Pretty(fmt.Sprintf("Ended: %s\nDuration: %s", baseSession.EndedAt.Format(time.RFC3339), duration)).
-					Log(ctx)
+					Emit()
 			}
 
 			if baseSession.TmuxKey != "" {
 				ulog.Info("Session tmux key").
 					Field("tmux_key", baseSession.TmuxKey).
 					Pretty(fmt.Sprintf("Tmux Key: %s", baseSession.TmuxKey)).
-					Log(ctx)
+					Emit()
 			}
 
 			if baseSession.ToolStats != nil {
@@ -437,7 +434,7 @@ func newSessionsGetCmd() *cobra.Command {
 						baseSession.ToolStats.FileModifications,
 						baseSession.ToolStats.FileReads,
 						baseSession.ToolStats.SearchOperations)).
-					Log(ctx)
+					Emit()
 			}
 
 			return nil
@@ -522,8 +519,7 @@ You can archive specific sessions by ID or use flags to archive multiple session
 			}
 
 			if len(sessionIDs) == 0 {
-				ctx := context.Background()
-				ulog.Info("No sessions to archive").Log(ctx)
+				ulog.Info("No sessions to archive").Emit()
 				return nil
 			}
 
@@ -532,11 +528,10 @@ You can archive specific sessions by ID or use flags to archive multiple session
 				return fmt.Errorf("failed to archive sessions: %w", err)
 			}
 
-			ctx := context.Background()
 			ulog.Success("Sessions archived").
 				Field("count", len(sessionIDs)).
 				Pretty(fmt.Sprintf("Archived %d session(s)", len(sessionIDs))).
-				Log(ctx)
+				Emit()
 			return nil
 		},
 	}
@@ -564,7 +559,6 @@ This updates the job frontmatter files directly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			updated := 0
 
-			ctx := context.Background()
 
 			// Discover all workspaces using grove-core
 			discoveryService := workspace.NewDiscoveryService(nil)
@@ -572,7 +566,7 @@ This updates the job frontmatter files directly.`,
 			if err != nil {
 				ulog.Warn("Failed to discover workspaces").
 					Err(err).
-					Log(ctx)
+					Emit()
 				return fmt.Errorf("failed to discover workspaces: %w", err)
 			}
 
@@ -583,7 +577,7 @@ This updates the job frontmatter files directly.`,
 			if err != nil {
 				ulog.Warn("Failed to load config").
 					Err(err).
-					Log(ctx)
+					Emit()
 				cfg = &config.Config{}
 			}
 			locator := workspace.NewNotebookLocator(cfg)
@@ -595,7 +589,7 @@ This updates the job frontmatter files directly.`,
 			}
 
 			if len(scannedDirs) == 0 {
-				ulog.Info("No plan directories found").Log(ctx)
+				ulog.Info("No plan directories found").Emit()
 				return nil
 			}
 
@@ -609,7 +603,7 @@ This updates the job frontmatter files directly.`,
 					ulog.Warn("Cannot read plans directory").
 						Field("path", plansBaseDir).
 						Err(err).
-						Log(ctx)
+						Emit()
 					continue
 				}
 
@@ -625,7 +619,7 @@ This updates the job frontmatter files directly.`,
 						ulog.Warn("Error processing plan").
 							Field("plan_dir", planDir).
 							Err(err).
-							Log(ctx)
+							Emit()
 						continue
 					}
 					updated += count
@@ -636,12 +630,12 @@ This updates the job frontmatter files directly.`,
 				ulog.Info("Dry run results").
 					Field("would_update", updated).
 					Pretty(fmt.Sprintf("Dry run: would update %d job(s)", updated)).
-					Log(ctx)
+					Emit()
 			} else {
 				ulog.Success("Jobs updated to interrupted status").
 					Field("updated_count", updated).
 					Pretty(fmt.Sprintf("Updated %d job(s) to interrupted status", updated)).
-					Log(ctx)
+					Emit()
 			}
 
 			return nil
@@ -688,7 +682,6 @@ WARNING: This will terminate the Claude process immediately.`,
 				return fmt.Errorf("invalid PID in lock file: %w", err)
 			}
 
-			ctx := context.Background()
 
 			// Check if process is alive
 			if !process.IsProcessAlive(pid) {
@@ -696,17 +689,17 @@ WARNING: This will terminate the Claude process immediately.`,
 					Field("session_id", sessionID).
 					Field("pid", pid).
 					Pretty(fmt.Sprintf("Session %s (PID %d) is not running", sessionID, pid)).
-					Log(ctx)
+					Emit()
 				// Clean up the stale directory
 				if err := os.RemoveAll(sessionDir); err != nil {
 					ulog.Warn("Failed to remove stale session directory").
 						Field("session_dir", sessionDir).
 						Err(err).
-						Log(ctx)
+						Emit()
 				} else {
 					ulog.Success("Cleaned up stale session directory").
 						Field("session_dir", sessionDir).
-						Log(ctx)
+						Emit()
 				}
 				return nil
 			}
@@ -717,7 +710,7 @@ WARNING: This will terminate the Claude process immediately.`,
 				var response string
 				fmt.Scanln(&response)
 				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
-					ulog.Info("Kill operation cancelled").Log(ctx)
+					ulog.Info("Kill operation cancelled").Emit()
 					return nil
 				}
 			}
@@ -731,18 +724,18 @@ WARNING: This will terminate the Claude process immediately.`,
 				Field("session_id", sessionID).
 				Field("pid", pid).
 				Pretty(fmt.Sprintf("Killed session %s (PID %d)", sessionID, pid)).
-				Log(ctx)
+				Emit()
 
 			// Clean up the session directory
 			if err := os.RemoveAll(sessionDir); err != nil {
 				ulog.Warn("Failed to remove session directory").
 					Field("session_dir", sessionDir).
 					Err(err).
-					Log(ctx)
+					Emit()
 			} else {
 				ulog.Success("Cleaned up session directory").
 					Field("session_dir", sessionDir).
-					Log(ctx)
+					Emit()
 			}
 
 			return nil
@@ -825,13 +818,12 @@ Example:
 				return fmt.Errorf("no status field found in frontmatter")
 			}
 
-			ctx := context.Background()
 			ulog.Info("Changing job status").
 				Field("job_file", jobFilePath).
 				Field("old_status", currentStatus).
 				Field("new_status", newStatus).
 				Pretty(fmt.Sprintf("Changing status from '%s' to '%s' in %s", currentStatus, newStatus, jobFilePath)).
-				Log(ctx)
+				Emit()
 
 			// Update the status line
 			lines[statusLineIdx] = fmt.Sprintf("status: %s", newStatus)
@@ -846,7 +838,7 @@ Example:
 				Field("new_status", newStatus).
 				Field("job_file", jobFilePath).
 				Pretty(fmt.Sprintf("Successfully updated status to '%s'", newStatus)).
-				Log(ctx)
+				Emit()
 
 			return nil
 		},
@@ -873,7 +865,6 @@ Example:
   grove-hooks sessions mark-old-completed --dry-run
   grove-hooks sessions mark-old-completed --before 2025-10-01`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
 
 			// Determine cutoff date
 			var cutoffDate time.Time
@@ -893,13 +884,13 @@ Example:
 			ulog.Info("Cutoff date set").
 				Field("cutoff_date", cutoffDate.Format("2006-01-02")).
 				Pretty(fmt.Sprintf("🗓️  Cutoff date: %s", cutoffDate.Format("2006-01-02"))).
-				Log(ctx)
+				Emit()
 			if dryRun {
 				ulog.Info("Dry run mode enabled").
 					Pretty("🔍 DRY RUN MODE - No changes will be made").
-					Log(ctx)
+					Emit()
 			}
-			ulog.Info("").PrettyOnly().Pretty("").Log(ctx)
+			ulog.Info("").PrettyOnly().Pretty("").Emit()
 
 			// Create storage
 			storage, err := disk.NewSQLiteStore()
@@ -976,7 +967,7 @@ Example:
 						filepath.Base(session.JobFilePath),
 						session.StartedAt.Format("2006-01-02"),
 						session.Status)).
-					Log(ctx)
+					Emit()
 
 				if !dryRun {
 					// Update the file
@@ -985,7 +976,7 @@ Example:
 							Field("job_file", session.JobFilePath).
 							Err(err).
 							Pretty(fmt.Sprintf("   ⚠️  Failed to update: %v", err)).
-							Log(ctx)
+							Emit()
 						errors++
 						continue
 					}
@@ -994,41 +985,41 @@ Example:
 				updated++
 			}
 
-			ulog.Info("").PrettyOnly().Pretty("").Log(ctx)
-			ulog.Info("Summary").Pretty("✅ Summary:").Log(ctx)
+			ulog.Info("").PrettyOnly().Pretty("").Emit()
+			ulog.Info("Summary").Pretty("✅ Summary:").Emit()
 			if dryRun {
 				ulog.Info("Dry run summary").
 					Field("would_mark_completed", updated).
 					Pretty(fmt.Sprintf("   Would mark as completed: %d jobs", updated)).
-					Log(ctx)
+					Emit()
 			} else {
 				ulog.Success("Jobs marked as completed").
 					Field("completed_count", updated).
 					Pretty(fmt.Sprintf("   Marked as completed: %d jobs", updated)).
-					Log(ctx)
+					Emit()
 			}
 			ulog.Info("Skipped jobs").
 				Field("skipped_count", skipped).
 				Pretty(fmt.Sprintf("   Skipped: %d jobs (already in terminal state or from today)", skipped)).
-				Log(ctx)
+				Emit()
 			if invalidDate > 0 {
 				ulog.Info("Skipped jobs with invalid dates").
 					Field("invalid_date_count", invalidDate).
 					Pretty(fmt.Sprintf("   Skipped: %d jobs (invalid/missing date)", invalidDate)).
-					Log(ctx)
+					Emit()
 			}
 			if errors > 0 {
 				ulog.Warn("Jobs with errors").
 					Field("error_count", errors).
 					Pretty(fmt.Sprintf("   ⚠️  Errors: %d jobs (missing status field or other issues)", errors)).
-					Log(ctx)
+					Emit()
 			}
 
 			if dryRun {
-				ulog.Info("").PrettyOnly().Pretty("").Log(ctx)
+				ulog.Info("").PrettyOnly().Pretty("").Emit()
 				ulog.Info("Dry run tip").
 					Pretty("💡 Run without --dry-run to actually update the files").
-					Log(ctx)
+					Emit()
 			}
 
 			return nil

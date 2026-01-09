@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -46,7 +45,6 @@ This command will:
 }
 
 func runInstall(targetDir string) error {
-	ctx := context.Background()
 	ulog := grovelogging.NewUnifiedLogger("grove-hooks.install")
 
 	// Resolve target directory
@@ -84,7 +82,7 @@ func runInstall(targetDir string) error {
 			ulog.Info("Found empty settings file, creating new configuration").
 				Field("settings_path", settingsPath).
 				Pretty(fmt.Sprintf("Found empty settings file, creating new configuration at %s", settingsPath)).
-				Log(ctx)
+				Emit()
 		} else {
 			if err := json.Unmarshal(data, &settings); err != nil {
 				// If parsing fails, offer to backup and create new
@@ -93,11 +91,11 @@ func runInstall(targetDir string) error {
 					Field("settings_path", settingsPath).
 					Err(err).
 					Pretty(fmt.Sprintf("Failed to parse existing settings (%v)", err)).
-					Log(ctx)
+					Emit()
 				ulog.Info("Backing up and creating new configuration").
 					Field("backup_path", backupPath).
 					Pretty(fmt.Sprintf("Backing up to %s and creating new configuration", backupPath)).
-					Log(ctx)
+					Emit()
 
 				// Backup the corrupted file
 				if err := os.WriteFile(backupPath, data, 0o644); err != nil {
@@ -109,7 +107,7 @@ func runInstall(targetDir string) error {
 				ulog.Info("Updating existing settings").
 					Field("settings_path", settingsPath).
 					Pretty(fmt.Sprintf("Updating existing settings at %s", settingsPath)).
-					Log(ctx)
+					Emit()
 			}
 		}
 	} else {
@@ -118,7 +116,7 @@ func runInstall(targetDir string) error {
 		ulog.Info("Creating new settings").
 			Field("settings_path", settingsPath).
 			Pretty(fmt.Sprintf("Creating new settings at %s", settingsPath)).
-			Log(ctx)
+			Emit()
 	}
 
 	// Define default hooks configuration
@@ -197,15 +195,15 @@ func runInstall(targetDir string) error {
 	ulog.Success("Grove hooks configuration installed successfully").
 		Field("settings_file", settingsPath).
 		Pretty("Grove hooks configuration installed successfully").
-		Log(ctx)
+		Emit()
 	ulog.Success("Settings file location").
 		Field("path", settingsPath).
 		Pretty(fmt.Sprintf("Settings file: %s", settingsPath)).
-		Log(ctx)
-	ulog.Info("").PrettyOnly().Pretty("").Log(ctx)
+		Emit()
+	ulog.Info("").PrettyOnly().Pretty("").Emit()
 	ulog.Info("Hooks configured").
 		Pretty("The following hooks have been configured:\n  - PreToolUse: Runs before any tool use\n  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, or Read tools\n  - Notification: Runs on notifications\n  - Stop: Runs when conversation stops\n  - SubagentStop: Runs when subagent stops").
-		Log(ctx)
+		Emit()
 
 	return nil
 }

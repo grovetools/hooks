@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,7 +22,6 @@ func NewDebugWorkspacesCmd() *cobra.Command {
 		Use:   "debug-workspaces",
 		Short: "Debug workspace hierarchy and node properties",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
 			logger := logrus.New()
 			logger.SetOutput(io.Discard)
 
@@ -38,38 +36,38 @@ func NewDebugWorkspacesCmd() *cobra.Command {
 				ulog.Info("Raw discovery output").
 					Field("projects_count", len(result.Projects)).
 					Pretty("=== RAW DISCOVERY OUTPUT ===").
-					Log(ctx)
+					Emit()
 				ulog.Info("Projects discovered").
 					Field("count", len(result.Projects)).
 					Pretty(fmt.Sprintf("Projects: %d", len(result.Projects))).
-					Log(ctx)
+					Emit()
 				for _, p := range result.Projects {
 					ulog.Info("Project").
 						Field("name", p.Name).
 						Field("path", p.Path).
 						Pretty(fmt.Sprintf("  - %s (%s)", p.Name, p.Path)).
-						Log(ctx)
+						Emit()
 				}
 				ulog.Info("Ecosystems discovered").
 					Field("count", len(result.Ecosystems)).
 					Pretty(fmt.Sprintf("\nEcosystems: %d", len(result.Ecosystems))).
-					Log(ctx)
+					Emit()
 				for _, e := range result.Ecosystems {
 					ulog.Info("Ecosystem").
 						Field("name", e.Name).
 						Field("path", e.Path).
 						Pretty(fmt.Sprintf("  - %s (%s)", e.Name, e.Path)).
-						Log(ctx)
+						Emit()
 				}
 				ulog.Info("Non-Grove directories").
 					Field("count", len(result.NonGroveDirectories)).
 					Pretty(fmt.Sprintf("\nNonGroveDirectories: %d", len(result.NonGroveDirectories))).
-					Log(ctx)
+					Emit()
 				for _, d := range result.NonGroveDirectories {
 					ulog.Info("Non-Grove directory").
 						Field("path", d).
 						Pretty(fmt.Sprintf("  - %s", d)).
-						Log(ctx)
+						Emit()
 				}
 				return nil
 			}
@@ -93,31 +91,31 @@ func NewDebugWorkspacesCmd() *cobra.Command {
 					Field("kind", ws.Kind).
 					Field("depth", ws.Depth).
 					Pretty(fmt.Sprintf("\n%s%s\n  Path: %s\n  Kind: %s\n  Depth: %d", ws.TreePrefix, ws.Name, ws.Path, ws.Kind, ws.Depth)).
-					Log(ctx)
+					Emit()
 				if ws.ParentProjectPath != "" {
 					ulog.Info("Parent project path").
 						Field("parent_project_path", ws.ParentProjectPath).
 						Pretty(fmt.Sprintf("  ParentProjectPath: %s", ws.ParentProjectPath)).
-						Log(ctx)
+						Emit()
 				}
 				if ws.ParentEcosystemPath != "" {
 					ulog.Info("Parent ecosystem path").
 						Field("parent_ecosystem_path", ws.ParentEcosystemPath).
 						Pretty(fmt.Sprintf("  ParentEcosystemPath: %s", ws.ParentEcosystemPath)).
-						Log(ctx)
+						Emit()
 				}
 				if ws.RootEcosystemPath != "" {
 					ulog.Info("Root ecosystem path").
 						Field("root_ecosystem_path", ws.RootEcosystemPath).
 						Pretty(fmt.Sprintf("  RootEcosystemPath: %s", ws.RootEcosystemPath)).
-						Log(ctx)
+						Emit()
 				}
 				parent := ws.GetHierarchicalParent()
 				if parent != "" {
 					ulog.Info("Hierarchical parent").
 						Field("hierarchical_parent", parent).
 						Pretty(fmt.Sprintf("  GetHierarchicalParent(): %s", parent)).
-						Log(ctx)
+						Emit()
 				}
 			}
 
