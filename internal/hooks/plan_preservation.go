@@ -152,10 +152,11 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 
 	// Extract title from plan content
 	title := extractPlanTitle(string(planContent), preservationConfig)
+	rawTitle := extractRawPlanTitle(string(planContent))
 
-	// Check if we already have a job for this plan file (by title)
+	// Check if we already have a job for this plan file (by raw title without prefix)
 	// If so, update it instead of creating a new one
-	existingJob := findExistingPlanJob(planDir, title)
+	existingJob := findExistingPlanJob(planDir, rawTitle)
 	if existingJob != "" {
 		// Update existing job
 		if err := updatePlanJob(existingJob, string(planContent)); err != nil {
@@ -229,37 +230,61 @@ func isClaudePlanFile(filePath string) bool {
 }
 
 // findExistingPlanJob looks for an existing job file with matching title
-func findExistingPlanJob(planDir, title string) string {
+// It matches on the raw title (from # heading) without the claude-plan prefix
+func findExistingPlanJob(planDir, rawTitle string) string {
 	entries, err := os.ReadDir(planDir)
 	if err != nil {
 		return ""
 	}
 
-	// Convert title to kebab-case for matching
-	kebabTitle := toKebabCase("", title)
+	// Convert raw title to kebab-case for matching (without prefix)
+	kebabRawTitle := toKebabCase("", rawTitle)
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
 
-		// Read the file to check its title
 		filePath := filepath.Join(planDir, entry.Name())
 		content, err := os.ReadFile(filePath)
 		if err != nil {
 			continue
 		}
 
-		// Check if the title in the file matches
-		lines := strings.Split(string(content), "\n")
+		contentStr := string(content)
+		lines := strings.Split(contentStr, "\n")
+
+		// First, check the # heading in the body (most reliable)
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "# ") {
 				fileTitle := strings.TrimPrefix(line, "# ")
-				if toKebabCase("", fileTitle) == kebabTitle {
+				if toKebabCase("", fileTitle) == kebabRawTitle {
 					return filePath
 				}
 				break // Only check first heading
+			}
+		}
+
+		// Also check frontmatter title field (handles existing jobs)
+		if strings.HasPrefix(contentStr, "---") {
+			// Parse frontmatter for title
+			parts := strings.SplitN(contentStr, "---", 3)
+			if len(parts) >= 3 {
+				frontmatter := parts[1]
+				for _, line := range strings.Split(frontmatter, "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "title:") {
+						fmTitle := strings.TrimSpace(strings.TrimPrefix(line, "title:"))
+						// Remove quotes if present
+						fmTitle = strings.Trim(fmTitle, "\"'")
+						// Check if frontmatter title contains the raw title (handles prefixed titles)
+						if strings.Contains(toKebabCase("", fmTitle), kebabRawTitle) {
+							return filePath
+						}
+						break
+					}
+				}
 			}
 		}
 	}
@@ -471,23 +496,26 @@ func resolvePlanNameToPathLegacy(workingDir, planName string) (string, error) {
 	return "", fmt.Errorf("could not find plan directory for: %s", planName)
 }
 
-// extractPlanTitle extracts a title from the plan content
-func extractPlanTitle(planContent string, cfg *PlanPreservationConfig) string {
+// extractRawPlanTitle extracts just the raw title from plan content without any formatting
+func extractRawPlanTitle(planContent string) string {
 	lines := strings.Split(planContent, "\n")
 
-	var rawTitle string
-
-	// Look for a markdown heading
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "# ") {
-			rawTitle = strings.TrimPrefix(line, "# ")
+			rawTitle := strings.TrimPrefix(line, "# ")
 			// Remove "Plan:" prefix if already present
 			rawTitle = strings.TrimPrefix(rawTitle, "Plan:")
-			rawTitle = strings.TrimSpace(rawTitle)
-			break
+			return strings.TrimSpace(rawTitle)
 		}
 	}
+
+	return ""
+}
+
+// extractPlanTitle extracts a title from the plan content with optional formatting
+func extractPlanTitle(planContent string, cfg *PlanPreservationConfig) string {
+	rawTitle := extractRawPlanTitle(planContent)
 
 	// Fall back to timestamp if no title found
 	if rawTitle == "" {
