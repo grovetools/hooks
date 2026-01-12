@@ -32,6 +32,11 @@ func main() {
 		SessionsListIntegration(),
 		// Real-time status update tests
 		RealtimeStatusUpdateScenario(),
+		// Plan preservation tests
+		PlanPreservationScenario(),
+		PlanPreservationDisabledScenario(),
+		PlanPreservationNoPlanScenario(),
+		PlanPreservationEmptyPlanScenario(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {

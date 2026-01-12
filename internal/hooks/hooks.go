@@ -167,6 +167,14 @@ func RunPostToolUseHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
+	// Handle ExitPlanMode - save Claude plans to grove-flow
+	if data.ToolName == "ExitPlanMode" {
+		if err := HandleExitPlanMode(ctx, data); err != nil {
+			// Log but don't fail the hook - plan preservation is best-effort
+			log.Printf("Failed to preserve plan: %v", err)
+		}
+	}
+
 	// Get stored tool ID and update completion
 	if toolID := getStoredToolID(data.SessionID); toolID != "" {
 		success := data.ToolError == nil
