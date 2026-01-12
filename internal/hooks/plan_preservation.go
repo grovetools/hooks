@@ -72,16 +72,30 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 		return nil // Not an error - just means no plan is active
 	}
 
+	// Try to find the Claude plan file by content matching
+	// This gives us a stable identifier for deduplication
+	claudeFilename := findClaudePlanFileByContent(planContent)
+	claudeSource := ""
+	if claudeFilename != "" {
+		claudeSource = "claude://plans/" + claudeFilename
+	}
+
 	// Extract title from plan content
 	title := extractPlanTitle(planContent, preservationConfig)
 	rawTitle := extractRawPlanTitle(planContent)
 
-	// Check if we already have a job for this plan (by raw title without prefix)
-	// If so, update it instead of creating a new one
-	existingJob := findExistingPlanJob(planDir, rawTitle)
+	planLog.WithFields(logrus.Fields{
+		"claude_source": claudeSource,
+		"title":         title,
+		"raw_title":     rawTitle,
+	}).Debug("Processing ExitPlanMode")
+
+	// Find existing job by claude_source (primary) or title (fallback)
+	existingJob := findExistingPlanJob(planDir, claudeSource, rawTitle)
+
 	if existingJob != "" {
 		// Update existing job
-		if err := updatePlanJob(existingJob, planContent); err != nil {
+		if err := updatePlanJob(existingJob, planContent, claudeSource); err != nil {
 			planLog.WithError(err).WithFields(logrus.Fields{
 				"plan_dir": planDir,
 				"job_file": existingJob,
@@ -89,14 +103,15 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 			return err
 		}
 		planLog.WithFields(logrus.Fields{
-			"plan_dir": planDir,
-			"job_file": existingJob,
-			"title":    title,
+			"plan_dir":      planDir,
+			"job_file":      existingJob,
+			"title":         title,
+			"claude_source": claudeSource,
 		}).Info("Updated existing plan job from ExitPlanMode")
 	} else {
 		// Generate a unique job filename and create new job
 		jobFilename := generateJobFilename(planDir)
-		if err := savePlanAsJob(planDir, jobFilename, title, planContent, preservationConfig); err != nil {
+		if err := savePlanAsJob(planDir, jobFilename, title, planContent, claudeSource, preservationConfig); err != nil {
 			planLog.WithError(err).WithFields(logrus.Fields{
 				"plan_dir": planDir,
 				"title":    title,
@@ -104,9 +119,10 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 			return err
 		}
 		planLog.WithFields(logrus.Fields{
-			"plan_dir":     planDir,
-			"job_filename": jobFilename,
-			"title":        title,
+			"plan_dir":      planDir,
+			"job_filename":  jobFilename,
+			"title":         title,
+			"claude_source": claudeSource,
 		}).Info("Successfully saved Claude plan to grove-flow")
 	}
 
@@ -132,7 +148,14 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 		return nil // Not a plan file, skip
 	}
 
-	planLog.WithField("file_path", filePath).Debug("Detected edit to Claude plan file")
+	// Extract the Claude plan filename and format as URI for stable identification
+	claudeFilename := filepath.Base(filePath)
+	claudeSource := "claude://plans/" + claudeFilename
+
+	planLog.WithFields(logrus.Fields{
+		"file_path":     filePath,
+		"claude_source": claudeSource,
+	}).Debug("Detected edit to Claude plan file")
 
 	// Read the updated file content
 	planContent, err := os.ReadFile(filePath)
@@ -171,12 +194,12 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 	title := extractPlanTitle(string(planContent), preservationConfig)
 	rawTitle := extractRawPlanTitle(string(planContent))
 
-	// Check if we already have a job for this plan file (by raw title without prefix)
-	// If so, update it instead of creating a new one
-	existingJob := findExistingPlanJob(planDir, rawTitle)
+	// Find existing job by claude_source (primary) or title (fallback)
+	existingJob := findExistingPlanJob(planDir, claudeSource, rawTitle)
+
 	if existingJob != "" {
-		// Update existing job
-		if err := updatePlanJob(existingJob, string(planContent)); err != nil {
+		// Update existing job, preserving claude_source in frontmatter
+		if err := updatePlanJob(existingJob, string(planContent), claudeSource); err != nil {
 			planLog.WithError(err).WithFields(logrus.Fields{
 				"plan_dir": planDir,
 				"job_file": existingJob,
@@ -184,14 +207,15 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 			return err
 		}
 		planLog.WithFields(logrus.Fields{
-			"plan_dir": planDir,
-			"job_file": existingJob,
-			"title":    title,
+			"plan_dir":      planDir,
+			"job_file":      existingJob,
+			"title":         title,
+			"claude_source": claudeSource,
 		}).Info("Updated existing plan job from Edit")
 	} else {
-		// Create new job
+		// Create new job with claude_source
 		jobFilename := generateJobFilename(planDir)
-		if err := savePlanAsJob(planDir, jobFilename, title, string(planContent), preservationConfig); err != nil {
+		if err := savePlanAsJob(planDir, jobFilename, title, string(planContent), claudeSource, preservationConfig); err != nil {
 			planLog.WithError(err).WithFields(logrus.Fields{
 				"plan_dir": planDir,
 				"title":    title,
@@ -199,9 +223,10 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 			return err
 		}
 		planLog.WithFields(logrus.Fields{
-			"plan_dir":     planDir,
-			"job_filename": jobFilename,
-			"title":        title,
+			"plan_dir":      planDir,
+			"job_filename":  jobFilename,
+			"title":         title,
+			"claude_source": claudeSource,
 		}).Info("Created new plan job from Edit")
 	}
 
@@ -246,17 +271,115 @@ func isClaudePlanFile(filePath string) bool {
 	return strings.HasPrefix(filePath, claudePlansDir)
 }
 
-// findExistingPlanJob looks for an existing job file with matching title
-// It matches on the raw title (from # heading) without the claude-plan prefix
-func findExistingPlanJob(planDir, rawTitle string) string {
+// findClaudePlanFileByContent finds a Claude plan file by matching its content
+// Returns the filename (e.g., "sharded-fluttering-pizza.md") or empty string if not found
+func findClaudePlanFileByContent(planContent string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		planLog.WithError(err).Debug("Failed to get home directory")
+		return ""
+	}
+
+	plansDir := filepath.Join(homeDir, ".claude", "plans")
+	entries, err := os.ReadDir(plansDir)
+	if err != nil {
+		planLog.WithError(err).WithField("plans_dir", plansDir).Debug("Failed to read Claude plans directory")
+		return ""
+	}
+
+	// Normalize content for comparison (trim whitespace)
+	normalizedContent := strings.TrimSpace(planContent)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		filePath := filepath.Join(plansDir, entry.Name())
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		if strings.TrimSpace(string(content)) == normalizedContent {
+			planLog.WithField("matched_file", entry.Name()).Debug("Found Claude plan file by content match")
+			return entry.Name()
+		}
+	}
+
+	planLog.Debug("No Claude plan file found matching content")
+	return ""
+}
+
+// findExistingPlanJob looks for an existing job file with matching source_file or title
+// It does THREE passes:
+// 1. Exact source_file match (most reliable - uses Claude's plan filename)
+// 2. Exact frontmatter title match (for proper grove-flow jobs)
+// 3. Body heading match (fallback for files without frontmatter)
+func findExistingPlanJob(planDir, sourceFile, rawTitle string) string {
 	entries, err := os.ReadDir(planDir)
 	if err != nil {
 		return ""
 	}
 
-	// Convert raw title to kebab-case for matching (without prefix)
-	kebabRawTitle := toKebabCase("", rawTitle)
+	planLog.WithFields(logrus.Fields{
+		"plan_dir":    planDir,
+		"source_file": sourceFile,
+		"raw_title":   rawTitle,
+	}).Debug("Searching for existing plan job")
 
+	// FIRST PASS: Look for source_file match (most reliable)
+	if sourceFile != "" {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+
+			filePath := filepath.Join(planDir, entry.Name())
+			content, err := os.ReadFile(filePath)
+			if err != nil {
+				continue
+			}
+
+			contentStr := string(content)
+
+			// Check frontmatter source_file field
+			if strings.HasPrefix(contentStr, "---") {
+				parts := strings.SplitN(contentStr, "---", 3)
+				if len(parts) >= 3 {
+					frontmatter := parts[1]
+					for _, line := range strings.Split(frontmatter, "\n") {
+						line = strings.TrimSpace(line)
+						if strings.HasPrefix(line, "source_file:") {
+							fmSource := strings.TrimSpace(strings.TrimPrefix(line, "source_file:"))
+							fmSource = strings.Trim(fmSource, "\"'")
+							if fmSource == sourceFile {
+								planLog.WithFields(logrus.Fields{
+									"matched_file": filePath,
+									"source_file":  sourceFile,
+									"pass":         "source_file",
+								}).Debug("Found matching job by source_file")
+								return filePath
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fall back to title matching if no source_file match or no source_file provided
+	if rawTitle == "" {
+		planLog.Debug("No existing plan job found (no source_file match and no title)")
+		return ""
+	}
+
+	// Convert title to kebab-case for matching
+	kebabTitle := toKebabCase("", rawTitle)
+	prefixedTitle := "claude-plan-" + kebabTitle
+
+	// SECOND PASS: Look for frontmatter title matches only (proper grove-flow jobs)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
@@ -269,23 +392,9 @@ func findExistingPlanJob(planDir, rawTitle string) string {
 		}
 
 		contentStr := string(content)
-		lines := strings.Split(contentStr, "\n")
 
-		// First, check the # heading in the body (most reliable)
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "# ") {
-				fileTitle := strings.TrimPrefix(line, "# ")
-				if toKebabCase("", fileTitle) == kebabRawTitle {
-					return filePath
-				}
-				break // Only check first heading
-			}
-		}
-
-		// Also check frontmatter title field (handles existing jobs)
+		// Check frontmatter title field
 		if strings.HasPrefix(contentStr, "---") {
-			// Parse frontmatter for title
 			parts := strings.SplitN(contentStr, "---", 3)
 			if len(parts) >= 3 {
 				frontmatter := parts[1]
@@ -293,10 +402,15 @@ func findExistingPlanJob(planDir, rawTitle string) string {
 					line = strings.TrimSpace(line)
 					if strings.HasPrefix(line, "title:") {
 						fmTitle := strings.TrimSpace(strings.TrimPrefix(line, "title:"))
-						// Remove quotes if present
 						fmTitle = strings.Trim(fmTitle, "\"'")
-						// Check if frontmatter title contains the raw title (handles prefixed titles)
-						if strings.Contains(toKebabCase("", fmTitle), kebabRawTitle) {
+						kebabFmTitle := toKebabCase("", fmTitle)
+						// EXACT match on frontmatter title (with or without prefix)
+						if kebabFmTitle == prefixedTitle || kebabFmTitle == kebabTitle {
+							planLog.WithFields(logrus.Fields{
+								"matched_file": filePath,
+								"fm_title":     fmTitle,
+								"pass":         "frontmatter_title",
+							}).Debug("Found matching job by frontmatter title")
 							return filePath
 						}
 						break
@@ -306,11 +420,51 @@ func findExistingPlanJob(planDir, rawTitle string) string {
 		}
 	}
 
+	// THIRD PASS: Look for body heading matches (fallback for files without frontmatter)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		filePath := filepath.Join(planDir, entry.Name())
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		contentStr := string(content)
+
+		// Skip files that have frontmatter (they were already checked in second pass)
+		if strings.HasPrefix(contentStr, "---") {
+			continue
+		}
+
+		// Check the # heading in the body
+		lines := strings.Split(contentStr, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "# ") {
+				fileTitle := strings.TrimPrefix(line, "# ")
+				if toKebabCase("", fileTitle) == kebabTitle {
+					planLog.WithFields(logrus.Fields{
+						"matched_file": filePath,
+						"heading":      fileTitle,
+						"pass":         "body_heading",
+					}).Debug("Found matching job by body heading")
+					return filePath
+				}
+				break // Only check first heading
+			}
+		}
+	}
+
+	planLog.Debug("No existing plan job found")
 	return ""
 }
 
 // updatePlanJob updates an existing plan job file with new content, preserving frontmatter
-func updatePlanJob(jobFilePath, newContent string) error {
+// and ensuring source_file is set
+func updatePlanJob(jobFilePath, newContent, sourceFile string) error {
 	// Read existing file to preserve frontmatter
 	existingContent, err := os.ReadFile(jobFilePath)
 	if err != nil {
@@ -325,6 +479,13 @@ func updatePlanJob(jobFilePath, newContent string) error {
 		parts := strings.SplitN(existingStr, "---", 3)
 		if len(parts) >= 3 {
 			frontmatter := parts[1]
+
+			// Ensure source_file is in frontmatter (add if missing)
+			if sourceFile != "" && !strings.Contains(frontmatter, "source_file:") {
+				// Add source_file before the closing ---
+				frontmatter = strings.TrimRight(frontmatter, "\n") + "\nsource_file: " + sourceFile + "\n"
+			}
+
 			// Combine preserved frontmatter with new content
 			updatedContent := "---" + frontmatter + "---\n\n" + newContent
 			return os.WriteFile(jobFilePath, []byte(updatedContent), 0644)
@@ -638,12 +799,17 @@ func generateJobFilename(planDir string) string {
 	return fmt.Sprintf("%02d-claude-plan-%s.md", nextNum, timestamp)
 }
 
-// savePlanAsJob saves the plan content as a new grove-flow job
-func savePlanAsJob(planDir, jobFilename, title, planContent string, preservationConfig *PlanPreservationConfig) error {
-	// Build the flow plan add command
+// savePlanAsJob saves the plan content as a new grove-flow job using flow plan add
+func savePlanAsJob(planDir, jobFilename, title, planContent, sourceFile string, preservationConfig *PlanPreservationConfig) error {
+	// Use flow plan add to create the job with proper frontmatter
 	args := []string{"plan", "add", planDir,
 		"--type", preservationConfig.JobType,
 		"--title", title,
+	}
+
+	// Add source-file if provided (for tracking job provenance)
+	if sourceFile != "" {
+		args = append(args, "--source-file", sourceFile)
 	}
 
 	// Add depends_on if configured
@@ -667,9 +833,10 @@ func savePlanAsJob(planDir, jobFilename, title, planContent string, preservation
 	}
 
 	planLog.WithFields(logrus.Fields{
-		"plan_dir":     planDir,
-		"job_filename": jobFilename,
-		"stdout":       stdout.String(),
+		"plan_dir":    planDir,
+		"title":       title,
+		"source_file": sourceFile,
+		"stdout":      stdout.String(),
 	}).Debug("flow plan add command output")
 
 	return nil
