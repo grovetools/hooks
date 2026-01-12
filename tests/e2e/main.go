@@ -37,6 +37,9 @@ func main() {
 		PlanPreservationDisabledScenario(),
 		PlanPreservationNoPlanScenario(),
 		PlanPreservationEmptyPlanScenario(),
+		// Plan edit sync tests
+		PlanEditSyncScenario(),
+		PlanEditNonPlanFileScenario(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {

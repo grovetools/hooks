@@ -101,6 +101,179 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 	return nil
 }
 
+// HandlePlanEdit processes Edit tool events on Claude plan files and syncs to grove-flow
+// This captures incremental edits to plans, not just the final ExitPlanMode event
+func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
+	// Extract file path from Edit tool input
+	filePath, ok := extractFilePath(data.ToolInput)
+	if !ok || filePath == "" {
+		return nil // Not an error, just no file path
+	}
+
+	// Check if this is a Claude plan file
+	if !isClaudePlanFile(filePath) {
+		return nil // Not a plan file, skip
+	}
+
+	planLog.WithField("file_path", filePath).Debug("Detected edit to Claude plan file")
+
+	// Read the updated file content
+	planContent, err := os.ReadFile(filePath)
+	if err != nil {
+		planLog.WithError(err).WithField("file_path", filePath).Debug("Failed to read edited plan file")
+		return nil // Best effort - don't fail if we can't read
+	}
+
+	if len(planContent) == 0 {
+		planLog.Debug("Plan file is empty, skipping sync")
+		return nil
+	}
+
+	// Get working directory from environment or session
+	workingDir := getWorkingDirFromEnv()
+	if workingDir == "" {
+		planLog.Debug("No working directory available, skipping plan sync")
+		return nil
+	}
+
+	// Check if plan preservation is enabled for this directory
+	preservationConfig := loadPlanPreservationConfig(workingDir)
+	if !preservationConfig.Enabled {
+		planLog.WithField("working_dir", workingDir).Debug("Plan preservation disabled for this directory")
+		return nil
+	}
+
+	// Find the active flow plan for this directory
+	planDir, err := findActivePlanDir(workingDir, preservationConfig)
+	if err != nil {
+		planLog.WithError(err).WithField("working_dir", workingDir).Debug("No active flow plan found")
+		return nil // Not an error - just means no plan is active
+	}
+
+	// Extract title from plan content
+	title := extractPlanTitle(string(planContent), preservationConfig)
+
+	// Check if we already have a job for this plan file (by title)
+	// If so, update it instead of creating a new one
+	existingJob := findExistingPlanJob(planDir, title)
+	if existingJob != "" {
+		// Update existing job
+		if err := updatePlanJob(existingJob, string(planContent)); err != nil {
+			planLog.WithError(err).WithFields(logrus.Fields{
+				"plan_dir": planDir,
+				"job_file": existingJob,
+			}).Error("Failed to update existing plan job")
+			return err
+		}
+		planLog.WithFields(logrus.Fields{
+			"plan_dir": planDir,
+			"job_file": existingJob,
+			"title":    title,
+		}).Info("Updated existing plan job from Edit")
+	} else {
+		// Create new job
+		jobFilename := generateJobFilename(planDir)
+		if err := savePlanAsJob(planDir, jobFilename, title, string(planContent), preservationConfig); err != nil {
+			planLog.WithError(err).WithFields(logrus.Fields{
+				"plan_dir": planDir,
+				"title":    title,
+			}).Error("Failed to save plan as job")
+			return err
+		}
+		planLog.WithFields(logrus.Fields{
+			"plan_dir":     planDir,
+			"job_filename": jobFilename,
+			"title":        title,
+		}).Info("Created new plan job from Edit")
+	}
+
+	// Send notification if enabled
+	if preservationConfig.NotifyOnSave {
+		sendPlanSavedNotification(ctx, planDir, "", title)
+	}
+
+	return nil
+}
+
+// extractFilePath extracts the file_path from Edit tool input
+func extractFilePath(toolInput any) (string, bool) {
+	if inputMap, ok := toolInput.(map[string]any); ok {
+		if fp, exists := inputMap["file_path"]; exists {
+			if fpStr, ok := fp.(string); ok {
+				return fpStr, true
+			}
+		}
+	}
+	if inputMap, ok := toolInput.(map[string]interface{}); ok {
+		if fp, exists := inputMap["file_path"]; exists {
+			if fpStr, ok := fp.(string); ok {
+				return fpStr, true
+			}
+		}
+	}
+	return "", false
+}
+
+// isClaudePlanFile checks if the given path is a Claude plan file
+func isClaudePlanFile(filePath string) bool {
+	// Expand ~ to home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+
+	claudePlansDir := filepath.Join(homeDir, ".claude", "plans")
+
+	// Check if filePath starts with the Claude plans directory
+	return strings.HasPrefix(filePath, claudePlansDir)
+}
+
+// findExistingPlanJob looks for an existing job file with matching title
+func findExistingPlanJob(planDir, title string) string {
+	entries, err := os.ReadDir(planDir)
+	if err != nil {
+		return ""
+	}
+
+	// Convert title to kebab-case for matching
+	kebabTitle := toKebabCase("", title)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		// Read the file to check its title
+		filePath := filepath.Join(planDir, entry.Name())
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		// Check if the title in the file matches
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "# ") {
+				fileTitle := strings.TrimPrefix(line, "# ")
+				if toKebabCase("", fileTitle) == kebabTitle {
+					return filePath
+				}
+				break // Only check first heading
+			}
+		}
+	}
+
+	return ""
+}
+
+// updatePlanJob updates an existing plan job file with new content
+func updatePlanJob(jobFilePath, newContent string) error {
+	// For now, just overwrite the file content
+	// In the future, we might want to preserve frontmatter or other metadata
+	return os.WriteFile(jobFilePath, []byte(newContent), 0644)
+}
+
 // extractPlanContent extracts the plan content from tool input
 func extractPlanContent(toolInput any) (string, bool) {
 	// Handle map[string]any (most common case)

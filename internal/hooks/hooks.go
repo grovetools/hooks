@@ -175,6 +175,14 @@ func RunPostToolUseHook() {
 		}
 	}
 
+	// Handle Edit - sync plan edits to grove-flow when editing Claude plan files
+	if data.ToolName == "Edit" {
+		if err := HandlePlanEdit(ctx, data); err != nil {
+			// Log but don't fail the hook - plan sync is best-effort
+			log.Printf("Failed to sync plan edit: %v", err)
+		}
+	}
+
 	// Get stored tool ID and update completion
 	if toolID := getStoredToolID(data.SessionID); toolID != "" {
 		success := data.ToolError == nil

@@ -479,3 +479,262 @@ func PlanPreservationEmptyPlanScenario() *harness.Scenario {
 		},
 	}
 }
+
+// PlanEditSyncScenario tests that Edit operations on Claude plan files sync to grove-flow
+func PlanEditSyncScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "plan-edit-sync",
+		Description: "Tests that Edit operations on Claude plan files (~/.claude/plans/*) sync to grove-flow",
+		Tags:        []string{"hooks", "flow", "plan-preservation", "edit"},
+		Steps: []harness.Step{
+			harness.NewStep("Setup project with flow plan and fake Claude plans dir", func(ctx *harness.Context) error {
+				git.Init(ctx.RootDir)
+				git.SetupTestConfig(ctx.RootDir)
+				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: plan-edit-test\n")
+				git.Add(ctx.RootDir, ".")
+				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Create flow plan directory
+				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
+				if err := os.MkdirAll(planDir, 0755); err != nil {
+					return err
+				}
+				fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
+				ctx.Set("plan_dir", planDir)
+
+				// Create a fake ~/.claude/plans directory in the test root for isolation
+				claudePlansDir := filepath.Join(ctx.RootDir, ".claude", "plans")
+				if err := os.MkdirAll(claudePlansDir, 0755); err != nil {
+					return err
+				}
+				ctx.Set("claude_plans_dir", claudePlansDir)
+
+				// Create an initial plan file that we'll "edit"
+				initialPlan := `# My Implementation Plan
+
+## Goal
+Build a feature to process user requests.
+
+## Steps
+1. Create the request handler
+2. Add validation logic
+`
+				planFilePath := filepath.Join(claudePlansDir, "fluffy-noodling-balloon.md")
+				fs.WriteString(planFilePath, initialPlan)
+				ctx.Set("plan_file_path", planFilePath)
+				ctx.Set("initial_plan", initialPlan)
+
+				return SetupTestDatabase(ctx)
+			}),
+
+			harness.NewStep("Simulate Edit hook on Claude plan file", func(ctx *harness.Context) error {
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
+				}
+
+				planDir := ctx.GetString("plan_dir")
+				planFilePath := ctx.GetString("plan_file_path")
+
+				// First, update the plan file content (simulating what Claude would do)
+				updatedPlan := `# My Implementation Plan
+
+## Goal
+Build a feature to process user requests.
+
+## Steps
+1. Create the request handler
+2. Add validation logic
+3. Write tests for the handler
+
+**Updated:** Added testing step during editing.
+`
+				fs.WriteString(planFilePath, updatedPlan)
+				ctx.Set("updated_plan", updatedPlan)
+
+				// Create the JSON input for posttooluse with Edit tool
+				hookInput := map[string]interface{}{
+					"session_id":      "test-plan-edit-session",
+					"transcript_path": "/tmp/test-transcript",
+					"hook_event_name": "PostToolUse:Edit",
+					"tool_name":       "Edit",
+					"tool_input": map[string]interface{}{
+						"file_path":  planFilePath,
+						"old_string": "2. Add validation logic\n",
+						"new_string": "2. Add validation logic\n3. Write tests for the handler\n\n**Updated:** Added testing step during editing.\n",
+					},
+					"tool_response":    "File edited successfully",
+					"tool_duration_ms": 50,
+				}
+
+				jsonInput, err := json.Marshal(hookInput)
+				if err != nil {
+					return fmt.Errorf("failed to marshal hook input: %w", err)
+				}
+
+				cmd := command.New(hooksBinary, "posttooluse").
+					Stdin(strings.NewReader(string(jsonInput))).
+					Dir(ctx.RootDir).
+					Env(
+						fmt.Sprintf("PWD=%s", ctx.RootDir),
+						fmt.Sprintf("GROVE_HOOKS_TARGET_PLAN_DIR=%s", planDir),
+						"GROVE_HOOKS_ENABLE_PLAN_PRESERVATION=true",
+						// Override HOME to use our test's .claude/plans
+						fmt.Sprintf("HOME=%s", ctx.RootDir),
+					)
+
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+				if err := assert.Equal(0, result.ExitCode, "posttooluse hook should succeed"); err != nil {
+					return err
+				}
+
+				return nil
+			}),
+
+			harness.NewStep("Verify plan was synced to grove-flow", func(ctx *harness.Context) error {
+				planDir := ctx.GetString("plan_dir")
+
+				entries, err := os.ReadDir(planDir)
+				if err != nil {
+					return fmt.Errorf("failed to read plan directory: %w", err)
+				}
+
+				ctx.ShowCommandOutput("Info", fmt.Sprintf("Found %d files in plan directory", len(entries)), "")
+
+				// Find a plan file (should be created by the sync)
+				var planFile string
+				for _, entry := range entries {
+					name := entry.Name()
+					ctx.ShowCommandOutput("Debug", "Found file", name)
+					if strings.HasSuffix(name, ".md") && name != ".grove-plan.yml" {
+						planFile = filepath.Join(planDir, name)
+						break
+					}
+				}
+
+				if planFile == "" {
+					return fmt.Errorf("no plan file found - Edit sync did not create a job")
+				}
+
+				ctx.ShowCommandOutput("Success", "Found synced plan file", planFile)
+
+				// Read and verify content
+				content, err := os.ReadFile(planFile)
+				if err != nil {
+					return fmt.Errorf("failed to read plan file: %w", err)
+				}
+
+				contentStr := string(content)
+
+				// Verify it contains the updated content
+				if !strings.Contains(contentStr, "My Implementation Plan") {
+					return fmt.Errorf("synced file doesn't contain expected title")
+				}
+
+				if !strings.Contains(contentStr, "Write tests for the handler") {
+					return fmt.Errorf("synced file doesn't contain the updated content")
+				}
+
+				ctx.ShowCommandOutput("Success", "Plan content verified with updated changes", "")
+				return nil
+			}),
+
+			harness.NewStep("Clean up", CleanupTestDatabase),
+		},
+	}
+}
+
+// PlanEditNonPlanFileScenario tests that Edit operations on non-plan files don't trigger sync
+func PlanEditNonPlanFileScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "plan-edit-non-plan-file",
+		Description: "Tests that Edit operations on regular files don't trigger plan sync",
+		Tags:        []string{"hooks", "flow", "plan-preservation", "edit"},
+		Steps: []harness.Step{
+			harness.NewStep("Setup project with flow plan", func(ctx *harness.Context) error {
+				git.Init(ctx.RootDir)
+				git.SetupTestConfig(ctx.RootDir)
+				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: non-plan-edit-test\n")
+				git.Add(ctx.RootDir, ".")
+				git.Commit(ctx.RootDir, "Initial commit")
+
+				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
+				os.MkdirAll(planDir, 0755)
+				fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
+				ctx.Set("plan_dir", planDir)
+
+				// Create a regular source file
+				fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), "package main\n\nfunc main() {}\n")
+
+				return SetupTestDatabase(ctx)
+			}),
+
+			harness.NewStep("Simulate Edit hook on regular source file", func(ctx *harness.Context) error {
+				hooksBinary, err := FindProjectBinary()
+				if err != nil {
+					return err
+				}
+
+				planDir := ctx.GetString("plan_dir")
+				sourceFile := filepath.Join(ctx.RootDir, "main.go")
+
+				hookInput := map[string]interface{}{
+					"session_id":      "test-regular-edit-session",
+					"hook_event_name": "PostToolUse:Edit",
+					"tool_name":       "Edit",
+					"tool_input": map[string]interface{}{
+						"file_path":  sourceFile,
+						"old_string": "func main() {}\n",
+						"new_string": "func main() {\n\tfmt.Println(\"Hello\")\n}\n",
+					},
+					"tool_response":    "File edited successfully",
+					"tool_duration_ms": 30,
+				}
+
+				jsonInput, _ := json.Marshal(hookInput)
+
+				cmd := command.New(hooksBinary, "posttooluse").
+					Stdin(strings.NewReader(string(jsonInput))).
+					Dir(ctx.RootDir).
+					Env(
+						fmt.Sprintf("PWD=%s", ctx.RootDir),
+						fmt.Sprintf("GROVE_HOOKS_TARGET_PLAN_DIR=%s", planDir),
+						"GROVE_HOOKS_ENABLE_PLAN_PRESERVATION=true",
+					)
+
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+				if err := assert.Equal(0, result.ExitCode, "hook should succeed"); err != nil {
+					return err
+				}
+
+				return nil
+			}),
+
+			harness.NewStep("Verify no plan file was created", func(ctx *harness.Context) error {
+				planDir := ctx.GetString("plan_dir")
+
+				entries, err := os.ReadDir(planDir)
+				if err != nil {
+					return fmt.Errorf("failed to read plan directory: %w", err)
+				}
+
+				for _, entry := range entries {
+					name := entry.Name()
+					// Only .grove-plan.yml should exist
+					if strings.HasSuffix(name, ".md") {
+						return fmt.Errorf("unexpected plan file created for non-plan Edit: %s", name)
+					}
+				}
+
+				ctx.ShowCommandOutput("Success", "No plan file created for regular file Edit", "")
+				return nil
+			}),
+
+			harness.NewStep("Clean up", CleanupTestDatabase),
+		},
+	}
+}
