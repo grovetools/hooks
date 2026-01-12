@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -74,10 +73,9 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 
 	// Try to find the Claude plan file by content matching
 	// This gives us a stable identifier for deduplication
-	claudeFilename := findClaudePlanFileByContent(planContent)
-	claudeSource := ""
-	if claudeFilename != "" {
-		claudeSource = "claude://plans/" + claudeFilename
+	sourceFile := ""
+	if claudeFilename := findClaudePlanFileByContent(planContent); claudeFilename != "" {
+		sourceFile = "claude://plans/" + claudeFilename
 	}
 
 	// Extract title from plan content
@@ -85,17 +83,17 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 	rawTitle := extractRawPlanTitle(planContent)
 
 	planLog.WithFields(logrus.Fields{
-		"claude_source": claudeSource,
-		"title":         title,
-		"raw_title":     rawTitle,
+		"source_file": sourceFile,
+		"title":       title,
+		"raw_title":   rawTitle,
 	}).Debug("Processing ExitPlanMode")
 
-	// Find existing job by claude_source (primary) or title (fallback)
-	existingJob := findExistingPlanJob(planDir, claudeSource, rawTitle)
+	// Find existing job by source_file (primary) or title (fallback)
+	existingJob := findExistingPlanJob(planDir, sourceFile, rawTitle)
 
 	if existingJob != "" {
 		// Update existing job
-		if err := updatePlanJob(existingJob, planContent, claudeSource); err != nil {
+		if err := updatePlanJob(existingJob, planContent, sourceFile); err != nil {
 			planLog.WithError(err).WithFields(logrus.Fields{
 				"plan_dir": planDir,
 				"job_file": existingJob,
@@ -103,15 +101,14 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 			return err
 		}
 		planLog.WithFields(logrus.Fields{
-			"plan_dir":      planDir,
-			"job_file":      existingJob,
-			"title":         title,
-			"claude_source": claudeSource,
+			"plan_dir":    planDir,
+			"job_file":    existingJob,
+			"title":       title,
+			"source_file": sourceFile,
 		}).Info("Updated existing plan job from ExitPlanMode")
 	} else {
-		// Generate a unique job filename and create new job
-		jobFilename := generateJobFilename(planDir)
-		if err := savePlanAsJob(planDir, jobFilename, title, planContent, claudeSource, preservationConfig); err != nil {
+		// Create new job
+		if err := savePlanAsJob(planDir, title, planContent, sourceFile, preservationConfig); err != nil {
 			planLog.WithError(err).WithFields(logrus.Fields{
 				"plan_dir": planDir,
 				"title":    title,
@@ -119,16 +116,15 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 			return err
 		}
 		planLog.WithFields(logrus.Fields{
-			"plan_dir":      planDir,
-			"job_filename":  jobFilename,
-			"title":         title,
-			"claude_source": claudeSource,
+			"plan_dir":    planDir,
+			"title":       title,
+			"source_file": sourceFile,
 		}).Info("Successfully saved Claude plan to grove-flow")
 	}
 
 	// Send notification if enabled
 	if preservationConfig.NotifyOnSave {
-		sendPlanSavedNotification(ctx, planDir, "", title)
+		sendPlanSavedNotification(ctx, planDir, title)
 	}
 
 	return nil
@@ -149,12 +145,11 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 	}
 
 	// Extract the Claude plan filename and format as URI for stable identification
-	claudeFilename := filepath.Base(filePath)
-	claudeSource := "claude://plans/" + claudeFilename
+	sourceFile := "claude://plans/" + filepath.Base(filePath)
 
 	planLog.WithFields(logrus.Fields{
-		"file_path":     filePath,
-		"claude_source": claudeSource,
+		"file_path":   filePath,
+		"source_file": sourceFile,
 	}).Debug("Detected edit to Claude plan file")
 
 	// Read the updated file content
@@ -194,12 +189,12 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 	title := extractPlanTitle(string(planContent), preservationConfig)
 	rawTitle := extractRawPlanTitle(string(planContent))
 
-	// Find existing job by claude_source (primary) or title (fallback)
-	existingJob := findExistingPlanJob(planDir, claudeSource, rawTitle)
+	// Find existing job by source_file (primary) or title (fallback)
+	existingJob := findExistingPlanJob(planDir, sourceFile, rawTitle)
 
 	if existingJob != "" {
-		// Update existing job, preserving claude_source in frontmatter
-		if err := updatePlanJob(existingJob, string(planContent), claudeSource); err != nil {
+		// Update existing job, preserving source_file in frontmatter
+		if err := updatePlanJob(existingJob, string(planContent), sourceFile); err != nil {
 			planLog.WithError(err).WithFields(logrus.Fields{
 				"plan_dir": planDir,
 				"job_file": existingJob,
@@ -207,15 +202,14 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 			return err
 		}
 		planLog.WithFields(logrus.Fields{
-			"plan_dir":      planDir,
-			"job_file":      existingJob,
-			"title":         title,
-			"claude_source": claudeSource,
+			"plan_dir":    planDir,
+			"job_file":    existingJob,
+			"title":       title,
+			"source_file": sourceFile,
 		}).Info("Updated existing plan job from Edit")
 	} else {
-		// Create new job with claude_source
-		jobFilename := generateJobFilename(planDir)
-		if err := savePlanAsJob(planDir, jobFilename, title, string(planContent), claudeSource, preservationConfig); err != nil {
+		// Create new job with source_file
+		if err := savePlanAsJob(planDir, title, string(planContent), sourceFile, preservationConfig); err != nil {
 			planLog.WithError(err).WithFields(logrus.Fields{
 				"plan_dir": planDir,
 				"title":    title,
@@ -223,16 +217,15 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 			return err
 		}
 		planLog.WithFields(logrus.Fields{
-			"plan_dir":      planDir,
-			"job_filename":  jobFilename,
-			"title":         title,
-			"claude_source": claudeSource,
+			"plan_dir":    planDir,
+			"title":       title,
+			"source_file": sourceFile,
 		}).Info("Created new plan job from Edit")
 	}
 
 	// Send notification if enabled
 	if preservationConfig.NotifyOnSave {
-		sendPlanSavedNotification(ctx, planDir, "", title)
+		sendPlanSavedNotification(ctx, planDir, title)
 	}
 
 	return nil
@@ -769,38 +762,8 @@ func toKebabCase(prefix, title string) string {
 	return result
 }
 
-// generateJobFilename generates a unique filename for the plan job
-func generateJobFilename(planDir string) string {
-	// Find existing jobs to determine next number
-	entries, err := os.ReadDir(planDir)
-	if err != nil {
-		return "99-claude-plan.md"
-	}
-
-	maxNum := 0
-	pattern := regexp.MustCompile(`^(\d+)-`)
-
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
-			matches := pattern.FindStringSubmatch(entry.Name())
-			if len(matches) > 1 {
-				var num int
-				fmt.Sscanf(matches[1], "%d", &num)
-				if num > maxNum {
-					maxNum = num
-				}
-			}
-		}
-	}
-
-	// Generate next number with leading zeros
-	nextNum := maxNum + 1
-	timestamp := time.Now().Format("150405") // HHMMSS
-	return fmt.Sprintf("%02d-claude-plan-%s.md", nextNum, timestamp)
-}
-
 // savePlanAsJob saves the plan content as a new grove-flow job using flow plan add
-func savePlanAsJob(planDir, jobFilename, title, planContent, sourceFile string, preservationConfig *PlanPreservationConfig) error {
+func savePlanAsJob(planDir, title, planContent, sourceFile string, preservationConfig *PlanPreservationConfig) error {
 	// Use flow plan add to create the job with proper frontmatter
 	args := []string{"plan", "add", planDir,
 		"--type", preservationConfig.JobType,
@@ -843,13 +806,12 @@ func savePlanAsJob(planDir, jobFilename, title, planContent, sourceFile string, 
 }
 
 // sendPlanSavedNotification sends a notification when a plan is saved
-func sendPlanSavedNotification(ctx *HookContext, planDir, jobFilename, title string) {
+func sendPlanSavedNotification(ctx *HookContext, planDir, title string) {
 	// Log an event for the plan save
 	eventData := map[string]any{
-		"plan_dir":     planDir,
-		"job_filename": jobFilename,
-		"title":        title,
-		"action":       "plan_preserved",
+		"plan_dir": planDir,
+		"title":    title,
+		"action":   "plan_preserved",
 	}
 
 	if err := ctx.LogEvent(models.EventType("plan_preserved"), eventData); err != nil {
