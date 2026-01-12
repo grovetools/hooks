@@ -74,28 +74,45 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 
 	// Extract title from plan content
 	title := extractPlanTitle(planContent, preservationConfig)
+	rawTitle := extractRawPlanTitle(planContent)
 
-	// Generate a unique job filename
-	jobFilename := generateJobFilename(planDir)
-
-	// Save the plan as a new job
-	if err := savePlanAsJob(planDir, jobFilename, title, planContent, preservationConfig); err != nil {
-		planLog.WithError(err).WithFields(logrus.Fields{
+	// Check if we already have a job for this plan (by raw title without prefix)
+	// If so, update it instead of creating a new one
+	existingJob := findExistingPlanJob(planDir, rawTitle)
+	if existingJob != "" {
+		// Update existing job
+		if err := updatePlanJob(existingJob, planContent); err != nil {
+			planLog.WithError(err).WithFields(logrus.Fields{
+				"plan_dir": planDir,
+				"job_file": existingJob,
+			}).Error("Failed to update existing plan job")
+			return err
+		}
+		planLog.WithFields(logrus.Fields{
 			"plan_dir": planDir,
+			"job_file": existingJob,
 			"title":    title,
-		}).Error("Failed to save plan as job")
-		return err
+		}).Info("Updated existing plan job from ExitPlanMode")
+	} else {
+		// Generate a unique job filename and create new job
+		jobFilename := generateJobFilename(planDir)
+		if err := savePlanAsJob(planDir, jobFilename, title, planContent, preservationConfig); err != nil {
+			planLog.WithError(err).WithFields(logrus.Fields{
+				"plan_dir": planDir,
+				"title":    title,
+			}).Error("Failed to save plan as job")
+			return err
+		}
+		planLog.WithFields(logrus.Fields{
+			"plan_dir":     planDir,
+			"job_filename": jobFilename,
+			"title":        title,
+		}).Info("Successfully saved Claude plan to grove-flow")
 	}
-
-	planLog.WithFields(logrus.Fields{
-		"plan_dir":     planDir,
-		"job_filename": jobFilename,
-		"title":        title,
-	}).Info("Successfully saved Claude plan to grove-flow")
 
 	// Send notification if enabled
 	if preservationConfig.NotifyOnSave {
-		sendPlanSavedNotification(ctx, planDir, jobFilename, title)
+		sendPlanSavedNotification(ctx, planDir, "", title)
 	}
 
 	return nil
@@ -292,10 +309,29 @@ func findExistingPlanJob(planDir, rawTitle string) string {
 	return ""
 }
 
-// updatePlanJob updates an existing plan job file with new content
+// updatePlanJob updates an existing plan job file with new content, preserving frontmatter
 func updatePlanJob(jobFilePath, newContent string) error {
-	// For now, just overwrite the file content
-	// In the future, we might want to preserve frontmatter or other metadata
+	// Read existing file to preserve frontmatter
+	existingContent, err := os.ReadFile(jobFilePath)
+	if err != nil {
+		// If we can't read, just write the new content
+		return os.WriteFile(jobFilePath, []byte(newContent), 0644)
+	}
+
+	existingStr := string(existingContent)
+
+	// Extract and preserve frontmatter if present
+	if strings.HasPrefix(existingStr, "---") {
+		parts := strings.SplitN(existingStr, "---", 3)
+		if len(parts) >= 3 {
+			frontmatter := parts[1]
+			// Combine preserved frontmatter with new content
+			updatedContent := "---" + frontmatter + "---\n\n" + newContent
+			return os.WriteFile(jobFilePath, []byte(updatedContent), 0644)
+		}
+	}
+
+	// No frontmatter found, just write new content
 	return os.WriteFile(jobFilePath, []byte(newContent), 0644)
 }
 
