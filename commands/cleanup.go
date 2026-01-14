@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/process"
 	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
@@ -118,7 +118,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 											fmt.Printf("Triggering auto-completion for dead flow job: %s\n", metadata.JobFilePath)
 										}
 										go func(jobPath, sessDir string) {
-											cmd := exec.Command("grove", "flow", "plan", "complete", jobPath)
+											cmd := delegation.Command("flow", "plan", "complete", jobPath)
 											if os.Getenv("GROVE_DEBUG") != "" {
 												output, err := cmd.CombinedOutput()
 												if err != nil {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/process"
 	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
@@ -313,7 +313,7 @@ func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*model
 					// Note: We keep the session directory so that flow plan complete can read the metadata
 					// to close the tmux window. The directory will be cleaned up after completion.
 					go func(jobPath, sessDir string) {
-						cmd := exec.Command("grove", "flow", "plan", "complete", jobPath)
+						cmd := delegation.Command("flow", "plan", "complete", jobPath)
 						// We can log errors for debugging but don't need to block on them.
 						// This is a best-effort, self-healing mechanism.
 						if os.Getenv("GROVE_DEBUG") != "" {

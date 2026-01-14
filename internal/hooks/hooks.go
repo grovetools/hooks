@@ -12,6 +12,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
 	"github.com/sirupsen/logrus"
@@ -491,7 +492,7 @@ func RunStopHook() {
 			slog.WithFields(logrus.Fields{
 				"job_file_path": jobFilePath,
 			}).Info("Auto-completing linked flow job")
-			cmd := exec.Command("grove", "flow", "plan", "complete", jobFilePath)
+			cmd := delegation.Command("flow", "plan", "complete", jobFilePath)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				// This isn't a fatal error for the hook itself, so just log it.
 				// The command might fail if the job is already complete, which is fine.
