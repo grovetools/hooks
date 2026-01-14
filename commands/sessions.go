@@ -38,6 +38,7 @@ func NewSessionsCmd() *cobra.Command {
 	cmd.AddCommand(newKillCmd())
 	cmd.AddCommand(newSetStatusCmd())
 	cmd.AddCommand(newMarkOldCompletedCmd())
+	cmd.AddCommand(newMarkZombiesInterruptedCmd())
 
 	return cmd
 }
@@ -1078,4 +1079,39 @@ func updateJobStatus(jobFilePath, newStatus string) error {
 	}
 
 	return nil
+}
+
+func newMarkZombiesInterruptedCmd() *cobra.Command {
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "mark-zombies-interrupted",
+		Short: "Mark stale interactive jobs as interrupted",
+		Long: `Find all 'chat' and 'interactive_agent' jobs with a non-terminal status (running, idle, pending_user)
+that do not have a corresponding live session process and update their frontmatter status to 'interrupted'.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			updatedCount, err := CleanupZombieFlowJobs(dryRun)
+			if err != nil {
+				return fmt.Errorf("failed to clean up zombie jobs: %w", err)
+			}
+
+			if dryRun {
+				ulog.Info("Dry run summary").
+					Field("would_update_count", updatedCount).
+					Pretty(fmt.Sprintf("\nDry run complete. Would update %d zombie job(s).", updatedCount)).
+					Emit()
+			} else {
+				ulog.Success("Zombie cleanup complete").
+					Field("updated_count", updatedCount).
+					Pretty(fmt.Sprintf("\nCleanup complete. Updated %d zombie job(s).", updatedCount)).
+					Emit()
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be updated without making changes")
+
+	return cmd
 }

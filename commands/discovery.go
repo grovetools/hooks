@@ -26,6 +26,52 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// IsZombieJob checks if a job is a zombie - an interactive job (chat/interactive_agent)
+// with a non-terminal status (running/idle/pending_user) that has no corresponding live session.
+// This helper is used by both real-time display (GetAllSessions) and file cleanup (CleanupZombieFlowJobs).
+//
+// Edge cases handled:
+//   - Jobs with empty JobFilePath are not considered zombies (can't be matched or updated)
+//   - Jobs with nil session pointer return false
+//   - Non-interactive job types (oneshot, headless_agent) are not considered zombies
+//
+// Note: There is a potential race condition if a session starts between building the
+// liveJobFilePaths map and calling this function. In practice, this is acceptable as the
+// job would simply be reconsidered on the next cleanup/discovery cycle.
+func IsZombieJob(job *models.Session, liveJobFilePaths map[string]bool) bool {
+	// Guard against nil job
+	if job == nil {
+		return false
+	}
+
+	// Jobs without a file path can't be matched against live sessions or updated
+	if job.JobFilePath == "" {
+		return false
+	}
+
+	isInteractiveType := job.Type == "chat" || job.Type == "interactive_agent"
+	isNonTerminalStatus := job.Status == "running" || job.Status == "idle" || job.Status == "pending_user"
+
+	if !isInteractiveType || !isNonTerminalStatus {
+		return false
+	}
+
+	_, isLive := liveJobFilePaths[job.JobFilePath]
+	return !isLive
+}
+
+// BuildLiveJobFilePathsMap creates a lookup map of job file paths that have live sessions.
+// Used by zombie detection logic. Returns an empty map if liveSessions is nil or empty.
+func BuildLiveJobFilePathsMap(liveSessions []*models.Session) map[string]bool {
+	liveJobFilePaths := make(map[string]bool)
+	for _, session := range liveSessions {
+		if session != nil && session.JobFilePath != "" {
+			liveJobFilePaths[session.JobFilePath] = true
+		}
+	}
+	return liveJobFilePaths
+}
+
 // Cache for flow jobs discovery to avoid expensive flow plan list calls
 var (
 	flowJobsCacheTTL  = 15 * time.Second // Cache for 15 seconds
@@ -993,6 +1039,15 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 			fmt.Fprintf(os.Stderr, "Warning: failed to discover flow jobs: %v\n", err)
 		}
 		flowJobs = []*models.Session{}
+	}
+
+	// Phase 1 Zombie Fix: Check flow jobs against live sessions and mark zombies as interrupted.
+	// Uses shared helper functions to ensure consistent zombie identification across display and cleanup.
+	liveJobFilePaths := BuildLiveJobFilePathsMap(liveInteractiveSessions)
+	for _, job := range flowJobs {
+		if IsZombieJob(job, liveJobFilePaths) {
+			job.Status = "interrupted"
+		}
 	}
 
 	// Discover OpenCode sessions

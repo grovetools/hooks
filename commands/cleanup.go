@@ -11,6 +11,7 @@ import (
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/process"
 	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
 	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
 	"github.com/mattsolo1/grove-hooks/internal/utils"
@@ -41,8 +42,8 @@ func NewCleanupCmd() *cobra.Command {
 				return fmt.Errorf("cleanup failed: %w", err)
 			}
 
-			// Clean up stale grove-flow jobs
-			cleanedJobs, err := CleanupStaleFlowJobs()
+			// Clean up zombie grove-flow jobs (interactive jobs with no live session)
+			cleanedJobs, err := CleanupZombieFlowJobs(false)
 			if err != nil {
 				return fmt.Errorf("flow job cleanup failed: %w", err)
 			}
@@ -53,11 +54,11 @@ func NewCleanupCmd() *cobra.Command {
 				ulog.Success("Cleanup completed").
 					Field("cleaned_sessions", cleanedSessions).
 					Field("cleaned_jobs", cleanedJobs).
-					Pretty(fmt.Sprintf("Cleaned up %d dead session(s) and %d stale job(s)", cleanedSessions, cleanedJobs)).
+					Pretty(fmt.Sprintf("Cleaned up %d dead session(s) and %d zombie job(s)", cleanedSessions, cleanedJobs)).
 					Emit()
 			} else {
 				ulog.Info("No cleanup needed").
-					Pretty("No dead sessions or stale jobs found").
+					Pretty("No dead sessions or zombie jobs found").
 					Emit()
 			}
 
@@ -224,13 +225,90 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	return cleaned, nil
 }
 
-// CleanupStaleFlowJobs discovers grove-flow jobs with stale lock files and updates their status
-// Returns the number of jobs cleaned up
-// Note: This function is maintained for backwards compatibility but the actual
-// grove-flow job cleanup logic is handled by grove-flow itself now
+// CleanupStaleFlowJobs is deprecated and has been superseded by CleanupZombieFlowJobs.
+// This function is kept for backwards compatibility but does nothing.
+// Use CleanupZombieFlowJobs(dryRun bool) instead for zombie job cleanup.
+//
+// Deprecated: Use CleanupZombieFlowJobs instead.
 func CleanupStaleFlowJobs() (int, error) {
-	// This functionality has been moved to grove-flow Phase 1-3
-	// and is handled by the PID-based lock file mechanism
-	// We keep this function for backwards compatibility but it's essentially a no-op now
 	return 0, nil
+}
+
+// updateJobStatusInFile updates a job file's status using orchestration.UpdateFrontmatter
+func updateJobStatusInFile(jobFilePath, newStatus string) error {
+	content, err := os.ReadFile(jobFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read job file: %w", err)
+	}
+
+	updatedContent, err := orchestration.UpdateFrontmatter(content, map[string]interface{}{
+		"status": newStatus,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update frontmatter: %w", err)
+	}
+
+	return os.WriteFile(jobFilePath, updatedContent, 0644)
+}
+
+// CleanupZombieFlowJobs finds interactive jobs (chat, interactive_agent) that are in a non-terminal
+// state but have no corresponding live session, and marks them as 'interrupted'.
+// Returns the count of jobs that were (or would be in dry-run mode) successfully updated.
+func CleanupZombieFlowJobs(dryRun bool) (int, error) {
+	updatedCount := 0
+	ulog := grovelogging.NewUnifiedLogger("grove-hooks.cleanup-zombies")
+
+	// 1. Discover all live interactive sessions to identify which jobs are actually running.
+	storage, err := disk.NewSQLiteStore()
+	if err != nil {
+		return 0, fmt.Errorf("failed to create storage for zombie cleanup: %w", err)
+	}
+	defer storage.(*disk.SQLiteStore).Close()
+
+	liveSessions, err := DiscoverLiveInteractiveSessions(storage)
+	if err != nil {
+		return 0, fmt.Errorf("failed to discover live sessions for zombie cleanup: %w", err)
+	}
+
+	// Use shared helper to build the live job paths map
+	liveJobFilePaths := BuildLiveJobFilePathsMap(liveSessions)
+
+	// 2. Discover all flow jobs from disk.
+	flowJobs, err := DiscoverFlowJobs()
+	if err != nil {
+		return 0, fmt.Errorf("failed to discover flow jobs for zombie cleanup: %w", err)
+	}
+
+	// 3. Identify and update zombies using shared helper.
+	for _, job := range flowJobs {
+		if !IsZombieJob(job, liveJobFilePaths) {
+			continue
+		}
+
+		// This is a zombie job.
+		if dryRun {
+			ulog.Info("Would mark as interrupted").
+				Field("job_file", job.JobFilePath).
+				Field("current_status", job.Status).
+				Pretty(fmt.Sprintf("Would update: %s (status: %s)", job.JobFilePath, job.Status)).
+				Emit()
+			updatedCount++
+		} else {
+			if err := updateJobStatusInFile(job.JobFilePath, "interrupted"); err != nil {
+				ulog.Warn("Failed to update zombie job file").
+					Field("job_file", job.JobFilePath).
+					Err(err).
+					Emit()
+				// Don't increment count on failure - only count successful updates
+				continue
+			}
+			ulog.Info("Marked as interrupted").
+				Field("job_file", job.JobFilePath).
+				Pretty(fmt.Sprintf("Updated: %s", job.JobFilePath)).
+				Emit()
+			updatedCount++
+		}
+	}
+
+	return updatedCount, nil
 }
