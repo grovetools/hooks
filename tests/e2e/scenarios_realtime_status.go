@@ -216,7 +216,7 @@ flow:
 					if actualStatus != expectedStatus {
 						return fmt.Errorf("job '%s': expected status=%s, got status=%s", jobTitle, expectedStatus, actualStatus)
 					}
-					ctx.ShowCommandOutput("✓", fmt.Sprintf("Job '%s' correctly shows status: %s", jobTitle, actualStatus), "")
+					ctx.ShowCommandOutput("*", fmt.Sprintf("Job '%s' correctly shows status: %s", jobTitle, actualStatus), "")
 				}
 
 				return nil
@@ -293,7 +293,7 @@ flow:
 					if actualStatus != expectedStatus {
 						return fmt.Errorf("job '%s': expected status=%s, got status=%s (real-time update failed)", jobTitle, expectedStatus, actualStatus)
 					}
-					ctx.ShowCommandOutput("✓", fmt.Sprintf("Job '%s' status updated in real-time to: %s", jobTitle, actualStatus), "")
+					ctx.ShowCommandOutput("*", fmt.Sprintf("Job '%s' status updated in real-time to: %s", jobTitle, actualStatus), "")
 				}
 
 				return nil
@@ -348,7 +348,7 @@ flow:
 					return fmt.Errorf("headless job with dead PID should be interrupted, got: %s", statusMap["Test Headless Agent Job"])
 				}
 
-				ctx.ShowCommandOutput("✓", "Jobs with dead PIDs correctly marked as interrupted", "")
+				ctx.ShowCommandOutput("*", "Jobs with dead PIDs correctly marked as interrupted", "")
 				return nil
 			}),
 
@@ -376,7 +376,7 @@ flow:
 						return fmt.Errorf("sessions list took %v (> 2s), real-time checks may not be working", elapsed)
 					}
 
-					ctx.ShowCommandOutput("✓", fmt.Sprintf("Run %d: sessions list completed in %v", i+1, elapsed), "")
+					ctx.ShowCommandOutput("*", fmt.Sprintf("Run %d: sessions list completed in %v", i+1, elapsed), "")
 				}
 
 				return nil

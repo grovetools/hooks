@@ -854,7 +854,7 @@ Example:
 				Emit()
 			if dryRun {
 				ulog.Info("Dry run mode enabled").
-					Pretty("🔍 DRY RUN MODE - No changes will be made").
+					Pretty(" DRY RUN MODE - No changes will be made").
 					Emit()
 			}
 			ulog.Info("").PrettyOnly().Pretty("").Emit()
@@ -930,7 +930,7 @@ Example:
 					Field("job_file", filepath.Base(session.JobFilePath)).
 					Field("started_at", session.StartedAt.Format("2006-01-02")).
 					Field("status", session.Status).
-					Pretty(fmt.Sprintf("📝 %s (started: %s, status: %s)",
+					Pretty(fmt.Sprintf(" %s (started: %s, status: %s)",
 						filepath.Base(session.JobFilePath),
 						session.StartedAt.Format("2006-01-02"),
 						session.Status)).
@@ -942,7 +942,7 @@ Example:
 						ulog.Warn("Failed to update job").
 							Field("job_file", session.JobFilePath).
 							Err(err).
-							Pretty(fmt.Sprintf("   ⚠️  Failed to update: %v", err)).
+							Pretty(fmt.Sprintf("   WARNING:  Failed to update: %v", err)).
 							Emit()
 						errors++
 						continue
@@ -953,7 +953,7 @@ Example:
 			}
 
 			ulog.Info("").PrettyOnly().Pretty("").Emit()
-			ulog.Info("Summary").Pretty("✅ Summary:").Emit()
+			ulog.Info("Summary").Pretty(" Summary:").Emit()
 			if dryRun {
 				ulog.Info("Dry run summary").
 					Field("would_mark_completed", updated).
@@ -978,14 +978,14 @@ Example:
 			if errors > 0 {
 				ulog.Warn("Jobs with errors").
 					Field("error_count", errors).
-					Pretty(fmt.Sprintf("   ⚠️  Errors: %d jobs (missing status field or other issues)", errors)).
+					Pretty(fmt.Sprintf("   WARNING:  Errors: %d jobs (missing status field or other issues)", errors)).
 					Emit()
 			}
 
 			if dryRun {
 				ulog.Info("").PrettyOnly().Pretty("").Emit()
 				ulog.Info("Dry run tip").
-					Pretty("💡 Run without --dry-run to actually update the files").
+					Pretty("Tip: Run without --dry-run to actually update the files").
 					Emit()
 			}
 

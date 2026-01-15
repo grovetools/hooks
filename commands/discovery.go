@@ -1534,11 +1534,11 @@ func sendJobReadyNotification(session *models.Session) {
 			title = "🤖 Agent Idle"
 		}
 	} else if session.Type == "oneshot" {
-		title = fmt.Sprintf("✅ Oneshot Complete: %s", session.JobTitle)
+		title = fmt.Sprintf(" Oneshot Complete: %s", session.JobTitle)
 		if session.JobTitle == "" && session.PlanName != "" {
-			title = fmt.Sprintf("✅ Oneshot Complete: %s", session.PlanName)
+			title = fmt.Sprintf(" Oneshot Complete: %s", session.PlanName)
 		} else if session.JobTitle == "" {
-			title = "✅ Oneshot Complete"
+			title = " Oneshot Complete"
 		}
 	} else {
 		title = fmt.Sprintf("Job Ready: %s", session.JobTitle)

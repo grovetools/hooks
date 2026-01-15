@@ -155,7 +155,7 @@ func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {
 
 	// Add job title if different from session ID
 	if jobTitle != "" && jobTitle != data.SessionID {
-		messageParts = append(messageParts, fmt.Sprintf("📋 %s", jobTitle))
+		messageParts = append(messageParts, fmt.Sprintf(" %s", jobTitle))
 	}
 
 	// Add plan name for jobs
@@ -166,12 +166,12 @@ func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {
 	// Add project/worktree info
 	if projectName != "" {
 		if isWorktree {
-			messageParts = append(messageParts, fmt.Sprintf("📁 %s (worktree)", projectName))
+			messageParts = append(messageParts, fmt.Sprintf(" %s (worktree)", projectName))
 		} else {
-			messageParts = append(messageParts, fmt.Sprintf("📁 %s", projectName))
+			messageParts = append(messageParts, fmt.Sprintf(" %s", projectName))
 		}
 	} else if repo != "" {
-		messageParts = append(messageParts, fmt.Sprintf("📁 %s", repo))
+		messageParts = append(messageParts, fmt.Sprintf(" %s", repo))
 	}
 
 	// Add branch info

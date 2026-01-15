@@ -55,7 +55,7 @@ func runOpencodeInstall(cmd *cobra.Command, args []string) error {
 
 	ulog.Success("Grove integration plugin installed").
 		Field("plugin_path", pluginPath).
-		Pretty(fmt.Sprintf("✓ Grove integration plugin for opencode installed at: %s", pluginPath)).
+		Pretty(fmt.Sprintf("* Grove integration plugin for opencode installed at: %s", pluginPath)).
 		Emit()
 	ulog.Info("Restart required").
 		Pretty("Please restart opencode for the plugin to take effect.").
