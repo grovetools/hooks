@@ -114,6 +114,7 @@ func LocalStorageScenario() *harness.Scenario {
 				}
 
 				for _, check := range checks {
+					// User-facing output goes to stdout
 					if err := assert.Contains(result.Stdout, check, fmt.Sprintf("Output should contain '%s'", check)); err != nil {
 						return err
 					}
@@ -342,7 +343,8 @@ func SessionQueriesScenario() *harness.Scenario {
 				}
 
 				// Check for table headers (check for presence of key header words)
-				requiredHeaders := []string{"SESSION ID", "TYPE", "STATUS", "CONTEXT", "USER", "DURATION", "IN STATE"}
+				// Table output goes to stdout
+				requiredHeaders := []string{"SESSION ID", "TYPE", "STATUS", "CONTEXT", "USER", "AGE"}
 				for _, header := range requiredHeaders {
 					if err := assert.Contains(result.Stdout, header, fmt.Sprintf("Should contain header '%s'", header)); err != nil {
 						return err
@@ -499,6 +501,7 @@ func OfflineOperationScenario() *harness.Scenario {
 					return err
 				}
 
+				// User-facing output goes to stdout
 				return assert.Contains(result.Stdout, "Status: completed", "Session should be completed")
 			}),
 			harness.NewStep("Clean up test database", CleanupTestDatabase),

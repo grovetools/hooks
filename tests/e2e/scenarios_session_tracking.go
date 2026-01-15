@@ -24,9 +24,9 @@ func PIDBasedSessionTracking() *harness.Scenario {
 			harness.NewStep("Set up test database", SetupTestDatabase),
 
 			harness.NewStep("Create session directories", func(ctx *harness.Context) error {
-				// With XDG_DATA_HOME set, ~/.grove/hooks/sessions becomes XDG_DATA_HOME/hooks/sessions
-				xdgDataHome := ctx.GetString("xdg_data_home")
-				groveSessionsDir := filepath.Join(xdgDataHome, "hooks", "sessions")
+				// With HOME set, ~/.grove/hooks/sessions becomes HOME/hooks/sessions
+				sandboxedHome := ctx.GetString("sandboxed_home")
+				groveSessionsDir := filepath.Join(sandboxedHome, ".grove", "hooks", "sessions")
 				testSessionDir := filepath.Join(groveSessionsDir, "test-session-phase4")
 
 				// Store paths for cleanup
@@ -40,11 +40,11 @@ func PIDBasedSessionTracking() *harness.Scenario {
 				markerFile := filepath.Join(ctx.RootDir, "session-tracking-info.txt")
 				info := fmt.Sprintf(`PID-based Session Tracking Test
 
-This test uses XDG_DATA_HOME to redirect all artifacts to the temp directory.
+This test uses HOME to redirect all artifacts to the temp directory.
 
-Session directory structure (with XDG_DATA_HOME=%s):
+Session directory structure (with HOME=%s):
   ~/.grove/hooks/sessions/ becomes:
-  %s/hooks/sessions/
+  %s/.grove/hooks/sessions/
     └── <session-id>/
         ├── pid.lock       (contains the process PID)
         └── metadata.json  (contains session metadata)
@@ -53,7 +53,7 @@ Test session ID: test-session-phase4
 Test session path: %s
 
 All artifacts are in this temp directory for easy inspection.
-`, xdgDataHome, xdgDataHome, testSessionDir)
+`, sandboxedHome, sandboxedHome, testSessionDir)
 				os.WriteFile(markerFile, []byte(info), 0644)
 
 				return nil
@@ -197,11 +197,11 @@ All artifacts are in this temp directory for easy inspection.
 	}
 }
 
-// SessionCleanupOnStop tests that session directories are cleaned up on completion
+// SessionCleanupOnStop tests that session directories are preserved on completion for later cleanup
 func SessionCleanupOnStop() *harness.Scenario {
 	return &harness.Scenario{
 		Name:        "session-cleanup-on-stop",
-		Description: "Tests session directory cleanup when session completes",
+		Description: "Tests session directory is preserved when session completes (cleanup handled separately)",
 		Steps: []harness.Step{
 			harness.NewStep("Set up test database", SetupTestDatabase),
 
@@ -228,9 +228,9 @@ func SessionCleanupOnStop() *harness.Scenario {
 					return err
 				}
 
-				// Store session directory path (using XDG_DATA_HOME from context)
-				xdgDataHome := ctx.GetString("xdg_data_home")
-				testSessionDir := filepath.Join(xdgDataHome, "hooks", "sessions", sessionID)
+				// Store session directory path (using HOME from context)
+				sandboxedHome := ctx.GetString("sandboxed_home")
+				testSessionDir := filepath.Join(sandboxedHome, ".grove", "hooks", "sessions", sessionID)
 				ctx.Set("test_session_dir", testSessionDir)
 
 				// Verify it was created
@@ -262,15 +262,16 @@ func SessionCleanupOnStop() *harness.Scenario {
 				return assert.Equal(0, result.ExitCode, "stop hook should succeed")
 			}),
 
-			harness.NewStep("Verify session directory was removed", func(ctx *harness.Context) error {
+			harness.NewStep("Verify session directory is preserved for later cleanup", func(ctx *harness.Context) error {
 				testSessionDir := ctx.GetString("test_session_dir")
 
-				// Session directory should be gone after completion
-				if _, err := os.Stat(testSessionDir); !os.IsNotExist(err) {
-					return fmt.Errorf("session directory should be removed after completion: %s", testSessionDir)
+				// Session directory should be PRESERVED after completion (for transcript archiving).
+				// Cleanup is now handled separately by 'grove-hooks sessions cleanup' command.
+				if _, err := os.Stat(testSessionDir); os.IsNotExist(err) {
+					return fmt.Errorf("session directory should be preserved after completion (for transcript archiving): %s", testSessionDir)
 				}
 
-				ctx.ShowCommandOutput("Success", "Session directory cleaned up on completion", "")
+				ctx.ShowCommandOutput("Success", "Session directory preserved for later cleanup", "")
 				return nil
 			}),
 
@@ -315,8 +316,8 @@ func SessionCleanupOnStop() *harness.Scenario {
 				cmd := command.New(hooksBinary, "pretooluse").Stdin(strings.NewReader(jsonInput))
 				cmd.Run()
 
-				xdgDataHome := ctx.GetString("xdg_data_home")
-				idleSessionDir := filepath.Join(xdgDataHome, "hooks", "sessions", idleSessionID)
+				sandboxedHome := ctx.GetString("sandboxed_home")
+				idleSessionDir := filepath.Join(sandboxedHome, ".grove", "hooks", "sessions", idleSessionID)
 
 				// Stop with empty exit_reason (normal stop, not completion)
 				jsonInput = fmt.Sprintf(`{
@@ -429,9 +430,9 @@ func SessionDiscoveryService() *harness.Scenario {
 			}),
 
 			harness.NewStep("Test discovery with stale PID", func(ctx *harness.Context) error {
-				xdgDataHome := ctx.GetString("xdg_data_home")
+				sandboxedHome := ctx.GetString("sandboxed_home")
 				staleSessionID := fmt.Sprintf("stale-%d", time.Now().Unix())
-				staleSessionDir := filepath.Join(xdgDataHome, "hooks", "sessions", staleSessionID)
+				staleSessionDir := filepath.Join(sandboxedHome, ".grove", "hooks", "sessions", staleSessionID)
 
 				// Create a stale session manually with fake dead PID
 				os.MkdirAll(staleSessionDir, 0755)

@@ -39,7 +39,7 @@ func InstallCommandScenario() *harness.Scenario {
 					return err
 				}
 
-				// Verify output messages
+				// Verify output messages (user-facing output goes to stdout)
 				if err := assert.Contains(result.Stdout, "Creating new settings", "Should indicate creating new settings"); err != nil {
 					return err
 				}
@@ -138,7 +138,7 @@ func InstallCommandScenario() *harness.Scenario {
 					return err
 				}
 
-				// Verify output indicates updating
+				// Verify output indicates updating (user-facing output goes to stdout)
 				if err := assert.Contains(result.Stdout, "Updating existing settings", "Should indicate updating existing settings"); err != nil {
 					return err
 				}

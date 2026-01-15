@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
 )
 
 type ClaudeSettings map[string]interface{}
@@ -45,8 +44,6 @@ This command will:
 }
 
 func runInstall(targetDir string) error {
-	ulog := grovelogging.NewUnifiedLogger("grove-hooks.install")
-
 	// Resolve target directory
 	absDir, err := filepath.Abs(targetDir)
 	if err != nil {
@@ -79,23 +76,13 @@ func runInstall(targetDir string) error {
 		// Handle empty or invalid JSON files
 		if len(data) == 0 || string(data) == "{}" {
 			settings = make(ClaudeSettings)
-			ulog.Info("Found empty settings file, creating new configuration").
-				Field("settings_path", settingsPath).
-				Pretty(fmt.Sprintf("Found empty settings file, creating new configuration at %s", settingsPath)).
-				Emit()
+			fmt.Printf("Found empty settings file, creating new configuration at %s\n", settingsPath)
 		} else {
 			if err := json.Unmarshal(data, &settings); err != nil {
 				// If parsing fails, offer to backup and create new
 				backupPath := settingsPath + ".backup"
-				ulog.Warn("Failed to parse existing settings").
-					Field("settings_path", settingsPath).
-					Err(err).
-					Pretty(fmt.Sprintf("Failed to parse existing settings (%v)", err)).
-					Emit()
-				ulog.Info("Backing up and creating new configuration").
-					Field("backup_path", backupPath).
-					Pretty(fmt.Sprintf("Backing up to %s and creating new configuration", backupPath)).
-					Emit()
+				fmt.Printf("Failed to parse existing settings (%v)\n", err)
+				fmt.Printf("Backing up to %s and creating new configuration\n", backupPath)
 
 				// Backup the corrupted file
 				if err := os.WriteFile(backupPath, data, 0o644); err != nil {
@@ -104,19 +91,13 @@ func runInstall(targetDir string) error {
 
 				settings = make(ClaudeSettings)
 			} else {
-				ulog.Info("Updating existing settings").
-					Field("settings_path", settingsPath).
-					Pretty(fmt.Sprintf("Updating existing settings at %s", settingsPath)).
-					Emit()
+				fmt.Printf("Updating existing settings at %s\n", settingsPath)
 			}
 		}
 	} else {
 		// File doesn't exist, create new settings
 		settings = make(ClaudeSettings)
-		ulog.Info("Creating new settings").
-			Field("settings_path", settingsPath).
-			Pretty(fmt.Sprintf("Creating new settings at %s", settingsPath)).
-			Emit()
+		fmt.Printf("Creating new settings at %s\n", settingsPath)
 	}
 
 	// Define default hooks configuration
@@ -192,18 +173,15 @@ func runInstall(targetDir string) error {
 		return fmt.Errorf("failed to write settings: %w", err)
 	}
 
-	ulog.Success("Grove hooks configuration installed successfully").
-		Field("settings_file", settingsPath).
-		Pretty("Grove hooks configuration installed successfully").
-		Emit()
-	ulog.Success("Settings file location").
-		Field("path", settingsPath).
-		Pretty(fmt.Sprintf("Settings file: %s", settingsPath)).
-		Emit()
-	ulog.Info("").PrettyOnly().Pretty("").Emit()
-	ulog.Info("Hooks configured").
-		Pretty("The following hooks have been configured:\n  - PreToolUse: Runs before any tool use\n  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, or Read tools\n  - Notification: Runs on notifications\n  - Stop: Runs when conversation stops\n  - SubagentStop: Runs when subagent stops").
-		Emit()
+	fmt.Println("Grove hooks configuration installed successfully")
+	fmt.Printf("Settings file: %s\n", settingsPath)
+	fmt.Println()
+	fmt.Println("The following hooks have been configured:")
+	fmt.Println("  - PreToolUse: Runs before any tool use")
+	fmt.Println("  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, or Read tools")
+	fmt.Println("  - Notification: Runs on notifications")
+	fmt.Println("  - Stop: Runs when conversation stops")
+	fmt.Println("  - SubagentStop: Runs when subagent stops")
 
 	return nil
 }

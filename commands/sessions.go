@@ -351,91 +351,58 @@ func newSessionsGetCmd() *cobra.Command {
 				sessionType = "job"
 			}
 
-			// Detailed text output
-			ulog.Info("Session details retrieved").
-				Field("session_id", baseSession.ID).
-				Field("type", sessionType).
-				Field("status", baseSession.Status).
-				Pretty(fmt.Sprintf("Session ID: %s\nType: %s\nStatus: %s", baseSession.ID, sessionType, baseSession.Status)).
-				Emit()
+			// Human-readable text output to stdout (data output, not logs)
+			fmt.Printf("Session ID: %s\n", baseSession.ID)
+			fmt.Printf("Type: %s\n", sessionType)
+			fmt.Printf("Status: %s\n", baseSession.Status)
+			fmt.Println()
 
 			if sessionType == "job" {
 				// Oneshot job specific fields
 				if planName != "" {
-					ulog.Info("Session plan").
-						Field("plan", planName).
-						Pretty(fmt.Sprintf("Plan: %s", planName)).
-						Emit()
+					fmt.Printf("Plan: %s\n", planName)
 				}
 				if planDirectory != "" {
-					ulog.Info("Session plan directory").
-						Field("plan_directory", planDirectory).
-						Pretty(fmt.Sprintf("Plan Directory: %s", planDirectory)).
-						Emit()
+					fmt.Printf("Plan Directory: %s\n", planDirectory)
 				}
 				if jobTitle != "" {
-					ulog.Info("Session job title").
-						Field("job_title", jobTitle).
-						Pretty(fmt.Sprintf("Job Title: %s", jobTitle)).
-						Emit()
+					fmt.Printf("Job Title: %s\n", jobTitle)
 				}
 				if jobFilePath != "" {
-					ulog.Info("Session job file").
-						Field("job_file", jobFilePath).
-						Pretty(fmt.Sprintf("Job File: %s", jobFilePath)).
-						Emit()
+					fmt.Printf("Job File: %s\n", jobFilePath)
 				}
 			} else {
 				// Claude session specific fields
-				ulog.Info("Session repository info").
-					Field("repository", baseSession.Repo).
-					Field("branch", baseSession.Branch).
-					Pretty(fmt.Sprintf("Repository: %s\nBranch: %s", baseSession.Repo, baseSession.Branch)).
-					Emit()
+				fmt.Printf("Repository: %s\n", baseSession.Repo)
+				fmt.Printf("Branch: %s\n", baseSession.Branch)
 			}
+			fmt.Println()
 
-			ulog.Info("Session user and environment").
-				Field("user", baseSession.User).
-				Field("working_directory", baseSession.WorkingDirectory).
-				Field("pid", baseSession.PID).
-				Pretty(fmt.Sprintf("User: %s\nWorking Directory: %s\nPID: %d", baseSession.User, baseSession.WorkingDirectory, baseSession.PID)).
-				Emit()
+			fmt.Printf("User: %s\n", baseSession.User)
+			fmt.Printf("Working Directory: %s\n", baseSession.WorkingDirectory)
+			fmt.Printf("PID: %d\n", baseSession.PID)
+			fmt.Println()
 
-			ulog.Info("Session started").
-				Field("started_at", baseSession.StartedAt).
-				Pretty(fmt.Sprintf("Started: %s", baseSession.StartedAt.Format(time.RFC3339))).
-				Emit()
+			fmt.Printf("Started: %s\n", baseSession.StartedAt.Format(time.RFC3339))
 
 			if baseSession.EndedAt != nil {
 				duration := baseSession.EndedAt.Sub(baseSession.StartedAt).Round(time.Second)
-				ulog.Info("Session ended").
-					Field("ended_at", baseSession.EndedAt).
-					Field("duration_seconds", duration.Seconds()).
-					Pretty(fmt.Sprintf("Ended: %s\nDuration: %s", baseSession.EndedAt.Format(time.RFC3339), duration)).
-					Emit()
+				fmt.Printf("Ended: %s\n", baseSession.EndedAt.Format(time.RFC3339))
+				fmt.Printf("Duration: %s\n", duration)
 			}
 
 			if baseSession.TmuxKey != "" {
-				ulog.Info("Session tmux key").
-					Field("tmux_key", baseSession.TmuxKey).
-					Pretty(fmt.Sprintf("Tmux Key: %s", baseSession.TmuxKey)).
-					Emit()
+				fmt.Printf("Tmux Key: %s\n", baseSession.TmuxKey)
 			}
 
 			if baseSession.ToolStats != nil {
-				ulog.Info("Tool statistics").
-					Field("total_calls", baseSession.ToolStats.TotalCalls).
-					Field("bash_commands", baseSession.ToolStats.BashCommands).
-					Field("file_modifications", baseSession.ToolStats.FileModifications).
-					Field("file_reads", baseSession.ToolStats.FileReads).
-					Field("search_operations", baseSession.ToolStats.SearchOperations).
-					Pretty(fmt.Sprintf("\nTool Statistics:\n  Total Calls: %d\n  Bash Commands: %d\n  File Modifications: %d\n  File Reads: %d\n  Search Operations: %d",
-						baseSession.ToolStats.TotalCalls,
-						baseSession.ToolStats.BashCommands,
-						baseSession.ToolStats.FileModifications,
-						baseSession.ToolStats.FileReads,
-						baseSession.ToolStats.SearchOperations)).
-					Emit()
+				fmt.Println()
+				fmt.Println("Tool Statistics:")
+				fmt.Printf("  Total Calls: %d\n", baseSession.ToolStats.TotalCalls)
+				fmt.Printf("  Bash Commands: %d\n", baseSession.ToolStats.BashCommands)
+				fmt.Printf("  File Modifications: %d\n", baseSession.ToolStats.FileModifications)
+				fmt.Printf("  File Reads: %d\n", baseSession.ToolStats.FileReads)
+				fmt.Printf("  Search Operations: %d\n", baseSession.ToolStats.SearchOperations)
 			}
 
 			return nil

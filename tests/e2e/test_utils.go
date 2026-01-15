@@ -37,21 +37,39 @@ func SetupTestDatabase(ctx *harness.Context) error {
 	os.Setenv("GROVE_HOOKS_DB_PATH", testDbPath)
 	ctx.Set("test_db_path", testDbPath)
 
-	// Set XDG_DATA_HOME to RootDir (NOT RootDir/.grove!)
-	// When expandPath sees ~/.grove/hooks/sessions with XDG_DATA_HOME set,
-	// it strips .grove/ and joins: XDG_DATA_HOME/hooks/sessions
-	// So XDG_DATA_HOME should be the base directory, not include .grove
-	xdgDataHome := tempDir
+	// Set HOME to a sandboxed directory within the test root.
+	// This ensures that grove-core's FileSystemRegistry (which uses os.UserHomeDir())
+	// writes session files to the test directory instead of the real home.
+	// os.UserHomeDir() respects the HOME environment variable on Unix systems.
+	sandboxedHome := filepath.Join(tempDir, "home")
+	if err := os.MkdirAll(sandboxedHome, 0755); err != nil {
+		return fmt.Errorf("failed to create sandboxed home: %w", err)
+	}
+
+	oldHome := os.Getenv("HOME")
+	ctx.Set("old_home", oldHome)
+	os.Setenv("HOME", sandboxedHome)
+	ctx.Set("sandboxed_home", sandboxedHome)
+
+	// Also set XDG_DATA_HOME for any code that checks it
 	oldXdgDataHome := os.Getenv("XDG_DATA_HOME")
 	ctx.Set("old_xdg_data_home", oldXdgDataHome)
-	os.Setenv("XDG_DATA_HOME", xdgDataHome)
-	ctx.Set("xdg_data_home", xdgDataHome)
+	os.Setenv("XDG_DATA_HOME", filepath.Join(sandboxedHome, ".local", "share"))
+	ctx.Set("xdg_data_home", filepath.Join(sandboxedHome, ".local", "share"))
 
 	return nil
 }
 
 // CleanupTestDatabase removes the test database
 func CleanupTestDatabase(ctx *harness.Context) error {
+	// Restore original HOME
+	oldHome := ctx.GetString("old_home")
+	if oldHome != "" {
+		os.Setenv("HOME", oldHome)
+	} else {
+		os.Unsetenv("HOME")
+	}
+
 	// Restore original XDG_DATA_HOME
 	oldXdgDataHome := ctx.GetString("old_xdg_data_home")
 	if oldXdgDataHome != "" {
