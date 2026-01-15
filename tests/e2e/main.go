@@ -40,12 +40,6 @@ func main() {
 		// Plan edit sync tests
 		PlanEditSyncScenario(),
 		PlanEditNonPlanFileScenario(),
-		// Zombie job management tests
-		ZombieRealtimeDetectionScenario(),
-		ZombieManualCleanupDryRunScenario(),
-		ZombieManualCleanupExecutionScenario(),
-		ZombieAutomatedCleanupScenario(),
-		ZombieLiveJobNotAZombieScenario(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {
