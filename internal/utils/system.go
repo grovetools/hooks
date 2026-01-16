@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/pkg/models"
+	"github.com/grovetools/core/pkg/models"
 )
 
 // CopyToClipboard copies text to the system clipboard

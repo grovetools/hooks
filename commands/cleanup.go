@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 	"time"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/process"
-	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
-	"github.com/mattsolo1/grove-core/util/delegation"
-	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
-	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
-	"github.com/mattsolo1/grove-hooks/internal/utils"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/process"
+	coresessions "github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/util/delegation"
+	"github.com/grovetools/hooks/internal/storage/disk"
+	"github.com/grovetools/hooks/internal/storage/interfaces"
+	"github.com/grovetools/hooks/internal/utils"
 	"github.com/spf13/cobra"
 )
 

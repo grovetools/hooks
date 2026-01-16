@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-core/util/delegation"
-	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
-	"github.com/mattsolo1/grove-hooks/internal/utils"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/util/delegation"
+	"github.com/grovetools/hooks/internal/storage/disk"
+	"github.com/grovetools/hooks/internal/utils"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )

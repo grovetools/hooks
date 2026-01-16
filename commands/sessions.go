@@ -11,13 +11,13 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/mattsolo1/grove-core/config"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-core/pkg/process"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
-	"github.com/mattsolo1/grove-hooks/internal/utils"
+	"github.com/grovetools/core/config"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/process"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/hooks/internal/storage/disk"
+	"github.com/grovetools/hooks/internal/utils"
 	"github.com/spf13/cobra"
 )
 

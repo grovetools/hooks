@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-core/pkg/process"
-	"github.com/mattsolo1/grove-core/pkg/sessions"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
-	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
-	"github.com/mattsolo1/grove-hooks/internal/utils"
-	"github.com/mattsolo1/grove-tmux/pkg/tmux"
+	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/process"
+	"github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/hooks/internal/storage/disk"
+	"github.com/grovetools/hooks/internal/storage/interfaces"
+	"github.com/grovetools/hooks/internal/utils"
+	"github.com/grovetools/nav/pkg/tmux"
 )
 
 // BaseHookInput contains fields common to all hooks

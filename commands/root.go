@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-hooks/internal/hooks"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/hooks/internal/hooks"
 	"github.com/spf13/cobra"
 )
 

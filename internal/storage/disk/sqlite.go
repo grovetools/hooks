@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-hooks/internal/storage/interfaces"
+	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/hooks/internal/storage/interfaces"
 )
 
 // ExtendedSession wraps the grove-core Session with oneshot-specific fields

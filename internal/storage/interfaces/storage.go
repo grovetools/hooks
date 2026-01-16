@@ -1,6 +1,6 @@
 package interfaces
 
-import "github.com/mattsolo1/grove-core/pkg/models"
+import "github.com/grovetools/core/pkg/models"
 
 // SessionStorer defines the interface for session state persistence.
 type SessionStorer interface {

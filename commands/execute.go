@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-hooks/internal/hooks"
+	"github.com/grovetools/hooks/internal/hooks"
 )
 
 // Execute runs the appropriate command or hook based on how the binary was called.

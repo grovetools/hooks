@@ -2,7 +2,7 @@ package browse
 
 import (
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/grovetools/core/tui/keymap"
 )
 
 // KeyMap is the custom keymap for the session browser

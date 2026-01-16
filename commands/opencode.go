@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-hooks/internal/opencode/plugin"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/hooks/internal/opencode/plugin"
 	"github.com/spf13/cobra"
 )
 

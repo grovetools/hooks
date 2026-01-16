@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-tend/pkg/assert"
-	"github.com/mattsolo1/grove-tend/pkg/command"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/tend/pkg/assert"
+	"github.com/grovetools/tend/pkg/command"
+	"github.com/grovetools/tend/pkg/harness"
 )
 
 // TestExtendedSession represents a session with oneshot fields for testing

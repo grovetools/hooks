@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/mattsolo1/grove-hooks/commands"
+	"github.com/grovetools/hooks/commands"
 )
 
 func main() {

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/mattsolo1/grove-core/pkg/models"
-	"github.com/mattsolo1/grove-hooks/internal/storage/disk"
-	"github.com/mattsolo1/grove-notifications"
+	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/hooks/internal/storage/disk"
+	"github.com/grovetools/notify"
 )
 
 // HookBlockingError represents an error that should block the session from stopping
