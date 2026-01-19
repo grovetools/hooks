@@ -1,5 +1,3 @@
-# Grove Hooks
-
 Grove Hooks is a command-line tool that captures lifecycle events from local AI agent sessions and automated jobs, storing the data in a local SQLite database.
 
 <!-- placeholder for animated gif -->
