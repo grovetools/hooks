@@ -24,9 +24,9 @@ func PIDBasedSessionTracking() *harness.Scenario {
 			harness.NewStep("Set up test database", SetupTestDatabase),
 
 			harness.NewStep("Create session directories", func(ctx *harness.Context) error {
-				// With HOME set, ~/.grove/hooks/sessions becomes HOME/hooks/sessions
+				// With HOME set, ~/.local/state/grove/hooks/sessions becomes HOME/hooks/sessions
 				sandboxedHome := ctx.GetString("sandboxed_home")
-				groveSessionsDir := filepath.Join(sandboxedHome, ".grove", "hooks", "sessions")
+				groveSessionsDir := filepath.Join(sandboxedHome, ".local", "state", "grove", "hooks", "sessions")
 				testSessionDir := filepath.Join(groveSessionsDir, "test-session-phase4")
 
 				// Store paths for cleanup
@@ -43,8 +43,8 @@ func PIDBasedSessionTracking() *harness.Scenario {
 This test uses HOME to redirect all artifacts to the temp directory.
 
 Session directory structure (with HOME=%s):
-  ~/.grove/hooks/sessions/ becomes:
-  %s/.grove/hooks/sessions/
+  ~/.local/state/grove/hooks/sessions/ becomes:
+  %s/.local/state/grove/hooks/sessions/
     └── <session-id>/
         ├── pid.lock       (contains the process PID)
         └── metadata.json  (contains session metadata)
@@ -230,7 +230,7 @@ func SessionCleanupOnStop() *harness.Scenario {
 
 				// Store session directory path (using HOME from context)
 				sandboxedHome := ctx.GetString("sandboxed_home")
-				testSessionDir := filepath.Join(sandboxedHome, ".grove", "hooks", "sessions", sessionID)
+				testSessionDir := filepath.Join(sandboxedHome, ".local", "state", "grove", "hooks", "sessions", sessionID)
 				ctx.Set("test_session_dir", testSessionDir)
 
 				// Verify it was created
@@ -317,7 +317,7 @@ func SessionCleanupOnStop() *harness.Scenario {
 				cmd.Run()
 
 				sandboxedHome := ctx.GetString("sandboxed_home")
-				idleSessionDir := filepath.Join(sandboxedHome, ".grove", "hooks", "sessions", idleSessionID)
+				idleSessionDir := filepath.Join(sandboxedHome, ".local", "state", "grove", "hooks", "sessions", idleSessionID)
 
 				// Stop with empty exit_reason (normal stop, not completion)
 				jsonInput = fmt.Sprintf(`{
@@ -432,7 +432,7 @@ func SessionDiscoveryService() *harness.Scenario {
 			harness.NewStep("Test discovery with stale PID", func(ctx *harness.Context) error {
 				sandboxedHome := ctx.GetString("sandboxed_home")
 				staleSessionID := fmt.Sprintf("stale-%d", time.Now().Unix())
-				staleSessionDir := filepath.Join(sandboxedHome, ".grove", "hooks", "sessions", staleSessionID)
+				staleSessionDir := filepath.Join(sandboxedHome, ".local", "state", "grove", "hooks", "sessions", staleSessionID)
 
 				// Create a stale session manually with fake dead PID
 				os.MkdirAll(staleSessionDir, 0755)

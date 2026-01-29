@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/hooks/internal/storage/disk"
+	"github.com/grovetools/hooks/internal/utils"
 	"github.com/spf13/cobra"
 )
 

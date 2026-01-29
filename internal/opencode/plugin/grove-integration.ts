@@ -15,6 +15,34 @@ import {
 // It connects to the grove-hooks SQLite database and creates a file-based
 // session registry to make opencode sessions discoverable by grove-hooks.
 
+// --- XDG Path Resolution ---
+// Call `core paths` to get XDG-compliant paths for Grove directories
+
+interface GrovePaths {
+  config_dir: string;
+  data_dir: string;
+  state_dir: string;
+  cache_dir: string;
+  bin_dir: string;
+}
+
+function getGrovePaths(): GrovePaths | null {
+  try {
+    const result = Bun.spawnSync(["core", "paths"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (result.exitCode === 0) {
+      return JSON.parse(result.stdout.toString()) as GrovePaths;
+    }
+    console.error("[Grove Plugin] Failed to get paths from core:", result.stderr.toString());
+    return null;
+  } catch (e) {
+    console.error("[Grove Plugin] Failed to call core paths:", e);
+    return null;
+  }
+}
+
 // --- Structured Logging ---
 // Writes JSON logs to .grove/logs/workspace-YYYY-MM-DD.log for compatibility with `core logs`
 
@@ -98,26 +126,31 @@ export const GroveIntegrationPlugin: Plugin = async ({
     directory: directory || null,
   });
 
+  // Get XDG-compliant paths from core
+  const grovePaths = getGrovePaths();
+
   // Paths for grove-hooks integration
-  const hooksDbPath = join(
-    homeDir,
-    ".local",
-    "share",
-    "grove-hooks",
-    "state.db"
-  );
-  const sessionsDir = join(homeDir, ".grove", "hooks", "sessions");
+  // Use XDG paths if available, fall back to legacy paths
+  const hooksDbPath = grovePaths
+    ? join(grovePaths.data_dir, "hooks", "state.db")
+    : join(homeDir, ".local", "share", "grove-hooks", "state.db");
+  const sessionsDir = grovePaths
+    ? join(grovePaths.state_dir, "hooks", "sessions")
+    : join(homeDir, ".grove", "hooks", "sessions");
 
   log.debug("Configured paths", {
     db_path: hooksDbPath,
     sessions_dir: sessionsDir,
+    xdg_paths_available: grovePaths !== null,
   });
 
   // --- Database Setup ---
   let db: Database | null = null;
   try {
     // Ensure the database directory exists
-    const dbDir = join(homeDir, ".local", "share", "grove-hooks");
+    const dbDir = grovePaths
+      ? join(grovePaths.data_dir, "hooks")
+      : join(homeDir, ".local", "share", "grove-hooks");
     if (!existsSync(dbDir)) {
       log.info("Creating database directory", { path: dbDir });
       mkdirSync(dbDir, { recursive: true });
