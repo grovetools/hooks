@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/hooks/internal/storage/interfaces"
 )
 
@@ -72,12 +73,12 @@ func NewSQLiteStore() (interfaces.SessionStorer, error) {
 	// Check for custom database path (useful for testing)
 	dbPath := os.Getenv("GROVE_HOOKS_DB_PATH")
 	if dbPath == "" {
-		// Use default path
-		dataDir := filepath.Join(os.Getenv("HOME"), ".local", "share", "grove-hooks")
-		if err := os.MkdirAll(dataDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create data directory: %w", err)
+		// Use XDG-compliant state directory for the database
+		stateDir := filepath.Join(paths.StateDir(), "hooks")
+		if err := os.MkdirAll(stateDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create state directory: %w", err)
 		}
-		dbPath = filepath.Join(dataDir, "state.db")
+		dbPath = filepath.Join(stateDir, "sessions.db")
 	}
 
 	return NewSQLiteStoreWithPath(dbPath)

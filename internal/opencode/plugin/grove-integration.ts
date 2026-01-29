@@ -131,12 +131,13 @@ export const GroveIntegrationPlugin: Plugin = async ({
 
   // Paths for grove-hooks integration
   // Use XDG paths if available, fall back to legacy paths
+  // Database is stored in state_dir (mutable runtime state)
   const hooksDbPath = grovePaths
-    ? join(grovePaths.data_dir, "hooks", "state.db")
-    : join(homeDir, ".local", "share", "grove-hooks", "state.db");
+    ? join(grovePaths.state_dir, "hooks", "sessions.db")
+    : join(homeDir, ".local", "state", "grove", "hooks", "sessions.db");
   const sessionsDir = grovePaths
     ? join(grovePaths.state_dir, "hooks", "sessions")
-    : join(homeDir, ".grove", "hooks", "sessions");
+    : join(homeDir, ".local", "state", "grove", "hooks", "sessions");
 
   log.debug("Configured paths", {
     db_path: hooksDbPath,
@@ -147,10 +148,10 @@ export const GroveIntegrationPlugin: Plugin = async ({
   // --- Database Setup ---
   let db: Database | null = null;
   try {
-    // Ensure the database directory exists
+    // Ensure the database directory exists (in state_dir for mutable data)
     const dbDir = grovePaths
-      ? join(grovePaths.data_dir, "hooks")
-      : join(homeDir, ".local", "share", "grove-hooks");
+      ? join(grovePaths.state_dir, "hooks")
+      : join(homeDir, ".local", "state", "grove", "hooks");
     if (!existsSync(dbDir)) {
       log.info("Creating database directory", { path: dbDir });
       mkdirSync(dbDir, { recursive: true });
