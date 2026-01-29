@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/tend/pkg/command"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
@@ -172,7 +173,7 @@ flow:
 				}
 
 				// Clear any cached data
-				cacheFile := filepath.Join(os.Getenv("HOME"), ".grove", "hooks", "flow_jobs_cache.json")
+				cacheFile := filepath.Join(paths.CacheDir(), "hooks", "flow_jobs_cache.json")
 				os.Remove(cacheFile)
 
 				cmd := command.New(hooksBinary, "sessions", "list", "--json", "--type", "job").

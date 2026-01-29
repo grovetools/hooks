@@ -14,10 +14,10 @@ import (
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/hooks/internal/storage/disk"
-	"github.com/grovetools/hooks/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -629,7 +629,7 @@ WARNING: This will terminate the Claude process immediately.`,
 			sessionID := args[0]
 
 			// First, try to find the session in the filesystem
-			groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
+			groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 			sessionDir := filepath.Join(groveSessionsDir, sessionID)
 			pidFile := filepath.Join(sessionDir, "pid.lock")
 

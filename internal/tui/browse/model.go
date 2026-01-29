@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
@@ -667,7 +668,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if key.Matches(msg, m.keys.Kill) {
 			if session := m.getCurrentSession(); session != nil && !m.showDetails {
 				if session.Type == "" || session.Type == "claude_session" {
-					groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
+					groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 					sessionDir := filepath.Join(groveSessionsDir, session.ID)
 					pidFile := filepath.Join(sessionDir, "pid.lock")
 					pidContent, err := os.ReadFile(pidFile)

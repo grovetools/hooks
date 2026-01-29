@@ -9,15 +9,15 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/hooks/internal/storage/disk"
 	"github.com/grovetools/hooks/internal/tui/browse"
-	"github.com/grovetools/hooks/internal/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
-var browseFiltersPath = utils.ExpandPath("~/.grove/hooks/browse_filters.json")
+var browseFiltersPath = filepath.Join(paths.StateDir(), "hooks", "browse_filters.json")
 
 // loadFilterPreferences loads saved filter preferences from disk
 func loadFilterPreferences() browse.FilterPreferences {

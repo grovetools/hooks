@@ -8,12 +8,12 @@ import (
 	"time"
 
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	coresessions "github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/hooks/internal/storage/disk"
 	"github.com/grovetools/hooks/internal/storage/interfaces"
-	"github.com/grovetools/hooks/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -83,7 +83,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 	cleaned := 0
 
 	// 1. Clean up stale interactive Claude session directories
-	groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
+	groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 	if _, err := os.Stat(groveSessionsDir); err == nil {
 		entries, err := os.ReadDir(groveSessionsDir)
 		if err == nil {

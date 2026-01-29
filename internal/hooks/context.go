@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/workspace"
@@ -124,8 +125,8 @@ func getCurrentBranch(workingDir string) string {
 
 // EnsureSessionExists creates a session if it doesn't exist
 func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath string) error {
-	// Create ~/.grove/hooks/sessions directory if it doesn't exist
-	groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
+	// Create sessions directory if it doesn't exist
+	groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 	if err := os.MkdirAll(groveSessionsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}

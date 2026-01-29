@@ -12,9 +12,9 @@ import (
 
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/hooks/internal/storage/disk"
-	"github.com/grovetools/hooks/internal/utils"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
@@ -264,7 +264,7 @@ func RunStopHook() {
 	// but the actual session_id is the flow job ID. Read metadata to get the correct ID.
 	// Also read provider and type from filesystem metadata since SQLite may not have grove-flow sessions.
 	actualSessionID := data.SessionID
-	groveSessionsDir := utils.ExpandPath("~/.grove/hooks/sessions")
+	groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 	metadataFile := filepath.Join(groveSessionsDir, data.SessionID, "metadata.json")
 
 	// Initialize with defaults
