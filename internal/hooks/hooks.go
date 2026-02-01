@@ -315,7 +315,10 @@ func RunStopHook() {
 			"session_id": actualSessionID,
 			"error":      err.Error(),
 		}).Debug("SQLite session lookup failed (may be expected for grove-flow sessions)")
-	} else if sessionData != nil {
+	}
+
+	// Supplement metadata from SQLite if available (but don't require it)
+	if sessionData != nil {
 		// Check if it's an extended session with a type
 		if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
 			// Only override if not already set from filesystem
@@ -349,20 +352,24 @@ func RunStopHook() {
 				"working_dir":  workingDir,
 			}).Info("Session details retrieved (basic session)")
 		}
+	}
 
-		// Execute repository-specific hook commands if we have a working directory
-		if workingDir != "" {
-			log.Printf("Checking for .grove-hooks.yaml in working directory: %s", workingDir)
-			if err := ExecuteRepoHookCommands(ctx, workingDir); err != nil {
-				// Check if this is a blocking error from exit code 2
-				if blockingErr, ok := err.(*HookBlockingError); ok {
-					log.Printf("Hook command returned blocking error: %s", blockingErr.Message)
-					// Write the error message to stderr and exit with code 2
-					fmt.Fprintf(os.Stderr, "%s\n", blockingErr.Message)
-					os.Exit(2)
-				}
-				log.Printf("Failed to execute repo hook commands: %v", err)
+	// Execute repository-specific hook commands if we have a working directory
+	// Note: workingDir may come from filesystem metadata OR SQLite - either is valid
+	if workingDir != "" {
+		if err := ExecuteRepoHookCommands(ctx, workingDir); err != nil {
+			// Check if this is a blocking error from exit code 2
+			if blockingErr, ok := err.(*HookBlockingError); ok {
+				slog.WithFields(logrus.Fields{
+					"message": blockingErr.Message,
+				}).Error("Hook command returned blocking error")
+				// Write the error message to stderr and exit with code 2
+				fmt.Fprintf(os.Stderr, "%s\n", blockingErr.Message)
+				os.Exit(2)
 			}
+			slog.WithFields(logrus.Fields{
+				"error": err.Error(),
+			}).Error("Failed to execute repo hook commands")
 		}
 	}
 
@@ -595,41 +602,54 @@ func RunSubagentStopHook() {
 
 // ExecuteRepoHookCommands executes on_stop commands from .grove-hooks.yaml
 func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
+	slog := logging.NewLogger("hooks.repo")
+
 	config, err := LoadRepoHookConfig(workingDir)
 	if err != nil {
 		return fmt.Errorf("failed to load repo hook config: %w", err)
 	}
 
 	if config == nil || len(config.Hooks.OnStop) == 0 {
-		// No commands to execute
 		return nil
 	}
 
-	log.Printf("Found %d on_stop commands in .grove-hooks.yaml", len(config.Hooks.OnStop))
+	slog.WithFields(logrus.Fields{
+		"count":       len(config.Hooks.OnStop),
+		"working_dir": workingDir,
+	}).Info("Found on_stop commands in .grove-hooks.yaml")
 
-	for i, hookCmd := range config.Hooks.OnStop {
-		log.Printf("Executing hook command %d: %s", i+1, hookCmd.Name)
-
+	for _, hookCmd := range config.Hooks.OnStop {
 		// Check run_if condition
 		if hookCmd.RunIf == "changes" {
 			hasChanges, err := hasGitChanges(workingDir)
 			if err != nil {
-				log.Printf("Failed to check git changes for command '%s': %v", hookCmd.Name, err)
+				slog.WithFields(logrus.Fields{
+					"name":  hookCmd.Name,
+					"error": err.Error(),
+				}).Warn("Failed to check git changes, skipping command")
 				continue
 			}
 			if !hasChanges {
-				log.Printf("Skipping command '%s' - no git changes detected", hookCmd.Name)
+				slog.WithFields(logrus.Fields{
+					"name": hookCmd.Name,
+				}).Debug("Skipping command - no git changes detected")
 				continue
 			}
 		}
 
 		// Execute the command
 		if err := ExecuteHookCommand(workingDir, hookCmd); err != nil {
-			log.Printf("Hook command '%s' failed: %v", hookCmd.Name, err)
+			slog.WithFields(logrus.Fields{
+				"name":  hookCmd.Name,
+				"error": err.Error(),
+			}).Error("Hook command failed")
 
 			// Check if this is a blocking error (exit code 2)
 			if blockingErr, ok := err.(*HookBlockingError); ok {
-				log.Printf("Hook command '%s' returned blocking error, stopping session", hookCmd.Name)
+				slog.WithFields(logrus.Fields{
+					"name":    hookCmd.Name,
+					"message": blockingErr.Message,
+				}).Error("Hook command returned blocking error, stopping session")
 
 				// Log event for blocking command
 				eventData := map[string]any{
@@ -640,7 +660,7 @@ func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 					"blocking":     true,
 				}
 				if logErr := hc.LogEvent(models.EventStop, eventData); logErr != nil {
-					log.Printf("Failed to log hook command blocking failure: %v", logErr)
+					slog.WithFields(logrus.Fields{"error": logErr.Error()}).Warn("Failed to log hook command blocking failure")
 				}
 
 				// Return the blocking error to prevent session stop
@@ -656,12 +676,14 @@ func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 				"blocking":     false,
 			}
 			if logErr := hc.LogEvent(models.EventStop, eventData); logErr != nil {
-				log.Printf("Failed to log hook command failure: %v", logErr)
+				slog.WithFields(logrus.Fields{"error": logErr.Error()}).Warn("Failed to log hook command failure")
 			}
 
 			// Continue with other commands for non-blocking errors
 		} else {
-			log.Printf("Hook command '%s' completed successfully", hookCmd.Name)
+			slog.WithFields(logrus.Fields{
+				"name": hookCmd.Name,
+			}).Info("Hook command completed successfully")
 
 			// Log event for successful command
 			eventData := map[string]any{
@@ -671,7 +693,7 @@ func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 				"blocking":     false,
 			}
 			if logErr := hc.LogEvent(models.EventStop, eventData); logErr != nil {
-				log.Printf("Failed to log hook command success: %v", logErr)
+				slog.WithFields(logrus.Fields{"error": logErr.Error()}).Warn("Failed to log hook command success")
 			}
 		}
 	}
