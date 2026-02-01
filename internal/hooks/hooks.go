@@ -10,13 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/errors"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/hooks/internal/storage/disk"
 	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 )
 
 // Hook implementations
@@ -600,25 +601,29 @@ func RunSubagentStopHook() {
 	// In the future, we might want to add a separate subagent tracking table
 }
 
-// ExecuteRepoHookCommands executes on_stop commands from .grove-hooks.yaml
+// ExecuteRepoHookCommands executes on_stop commands from grove.yml
 func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 	slog := logging.NewLogger("hooks.repo")
 
-	config, err := LoadRepoHookConfig(workingDir)
+	cfg, err := config.LoadFrom(workingDir)
 	if err != nil {
-		return fmt.Errorf("failed to load repo hook config: %w", err)
+		// Ignore ConfigNotFound errors - proceed without hooks
+		if errors.GetCode(err) == errors.ErrCodeConfigNotFound {
+			return nil
+		}
+		return fmt.Errorf("failed to load grove config: %w", err)
 	}
 
-	if config == nil || len(config.Hooks.OnStop) == 0 {
+	if cfg == nil || cfg.Hooks == nil || len(cfg.Hooks.OnStop) == 0 {
 		return nil
 	}
 
 	slog.WithFields(logrus.Fields{
-		"count":       len(config.Hooks.OnStop),
+		"count":       len(cfg.Hooks.OnStop),
 		"working_dir": workingDir,
-	}).Info("Found on_stop commands in .grove-hooks.yaml")
+	}).Info("Found on_stop commands in grove.yml")
 
-	for _, hookCmd := range config.Hooks.OnStop {
+	for _, hookCmd := range cfg.Hooks.OnStop {
 		// Check run_if condition
 		if hookCmd.RunIf == "changes" {
 			hasChanges, err := hasGitChanges(workingDir)
@@ -699,29 +704,6 @@ func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 	}
 
 	return nil
-}
-
-// LoadRepoHookConfig loads .grove-hooks.yaml from the specified directory
-func LoadRepoHookConfig(workingDir string) (*models.RepoHookConfig, error) {
-	configPath := filepath.Join(workingDir, ".grove-hooks.yaml")
-
-	// Check if file exists
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, nil // No config file found, not an error
-	}
-
-	// Read and parse the file
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read .grove-hooks.yaml: %w", err)
-	}
-
-	var config models.RepoHookConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse .grove-hooks.yaml: %w", err)
-	}
-
-	return &config, nil
 }
 
 // hasGitChanges checks if there are any git changes in the working directory

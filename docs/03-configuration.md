@@ -40,9 +40,9 @@ This command creates or modifies `.claude/settings.local.json`. This file instru
 
 ### 2. Repository-Specific Hooks
 
-A file named `.grove-hooks.yaml` in a project's root directory can define shell commands to be executed when a session stops. This is used for actions like running linters, tests, or cleanup scripts.
+The `hooks` section in a project's `grove.yml` (or `.grove.yml`) can define shell commands to be executed when a session stops. This is used for actions like running linters, tests, or cleanup scripts.
 
-**Example `.grove-hooks.yaml`:**
+**Example `grove.yml`:**
 
 ```yaml
 hooks:
@@ -79,7 +79,7 @@ If a command in `on_stop` exits with code `2`, it is treated as a blocking error
 
 -   **`Stop`**
     -   **Trigger**: When a session ends for any reason (e.g., completion, interruption).
-    -   **Action**: Updates the final session status in the database. Executes `on_stop` commands defined in `.grove-hooks.yaml` if the file exists in the session's working directory.
+    -   **Action**: Updates the final session status in the database. Executes `on_stop` commands defined in the `hooks` section of `grove.yml` if present in the session's working directory.
 
 -   **`SubagentStop`**
     -   **Trigger**: When a sub-agent completes a delegated task.
@@ -98,7 +98,7 @@ If a command in `on_stop` exits with code `2`, it is treated as a blocking error
 
 -   **Session Auditing**: The primary function is to create a local, queryable record of all agent activity. `grove-hooks sessions list` and `grove-hooks browse` provide interfaces to this data.
 -   **Performance Monitoring**: The `PostToolUse` and `Stop` hooks receive `duration_ms` fields, which are logged to the database. This data can be used to analyze tool and session performance.
--   **Post-Session Automation**: Using `.grove-hooks.yaml`, you can define commands that run automatically when an agent session concludes, such as code validation or status notifications.
+-   **Post-Session Automation**: Using the `hooks` section in `grove.yml`, you can define commands that run automatically when an agent session concludes, such as code validation or status notifications.
 
 ### Limitations
 

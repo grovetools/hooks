@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/hooks/internal/storage/disk"
 	"github.com/grovetools/notify"
@@ -221,7 +222,7 @@ func generateSessionSummary(data StopInput) map[string]any {
 }
 
 // ExecuteHookCommand executes a single hook command (moved from api package)
-func ExecuteHookCommand(workingDir string, hookCmd models.HookCommand) error {
+func ExecuteHookCommand(workingDir string, hookCmd config.HookCommand) error {
 	log.Printf("Running: %s", hookCmd.Command)
 
 	cmd := exec.Command("sh", "-c", hookCmd.Command)

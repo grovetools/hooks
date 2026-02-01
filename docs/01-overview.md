@@ -20,7 +20,7 @@ The `tui` command renders a hierarchical view of active and historical sessions.
 *   **Visual Indicators**: Displays session age, status icons, and job types.
 
 ### Repository Hooks
-Projects can define custom lifecycle actions via a `.grove-hooks.yaml` file in the project root.
+Projects can define custom lifecycle actions via the `hooks` section in `grove.yml`.
 *   **On Stop**: Executes shell commands when a session ends (e.g., linting, cleanup).
 *   **Conditions**: Commands can be conditional (e.g., `run_if: changes` checks for git modifications).
 
