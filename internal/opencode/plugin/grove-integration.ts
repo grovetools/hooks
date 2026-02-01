@@ -11,9 +11,9 @@ import {
   readFileSync,
 } from "fs";
 
-// This plugin is embedded into the grove-hooks binary and installed via `grove-hooks opencode install`.
-// It connects to the grove-hooks SQLite database and creates a file-based
-// session registry to make opencode sessions discoverable by grove-hooks.
+// This plugin is embedded into the hooks binary and installed via `hooks opencode install`.
+// It connects to the hooks SQLite database and creates a file-based
+// session registry to make opencode sessions discoverable by the hooks system.
 
 // --- XDG Path Resolution ---
 // Call `core paths` to get XDG-compliant paths for Grove directories
@@ -559,7 +559,7 @@ export const GroveIntegrationPlugin: Plugin = async ({
           });
 
           const { $ } = await import("bun");
-          const result = await $`echo ${stopInput} | grove-hooks stop`.quiet();
+          const result = await $`echo ${stopInput} | grove hooks stop`.quiet();
 
           log.info("Stop hook called successfully", {
             session_id: activeSessionId,

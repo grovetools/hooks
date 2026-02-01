@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -23,46 +24,62 @@ type Hook struct {
 
 func NewInstallCmd() *cobra.Command {
 	var targetDir string
+	var global bool
 
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install grove-hooks configuration in a repository",
-		Long: `Install grove-hooks configuration in a repository by creating or updating .claude/settings.local.json
+		Short: "Install grove-hooks configuration for Claude Code",
+		Long: `Install grove-hooks configuration for Claude Code.
 
-This command will:
-- Create .claude directory if it doesn't exist
-- Create or update settings.local.json with grove-hooks configuration
-- Preserve existing settings when updating`,
+Can install locally (default) to .claude/settings.local.json or globally
+to ~/.claude/settings.json.
+
+This command merges configuration non-destructively, preserving any other
+hooks you may have defined.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInstall(targetDir)
+			return runInstall(targetDir, global)
 		},
 	}
 
-	cmd.Flags().StringVarP(&targetDir, "directory", "d", ".", "Target directory for installation")
+	cmd.Flags().StringVarP(&targetDir, "directory", "d", ".", "Target directory for local installation")
+	cmd.Flags().BoolVarP(&global, "global", "g", false, "Install hooks globally to ~/.claude/settings.json")
 
 	return cmd
 }
 
-func runInstall(targetDir string) error {
-	// Resolve target directory
-	absDir, err := filepath.Abs(targetDir)
-	if err != nil {
-		return fmt.Errorf("failed to resolve directory: %w", err)
-	}
+func runInstall(targetDir string, global bool) error {
+	var settingsPath string
 
-	// Check if target directory exists
-	if _, err := os.Stat(absDir); os.IsNotExist(err) {
-		return fmt.Errorf("target directory does not exist: %s", absDir)
-	}
+	if global {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		claudeDir := filepath.Join(homeDir, ".claude")
+		if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create .claude directory: %w", err)
+		}
+		settingsPath = filepath.Join(claudeDir, "settings.json")
+	} else {
+		// Resolve target directory
+		absDir, err := filepath.Abs(targetDir)
+		if err != nil {
+			return fmt.Errorf("failed to resolve directory: %w", err)
+		}
 
-	// Create .claude directory if it doesn't exist
-	claudeDir := filepath.Join(absDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create .claude directory: %w", err)
-	}
+		// Check if target directory exists
+		if _, err := os.Stat(absDir); os.IsNotExist(err) {
+			return fmt.Errorf("target directory does not exist: %s", absDir)
+		}
 
-	// Path to settings file
-	settingsPath := filepath.Join(claudeDir, "settings.local.json")
+		// Create .claude directory if it doesn't exist
+		claudeDir := filepath.Join(absDir, ".claude")
+		if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create .claude directory: %w", err)
+		}
+
+		settingsPath = filepath.Join(claudeDir, "settings.local.json")
+	}
 
 	// Check if settings file already exists
 	var settings ClaudeSettings
@@ -76,7 +93,7 @@ func runInstall(targetDir string) error {
 		// Handle empty or invalid JSON files
 		if len(data) == 0 || string(data) == "{}" {
 			settings = make(ClaudeSettings)
-			fmt.Printf("Found empty settings file, creating new configuration at %s\n", settingsPath)
+			fmt.Printf("Found empty settings file, initializing at %s\n", settingsPath)
 		} else {
 			if err := json.Unmarshal(data, &settings); err != nil {
 				// If parsing fails, offer to backup and create new
@@ -100,16 +117,13 @@ func runInstall(targetDir string) error {
 		fmt.Printf("Creating new settings at %s\n", settingsPath)
 	}
 
-	// Define default hooks configuration
-	defaultHooks := map[string][]HookEntry{
+	// Define hooks configuration using delegated command format
+	newHooks := map[string][]HookEntry{
 		"PreToolUse": {
 			{
 				Matcher: ".*",
 				Hooks: []Hook{
-					{
-						Type:    "command",
-						Command: "grove-hooks pretooluse",
-					},
+					{Type: "command", Command: "grove hooks pretooluse"},
 				},
 			},
 		},
@@ -117,10 +131,7 @@ func runInstall(targetDir string) error {
 			{
 				Matcher: "(Edit|Write|MultiEdit|Bash|Read)",
 				Hooks: []Hook{
-					{
-						Type:    "command",
-						Command: "grove-hooks posttooluse",
-					},
+					{Type: "command", Command: "grove hooks posttooluse"},
 				},
 			},
 		},
@@ -128,10 +139,7 @@ func runInstall(targetDir string) error {
 			{
 				Matcher: ".*",
 				Hooks: []Hook{
-					{
-						Type:    "command",
-						Command: "grove-hooks notification",
-					},
+					{Type: "command", Command: "grove hooks notification"},
 				},
 			},
 		},
@@ -139,10 +147,7 @@ func runInstall(targetDir string) error {
 			{
 				Matcher: ".*",
 				Hooks: []Hook{
-					{
-						Type:    "command",
-						Command: "grove-hooks stop",
-					},
+					{Type: "command", Command: "grove hooks stop"},
 				},
 			},
 		},
@@ -150,17 +155,14 @@ func runInstall(targetDir string) error {
 			{
 				Matcher: ".*",
 				Hooks: []Hook{
-					{
-						Type:    "command",
-						Command: "grove-hooks subagentstop",
-					},
+					{Type: "command", Command: "grove hooks subagent-stop"},
 				},
 			},
 		},
 	}
 
-	// Update hooks (this will overwrite existing grove-hooks configurations)
-	settings["hooks"] = defaultHooks
+	// Merge hooks into settings (preserves user's custom hooks)
+	mergeHooks(settings, newHooks)
 
 	// Marshal settings with indentation
 	data, err := json.MarshalIndent(settings, "", "  ")
@@ -184,4 +186,76 @@ func runInstall(targetDir string) error {
 	fmt.Println("  - SubagentStop: Runs when subagent stops")
 
 	return nil
+}
+
+// mergeHooks intelligently merges new hooks into existing settings,
+// preserving any user-defined hooks while updating Grove-specific ones.
+func mergeHooks(settings ClaudeSettings, newHooks map[string][]HookEntry) {
+	// Initialize hooks map if it doesn't exist
+	if _, ok := settings["hooks"]; !ok {
+		settings["hooks"] = make(map[string]interface{})
+	}
+
+	existingHooksMap, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		// If hooks is malformed/not a map, reset it
+		existingHooksMap = make(map[string]interface{})
+		settings["hooks"] = existingHooksMap
+	}
+
+	for eventType, newEntries := range newHooks {
+		// Get existing entries for this event type
+		var mergedEntries []interface{}
+
+		if existingRaw, exists := existingHooksMap[eventType]; exists {
+			if existingList, ok := existingRaw.([]interface{}); ok {
+				// Filter out old Grove hooks to avoid duplicates
+				for _, item := range existingList {
+					if entryMap, ok := item.(map[string]interface{}); ok {
+						isGroveHook := false
+						if hooksList, ok := entryMap["hooks"].([]interface{}); ok {
+							for _, h := range hooksList {
+								if hookMap, ok := h.(map[string]interface{}); ok {
+									if cmd, ok := hookMap["command"].(string); ok {
+										// Identify old or current grove commands
+										// Match: grove-hooks, grove hooks, or standalone hooks binary
+										if strings.Contains(cmd, "grove-hooks") ||
+											strings.Contains(cmd, "grove hooks") ||
+											strings.HasPrefix(cmd, "hooks ") {
+											isGroveHook = true
+											break
+										}
+									}
+								}
+							}
+						}
+						// Keep it if it's NOT a grove hook (preserve user custom hooks)
+						if !isGroveHook {
+							mergedEntries = append(mergedEntries, item)
+						}
+					}
+				}
+			}
+		}
+
+		// Append new Grove hooks
+		for _, entry := range newEntries {
+			// Convert HookEntry to map structure to match existing JSON structure
+			hooksList := make([]map[string]string, len(entry.Hooks))
+			for i, h := range entry.Hooks {
+				hooksList[i] = map[string]string{
+					"type":    h.Type,
+					"command": h.Command,
+				}
+			}
+
+			entryMap := map[string]interface{}{
+				"matcher": entry.Matcher,
+				"hooks":   hooksList,
+			}
+			mergedEntries = append(mergedEntries, entryMap)
+		}
+
+		existingHooksMap[eventType] = mergedEntries
+	}
 }
