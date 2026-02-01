@@ -47,6 +47,7 @@ type StopInput struct {
 	DurationMs     int64  `json:"duration_ms"`
 	CurrentUUID    string `json:"current_uuid,omitempty"`
 	ParentUUID     string `json:"parent_uuid,omitempty"`
+	Cwd            string `json:"cwd,omitempty"`
 }
 
 type SubagentStopInput struct {

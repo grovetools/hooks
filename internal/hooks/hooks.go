@@ -355,8 +355,16 @@ func RunStopHook() {
 		}
 	}
 
+	// Fallback to cwd from stop input if we don't have a working directory from metadata
+	if workingDir == "" && data.Cwd != "" {
+		workingDir = data.Cwd
+		slog.WithFields(logrus.Fields{
+			"working_dir": workingDir,
+		}).Debug("Using cwd from stop input as working directory")
+	}
+
 	// Execute repository-specific hook commands if we have a working directory
-	// Note: workingDir may come from filesystem metadata OR SQLite - either is valid
+	// Note: workingDir may come from filesystem metadata, SQLite, or stop input cwd
 	if workingDir != "" {
 		if err := ExecuteRepoHookCommands(ctx, workingDir); err != nil {
 			// Check if this is a blocking error from exit code 2
@@ -614,16 +622,26 @@ func ExecuteRepoHookCommands(hc *HookContext, workingDir string) error {
 		return fmt.Errorf("failed to load grove config: %w", err)
 	}
 
-	if cfg == nil || cfg.Hooks == nil || len(cfg.Hooks.OnStop) == 0 {
+	// Unmarshal hooks from extensions
+	var hooksConfig config.HooksConfig
+	if err := cfg.UnmarshalExtension("hooks", &hooksConfig); err != nil {
+		slog.WithFields(logrus.Fields{
+			"working_dir": workingDir,
+			"error":       err.Error(),
+		}).Warn("Failed to unmarshal hooks config")
+		return nil
+	}
+
+	if len(hooksConfig.OnStop) == 0 {
 		return nil
 	}
 
 	slog.WithFields(logrus.Fields{
-		"count":       len(cfg.Hooks.OnStop),
+		"count":       len(hooksConfig.OnStop),
 		"working_dir": workingDir,
 	}).Info("Found on_stop commands in grove.yml")
 
-	for _, hookCmd := range cfg.Hooks.OnStop {
+	for _, hookCmd := range hooksConfig.OnStop {
 		// Check run_if condition
 		if hookCmd.RunIf == "changes" {
 			hasChanges, err := hasGitChanges(workingDir)
