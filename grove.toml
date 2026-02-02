@@ -1,0 +1,10 @@
+name = "hooks"
+description = "Claude hooks integration for Grove ecosystem"
+managed = true
+
+[binary]
+name = "hooks"
+path = "./bin/hooks"
+
+[context]
+default_rules_path = ".cx/dev-no-tests.rules"
