@@ -1,3 +1,19 @@
+## v0.6.1 (2026-02-03)
+
+This release resolves an issue with binary compilation where CGO support was disabled during cross-compilation (27852c5), causing database migration failures at runtime. The CI pipeline has been updated to use a matrix build strategy with native runners for both macOS and Linux to ensure proper SQLite support in release artifacts.
+
+### Bug Fixes
+- Use matrix build with native runners for CGO support to fix database migration errors (27852c5)
+
+### File Changes
+```
+ .github/workflows/release.yml | 58 +++++++++++++++++++++++++++++++++++++------
+ Makefile                      |  8 ++++++
+ go.mod                        |  6 +++--
+ go.sum                        | 16 ++++++------
+ 4 files changed, 71 insertions(+), 17 deletions(-)
+```
+
 ## v0.6.0 (2026-02-02)
 
 The installation process has been enhanced with a new global option (`--global`) and non-disruptive merging capabilities to preserve user-defined hooks (0f7a112). Configuration management sees significant consolidation, with repository lifecycle hooks migrating from the standalone `.grove-hooks.yaml` to the standard `grove.yml` file (54978e1), streamlining the setup process.
