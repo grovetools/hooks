@@ -1,3 +1,73 @@
+## v0.6.0 (2026-02-02)
+
+The installation process has been enhanced with a new global option (`--global`) and non-disruptive merging capabilities to preserve user-defined hooks (0f7a112). Configuration management sees significant consolidation, with repository lifecycle hooks migrating from the standalone `.grove-hooks.yaml` to the standard `grove.yml` file (54978e1), streamlining the setup process.
+
+Data storage and session tracking have been standardized to use XDG-compliant paths via the centralized `grove-core` package (e574356, 40ddce9, f6d8202). This ensures that databases and session logs are stored in appropriate system locations. Additionally, several bug fixes improve hook execution reliability when working with filesystem metadata (4d55a75) and ensure correct version injection during builds (11f0a10).
+
+### Features
+- Add global install option and non-disruptive hook merging (0f7a112)
+- Update readme and overview documentation (24d40ae)
+
+### Bug Fixes
+- Use UnmarshalExtension for hooks config and add cwd fallback (b940a15)
+- Execute repo hooks when working_dir is set from filesystem metadata (4d55a75)
+- Remove headers and striplines from overview (7b69505)
+- Update VERSION_PKG to grovetools/core path (11f0a10)
+
+### Changed
+- Migrate repo hooks from .grove-hooks.yaml to grove.yml (54978e1)
+- Use XDG paths for hooks database and sessions (40ddce9)
+- Use XDG-compliant paths for session tracking (f6d8202)
+- Migrate hooks to XDG-compliant paths via grove-core paths package (e574356)
+- Migrate grove.yml to grove.toml (ed04ff0)
+- Update docgen title to match package name (2218e0c)
+- Update go.mod for grovetools migration (28a4ec3)
+
+### Documentation
+- Add MIT License (4e1b29d)
+- Update docs.json (4cdf98b)
+- Add concept lookup instructions to CLAUDE.md (988a268)
+
+### CI/CD
+- Restore release workflow (1d5466b)
+- Move README template to notebook (1f8cea2)
+- Remove docgen files from repo (dba0ea0)
+- Move docs.rules to .cx/ directory (c744fc4)
+
+### File Changes
+```
+ {docs => .cx}/docs.rules                      |   0
+ .github/workflows/release.yml                 | 114 +++--------------
+ CLAUDE.md                                     |  15 ++-
+ LICENSE                                       |  21 ++++
+ Makefile                                      |   2 +-
+ README.md                                     |  72 ++++++-----
+ commands/browse.go                            |   4 +-
+ commands/cleanup.go                           |   4 +-
+ commands/discovery.go                         |   5 +-
+ commands/install.go                           | 174 ++++++++++++++++++--------
+ commands/sessions.go                          |   3 +-
+ docs/01-overview.md                           |  68 +++++-----
+ docs/03-configuration.md                      |   8 +-
+ docs/README.md.tpl                            |   6 -
+ docs/docgen.config.yml                        |  39 ------
+ go.mod                                        |  46 +++----
+ go.sum                                        | 129 ++++++++++---------
+ grove.toml                                    |  10 ++
+ grove.yml                                     |   9 --
+ internal/hooks/context.go                     |   5 +-
+ internal/hooks/helpers.go                     |   3 +-
+ internal/hooks/hooks.go                       | 132 +++++++++++--------
+ internal/hooks/types.go                       |   1 +
+ internal/opencode/plugin/grove-integration.ts |  62 ++++++---
+ internal/storage/disk/sqlite.go               |  11 +-
+ internal/tui/browse/model.go                  |   3 +-
+ pkg/docs/docs.json                            |  24 ++--
+ tests/e2e/scenarios_realtime_status.go        |   3 +-
+ tests/e2e/scenarios_session_tracking.go       |  14 +--
+ 29 files changed, 518 insertions(+), 469 deletions(-)
+```
+
 ## v0.0.8-nightly.f075336 (2025-10-03)
 
 ## v0.1.0 (2025-10-01)
