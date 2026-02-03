@@ -6,15 +6,14 @@ require (
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/grovetools/core v0.0.1
-	github.com/grovetools/flow v0.0.1
-	github.com/grovetools/nav v0.0.1
-	github.com/grovetools/notify v0.0.1
-	github.com/grovetools/tend v0.0.1
+	github.com/grovetools/core v0.6.1
+	github.com/grovetools/flow v0.6.1
+	github.com/grovetools/nav v0.6.0
+	github.com/grovetools/notify v0.6.0
+	github.com/grovetools/tend v0.6.0
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -22,6 +21,7 @@ require (
 	cloud.google.com/go/auth v0.16.1 // indirect
 	cloud.google.com/go/compute/metadata v0.7.0 // indirect
 	github.com/ActiveState/vt10x v1.3.1 // indirect
+	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/Netflix/go-expect v0.0.0-20220104043353-73e0943537d2 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.19.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
@@ -43,10 +43,10 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/grovetools/cx v0.0.1 // indirect
-	github.com/grovetools/grove-anthropic v0.0.1 // indirect
-	github.com/grovetools/grove-gemini v0.0.1 // indirect
-	github.com/grovetools/skills v0.0.1 // indirect
+	github.com/grovetools/cx v0.6.0 // indirect
+	github.com/grovetools/grove-anthropic v0.6.0 // indirect
+	github.com/grovetools/grove-gemini v0.6.0 // indirect
+	github.com/grovetools/skills v0.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/kr/pty v1.1.1 // indirect
@@ -59,6 +59,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
+	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
@@ -84,4 +85,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
 	google.golang.org/grpc v1.74.2 // indirect
 	google.golang.org/protobuf v1.36.7 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
