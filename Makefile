@@ -78,6 +78,14 @@ generate-docs:
 	@echo "Generating documentation..."
 	@docgen sync-readme
 
+# Build a single binary with a custom output path (used by CI matrix builds)
+# Usage: make build-one OUTPUT=dist/hooks-linux-amd64 VERSION=v1.2.3
+OUTPUT ?= $(BIN_DIR)/$(BINARY_NAME)
+build-one:
+	@mkdir -p $(dir $(OUTPUT))
+	@echo "Building $(OUTPUT) version $(VERSION)..."
+	@go build $(LDFLAGS) -o $(OUTPUT) .
+
 # Cross-compilation targets
 # Note: Cross-compilation with CGO requires appropriate C compilers for target platforms
 # For CI/CD, we use native runners for each platform instead
