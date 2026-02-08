@@ -8,6 +8,7 @@ import (
 	"time"
 
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	coresessions "github.com/grovetools/core/pkg/sessions"
@@ -27,6 +28,22 @@ func NewCleanupCmd() *cobra.Command {
 		Short: "Clean up inactive sessions",
 		Long:  `Check all running and idle sessions and mark those that have been inactive for too long as completed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Phase 3: Check if daemon is running
+			// If the daemon is active, it owns session lifecycle management and cleanup.
+			client := daemon.New()
+			defer client.Close()
+
+			if client.IsRunning() {
+				ulog.Info("Daemon Active").
+					Pretty("The Grove Daemon is running and managing session lifecycle automatically.").
+					Emit()
+				return nil
+			}
+
+			// Fallback: Daemon not running, perform manual cleanup
+			ulog.Info("Local Cleanup").
+				Pretty("Daemon not active. Performing manual cleanup...").
+				Emit()
 
 			// Create storage
 			storage, err := disk.NewSQLiteStore()
