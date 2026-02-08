@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	coreconfig "github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
@@ -214,10 +216,77 @@ func StartBackgroundRefresh() {
 	})
 }
 
-// DiscoverLiveInteractiveSessions scans ~/.grove/hooks/sessions/ directory and returns live sessions
-// from all interactive providers (Claude, Codex, etc.)
-// A session is considered live if its PID is still alive
+// DiscoverLiveInteractiveSessions returns live interactive sessions.
+// It attempts to use the daemon first for fast, cached results. If the daemon is unavailable
+// or returns an error, it falls back to direct filesystem scanning.
+//
+// Phase 2: The daemon is now the single source of truth for "what sessions are running?".
+// This eliminates redundant scanning of ~/.grove/hooks/sessions by multiple tools.
 func DiscoverLiveInteractiveSessions(storage interfaces.SessionStorer) ([]*models.Session, error) {
+	// Try to get sessions from daemon first
+	client := daemon.New()
+	defer client.Close()
+
+	if client.IsRunning() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		daemonSessions, err := client.GetSessions(ctx)
+		if err == nil && len(daemonSessions) > 0 {
+			// Got sessions from daemon, enrich with DB data if available
+			return enrichSessionsFromDB(daemonSessions, storage), nil
+		}
+		// If daemon returned empty or error, fall back to filesystem
+	}
+
+	// Fallback: Direct filesystem scanning (when daemon is not running)
+	return discoverLiveInteractiveSessionsFromFilesystem(storage)
+}
+
+// enrichSessionsFromDB adds DB-specific fields (like status, last activity, tool stats) to sessions
+func enrichSessionsFromDB(sessions []*models.Session, storage interfaces.SessionStorer) []*models.Session {
+	for _, session := range sessions {
+		// For interactive_agent sessions, check both the flow job ID and Claude UUID
+		dbSessionData, err := storage.GetSession(session.ID)
+		if err != nil && session.ClaudeSessionID != "" && session.ClaudeSessionID != session.ID {
+			// Try the Claude UUID if the flow job ID lookup failed
+			dbSessionData, err = storage.GetSession(session.ClaudeSessionID)
+		}
+
+		if err == nil {
+			var dbStatus string
+			var dbLastActivity time.Time
+
+			// Extract status and last activity from either ExtendedSession or Session
+			if extSession, ok := dbSessionData.(*disk.ExtendedSession); ok {
+				dbStatus = extSession.Status
+				dbLastActivity = extSession.LastActivity
+			} else if s, ok := dbSessionData.(*models.Session); ok {
+				dbStatus = s.Status
+				dbLastActivity = s.LastActivity
+			}
+
+			// DB might have fresher status (e.g., "idle" vs daemon's "running")
+			if dbStatus == "idle" && session.Status == "running" {
+				session.Status = "idle"
+			}
+
+			if !dbLastActivity.IsZero() && dbLastActivity.After(session.LastActivity) {
+				session.LastActivity = dbLastActivity
+			}
+		} else if session.JobFilePath != "" {
+			// Fallback: Read job file status directly from YAML frontmatter
+			if jobStatus := readJobFileStatus(session.JobFilePath); jobStatus == "idle" && session.Status == "running" {
+				session.Status = "idle"
+			}
+		}
+	}
+	return sessions
+}
+
+// discoverLiveInteractiveSessionsFromFilesystem is the original filesystem-based discovery.
+// Used as fallback when daemon is not available.
+func discoverLiveInteractiveSessionsFromFilesystem(storage interfaces.SessionStorer) ([]*models.Session, error) {
 	groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 
 	// Check if directory exists
