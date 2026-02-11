@@ -1,3 +1,22 @@
+## v0.6.2 (2026-02-10)
+
+This release transitions session discovery to a thin client architecture, delegating heavy scanning operations to the daemon for improved performance and centralization (32d5951). The system now prioritizes fetching session data from the daemon with a filesystem fallback, resulting in a significant reduction of redundant code and complexity within the hooks discovery logic (4bd0026).
+
+### Added
+- Use daemon client for session discovery with fallback to filesystem scanning (4bd0026)
+
+### Changed
+- Refactor hooks to function as a thin client for the daemon (32d5951)
+- Simplify cleanup command to defer to the daemon when available (32d5951)
+- Remove redundant scanning logic and use daemon for session retrieval (32d5951)
+
+### File Changes
+```
+ commands/cleanup.go   |   17 +
+ commands/discovery.go | 1708 +++++++------------------------------------------
+ 2 files changed, 266 insertions(+), 1459 deletions(-)
+```
+
 ## v0.6.1 (2026-02-03)
 
 This release resolves an issue with binary compilation where CGO support was disabled during cross-compilation (27852c5), causing database migration failures at runtime. The CI pipeline has been updated to use a matrix build strategy with native runners for both macOS and Linux to ensure proper SQLite support in release artifacts.
