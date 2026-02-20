@@ -43,6 +43,34 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	}
 }
 
+// Sections returns grouped sections of key bindings for the full help view.
+// Only includes sections that the hooks browser actually implements.
+func (k KeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
+		{
+			Name:     "Navigation",
+			Bindings: []key.Binding{k.Up, k.Down, k.ScrollUp, k.ScrollDown, k.GoToTop, k.GoToBottom, k.JumpToWorkspace},
+		},
+		{
+			Name:     "Selection",
+			Bindings: []key.Binding{k.Select, k.SelectAll},
+		},
+		{
+			Name:     "View",
+			Bindings: []key.Binding{k.ToggleView, k.ToggleFilter, k.SearchFilter},
+		},
+		{
+			Name:     "Actions",
+			Bindings: []key.Binding{k.Edit, k.Open, k.CopyID, k.OpenDir, k.ExportJSON, k.Archive},
+		},
+		{
+			Name:     "Session",
+			Bindings: []key.Binding{k.MarkComplete, k.Kill},
+		},
+		k.Base.SystemSection(),
+	}
+}
+
 func NewKeyMap() KeyMap {
 	base := keymap.NewBase()
 	return KeyMap{
