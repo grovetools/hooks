@@ -145,3 +145,15 @@ func NewKeyMap() KeyMap {
 		),
 	}
 }
+
+// KeymapInfo returns the keymap metadata for the hooks session browser TUI.
+// Used by the grove keys registry generator to aggregate all TUI keybindings.
+func KeymapInfo() keymap.TUIInfo {
+	km := NewKeyMap()
+	return keymap.MakeTUIInfo(
+		"hooks-browser",
+		"hooks",
+		"Hook session browser and manager",
+		km,
+	)
+}
