@@ -10,10 +10,8 @@ type KeyMap struct {
 	keymap.Base
 	ToggleView      key.Binding
 	Archive         key.Binding
-	CopyID          key.Binding
 	OpenDir         key.Binding
 	ExportJSON      key.Binding
-	SelectAll       key.Binding
 	ScrollDown      key.Binding
 	ScrollUp        key.Binding
 	Kill            key.Binding
@@ -38,7 +36,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "action"),
 		), k.Back, k.Select, k.SelectAll},
-		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.Edit, k.Open, k.CopyID, k.OpenDir, k.ExportJSON},
+		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.Edit, k.Open, k.CopyPath, k.OpenDir, k.ExportJSON},
 		{k.MarkComplete, k.Kill, k.Help, k.Quit},
 	}
 }
@@ -61,7 +59,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		},
 		{
 			Name:     "Actions",
-			Bindings: []key.Binding{k.Edit, k.Open, k.CopyID, k.OpenDir, k.ExportJSON, k.Archive},
+			Bindings: []key.Binding{k.Edit, k.Open, k.CopyPath, k.OpenDir, k.ExportJSON, k.Archive},
 		},
 		{
 			Name:     "Session",
@@ -88,12 +86,8 @@ func NewKeyMap() KeyMap {
 			key.WithHelp("/", "search"),
 		),
 		Archive: key.NewBinding(
-			key.WithKeys("ctrl+x"),
-			key.WithHelp("ctrl+x", "archive selected"),
-		),
-		CopyID: key.NewBinding(
-			key.WithKeys("ctrl+y"),
-			key.WithHelp("ctrl+y", "copy id"),
+			key.WithKeys("X"),
+			key.WithHelp("X", "archive selected"),
 		),
 		OpenDir: key.NewBinding(
 			key.WithKeys("ctrl+o"),
@@ -102,10 +96,6 @@ func NewKeyMap() KeyMap {
 		ExportJSON: key.NewBinding(
 			key.WithKeys("ctrl+j"),
 			key.WithHelp("ctrl+j", "export json"),
-		),
-		SelectAll: key.NewBinding(
-			key.WithKeys("ctrl+a"),
-			key.WithHelp("ctrl+a", "select all"),
 		),
 		ScrollDown: key.NewBinding(
 			key.WithKeys("ctrl+d", "pagedown"),

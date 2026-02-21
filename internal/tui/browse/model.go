@@ -611,7 +611,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		} else if key.Matches(msg, m.keys.CopyID) {
+		} else if key.Matches(msg, m.keys.CopyPath) {
 			if session := m.getCurrentSession(); session != nil {
 				utils.CopyToClipboard(session.ID)
 			}
