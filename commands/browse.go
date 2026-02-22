@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
@@ -124,6 +125,9 @@ func NewBrowseCmd() *cobra.Command {
 			// Load filter preferences
 			prefs := loadFilterPreferences()
 
+			// Load grove config for keybinding overrides
+			cfg, _ := config.LoadDefault() // Ignore error, will use defaults if config unavailable
+
 			// Discover workspaces
 			logger := logrus.New()
 			logger.SetOutput(io.Discard) // Suppress logs in the TUI
@@ -135,6 +139,7 @@ func NewBrowseCmd() *cobra.Command {
 
 			// Create the interactive model using the extracted browse package
 			m := browse.NewModel(
+				cfg,
 				sessions,
 				workspaces,
 				storage,

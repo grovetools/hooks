@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux"
@@ -120,6 +121,7 @@ type Model struct {
 }
 
 func NewModel(
+	cfg *config.Config,
 	sessions []*models.Session,
 	workspaces []*workspace.WorkspaceNode,
 	storage interfaces.SessionStorer,
@@ -139,7 +141,7 @@ func NewModel(
 	ti.Cursor.Style = t.Cursor
 	ti.TextStyle = t.Input
 
-	keys := NewKeyMap()
+	keys := NewKeyMap(cfg)
 
 	model := Model{
 		sessions:              sessions,
@@ -1164,7 +1166,7 @@ func (m Model) updateFilterView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filterCursor < totalOptions-1 {
 			m.filterCursor++
 		}
-	} else if key.Matches(keyMsg, m.keys.Select) || keyMsg.String() == " " {
+	} else if key.Matches(keyMsg, m.keys.Select) {
 		if m.filterCursor < len(statusOptions) {
 			status := statusOptions[m.filterCursor]
 			m.statusFilters[status] = !m.statusFilters[status]

@@ -2,6 +2,7 @@ package browse
 
 import (
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/keymap"
 )
 
@@ -69,10 +70,12 @@ func (k KeyMap) Sections() []keymap.Section {
 	}
 }
 
-func NewKeyMap() KeyMap {
-	base := keymap.NewBase()
-	return KeyMap{
-		Base: base,
+// NewKeyMap creates a new KeyMap with user configuration applied.
+// Base bindings (navigation, actions, search, selection) come from keymap.Load().
+// Only TUI-specific bindings are defined here.
+func NewKeyMap(cfg *config.Config) KeyMap {
+	km := KeyMap{
+		Base: keymap.Load(cfg, "hooks.browser"),
 		ToggleView: key.NewBinding(
 			key.WithKeys("t"),
 			key.WithHelp("t", "toggle view"),
@@ -134,12 +137,24 @@ func NewKeyMap() KeyMap {
 			key.WithHelp("c", "mark complete"),
 		),
 	}
+
+	// Apply TUI-specific overrides from config (uses reflection to map all bindings)
+	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
+		tuiOverrides := cfg.TUI.Keybindings.GetTUIOverrides()
+		if hooksOverrides, ok := tuiOverrides["hooks"]; ok {
+			if overrides, ok := hooksOverrides["browser"]; ok {
+				keymap.ApplyOverrides(&km, overrides)
+			}
+		}
+	}
+
+	return km
 }
 
 // KeymapInfo returns the keymap metadata for the hooks session browser TUI.
 // Used by the grove keys registry generator to aggregate all TUI keybindings.
 func KeymapInfo() keymap.TUIInfo {
-	km := NewKeyMap()
+	km := NewKeyMap(nil)
 	return keymap.MakeTUIInfo(
 		"hooks-browser",
 		"hooks",
