@@ -138,15 +138,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 	}
 
-	// Apply TUI-specific overrides from config (uses reflection to map all bindings)
-	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
-		tuiOverrides := cfg.TUI.Keybindings.GetTUIOverrides()
-		if hooksOverrides, ok := tuiOverrides["hooks"]; ok {
-			if overrides, ok := hooksOverrides["browser"]; ok {
-				keymap.ApplyOverrides(&km, overrides)
-			}
-		}
-	}
+	// Apply TUI-specific overrides from config
+	keymap.ApplyTUIOverrides(cfg, "hooks", "browser", &km)
 
 	return km
 }
