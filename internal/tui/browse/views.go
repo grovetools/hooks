@@ -161,7 +161,7 @@ func (m Model) viewTable() string {
 				statusCol = statusIcon + " " + statusStyle.Render(s.Status)
 
 				// Only show provider for interactive session types
-				if s.Type == "interactive_agent" || s.Type == "" || s.Type == "claude_session" {
+				if s.Type == "interactive_agent" || s.Type == "isolated_agent" || s.Type == "" || s.Type == "claude_session" {
 					provider := "claude_code"
 					if s.Provider == "codex" {
 						provider = "codex"
@@ -338,7 +338,7 @@ func (m Model) viewTree() string {
 
 				// Determine provider display only for interactive session types
 				providerDisplay := ""
-				if s.Type == "interactive_agent" || s.Type == "" || s.Type == "claude_session" {
+				if s.Type == "interactive_agent" || s.Type == "isolated_agent" || s.Type == "" || s.Type == "claude_session" {
 					provider := "claude_code"
 					if s.Provider == "codex" {
 						provider = "codex"
@@ -359,8 +359,8 @@ func (m Model) viewTree() string {
 					providerDisplay,
 				)
 
-				// Augment display for linked interactive_agent jobs
-				if s.Type == "interactive_agent" && s.ClaudeSessionID != "" {
+				// Augment display for linked interactive_agent and isolated_agent jobs
+				if (s.Type == "interactive_agent" || s.Type == "isolated_agent") && s.ClaudeSessionID != "" {
 					// Show only the Claude session state (not the agent's running state)
 					linkedStatusStyle := getStatusStyle(s.Status)
 					baseInfo = fmt.Sprintf("%s %s %s → %s %s%s",
@@ -527,7 +527,7 @@ func (m Model) viewDetails() string {
 	content.WriteString("\n")
 
 	// Show provider for interactive session types
-	if s.Type == "interactive_agent" || s.Type == "" || s.Type == "claude_session" {
+	if s.Type == "interactive_agent" || s.Type == "isolated_agent" || s.Type == "" || s.Type == "claude_session" {
 		provider := "claude_code"
 		if s.Provider == "codex" {
 			provider = "codex"
@@ -596,7 +596,7 @@ func (m Model) viewFilterOptions() string {
 	content.WriteString(t.Header.Render("Filter Options") + "\n\n")
 
 	statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error", "hold", "todo", "abandoned"}
-	typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell", "opencode_session"}
+	typeOptions := []string{"claude_code", "chat", "interactive_agent", "isolated_agent", "oneshot", "headless_agent", "agent", "shell", "opencode_session"}
 
 	var rows [][]string
 	rows = append(rows, []string{t.Muted.Render("STATUS FILTERS"), ""})
@@ -759,7 +759,7 @@ func getJobTypeIcon(jobType string) string {
 		return theme.IconNote
 	case "chat":
 		return theme.IconChat
-	case "interactive_agent":
+	case "interactive_agent", "isolated_agent":
 		return theme.IconInteractiveAgent
 	case "oneshot":
 		return theme.IconOneshot

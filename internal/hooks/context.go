@@ -294,7 +294,12 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	if flowJobID := os.Getenv("GROVE_FLOW_JOB_ID"); flowJobID != "" {
 		session.ClaudeSessionID = sessionID // Preserve the original claude_code UUID
 		session.ID = flowJobID              // Use the job ID as the session ID for unification
-		session.Type = "interactive_agent"
+		// Check if this is an isolated agent
+		if os.Getenv("GROVE_FLOW_ISOLATED") == "true" {
+			session.Type = "isolated_agent"
+		} else {
+			session.Type = "interactive_agent"
+		}
 		session.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
 		session.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
 		session.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")

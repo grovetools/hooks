@@ -158,8 +158,8 @@ func DispatchStateChangeNotifications(oldSessions, newSessions []*models.Session
 			sendJobReadyNotification(newSession)
 		}
 
-		// Rule: Notify when an interactive_agent job transitions from running to idle
-		if newSession.Type == "interactive_agent" && newSession.Status == "idle" && oldStatus == "running" {
+		// Rule: Notify when an interactive_agent or isolated_agent job transitions from running to idle
+		if (newSession.Type == "interactive_agent" || newSession.Type == "isolated_agent") && newSession.Status == "idle" && oldStatus == "running" {
 			sendJobReadyNotification(newSession)
 		}
 
@@ -188,7 +188,7 @@ func sendJobReadyNotification(session *models.Session) {
 		} else if session.JobTitle == "" {
 			title = "💬 Chat Ready"
 		}
-	} else if session.Type == "interactive_agent" {
+	} else if session.Type == "interactive_agent" || session.Type == "isolated_agent" {
 		title = fmt.Sprintf("🤖 Agent Idle: %s", session.JobTitle)
 		if session.JobTitle == "" && session.PlanName != "" {
 			title = fmt.Sprintf("🤖 Agent Idle: %s", session.PlanName)
@@ -300,8 +300,8 @@ func markInterruptedJobsInPlan(planDir string, dryRun bool) (int, error) {
 			continue
 		}
 
-		// Skip interactive_agent jobs - they may not have lock files immediately after start
-		if jobInfo.Type == "interactive_agent" {
+		// Skip interactive_agent and isolated_agent jobs - they may not have lock files immediately after start
+		if jobInfo.Type == "interactive_agent" || jobInfo.Type == "isolated_agent" {
 			continue
 		}
 

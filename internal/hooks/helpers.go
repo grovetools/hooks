@@ -135,7 +135,7 @@ func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {
 
 	// Construct title based on session type
 	var title string
-	isJob := sessionType == "oneshot_job" || sessionType == "agent_job" || sessionType == "interactive_agent" || sessionType == "chat"
+	isJob := sessionType == "oneshot_job" || sessionType == "agent_job" || sessionType == "interactive_agent" || sessionType == "isolated_agent" || sessionType == "chat"
 
 	if isJob && data.SessionID != "" {
 		// For jobs, use the job name (session ID) as the title

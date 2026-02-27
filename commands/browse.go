@@ -39,6 +39,7 @@ func loadFilterPreferences() browse.FilterPreferences {
 			"claude_code":       true,
 			"chat":              true,
 			"interactive_agent": true,
+			"isolated_agent":    true,
 			"oneshot":           true,
 			"headless_agent":    true,
 			"agent":             true,

@@ -555,7 +555,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, tea.Quit
 					}
 
-					if session.Type == "interactive_agent" && (session.Status == "running" || session.Status == "idle") {
+					if (session.Type == "interactive_agent" || session.Type == "isolated_agent") && (session.Status == "running" || session.Status == "idle") {
 						workDir := session.WorkingDirectory
 						projInfo, err := workspace.GetProjectByPath(workDir)
 						if err != nil {
@@ -1150,7 +1150,7 @@ func (m *Model) getCurrentSession() *models.Session {
 
 func (m Model) updateFilterView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	statusOptions := []string{"running", "idle", "pending_user", "completed", "interrupted", "failed", "error", "hold", "todo", "abandoned"}
-	typeOptions := []string{"claude_code", "chat", "interactive_agent", "oneshot", "headless_agent", "agent", "shell"}
+	typeOptions := []string{"claude_code", "chat", "interactive_agent", "isolated_agent", "oneshot", "headless_agent", "agent", "shell"}
 	totalOptions := len(statusOptions) + len(typeOptions)
 
 	keyMsg, ok := msg.(tea.KeyMsg)

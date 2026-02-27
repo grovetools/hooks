@@ -129,7 +129,7 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 								var metadata coresessions.SessionMetadata
 								if err := json.Unmarshal(metadataContent, &metadata); err == nil {
 									// Check if it's a flow job
-									if (metadata.Type == "interactive_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {
+									if (metadata.Type == "interactive_agent" || metadata.Type == "isolated_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {
 										// This is a flow job - trigger auto-completion
 										if os.Getenv("GROVE_DEBUG") != "" {
 											fmt.Printf("Triggering auto-completion for dead flow job: %s\n", metadata.JobFilePath)
