@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
@@ -254,15 +256,29 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	}
 
 	// Check for grove-flow integration environment variables
-	if flowJobID := os.Getenv("GROVE_FLOW_JOB_ID"); flowJobID != "" {
+	flowJobID := os.Getenv("GROVE_FLOW_JOB_ID")
+	if flowJobID != "" {
 		coreMetadata.ClaudeSessionID = sessionID // Preserve the original claude_code UUID
 		coreMetadata.SessionID = flowJobID       // Use the job ID as the session ID for unification
 		coreMetadata.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
 		coreMetadata.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
 		coreMetadata.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
+
+		// When running from flow, confirm the session with the daemon.
+		// The flow tool pre-registers the session intent, and this hook confirms it with the actual PID.
+		daemonClient := daemon.NewWithAutoStart()
+		confirmErr := daemonClient.ConfirmSession(context.Background(), daemon.SessionConfirmation{
+			JobID:          flowJobID,
+			NativeID:       sessionID,
+			PID:            pid,
+			TranscriptPath: transcriptPath,
+		})
+		daemonClient.Close()
+		// Log daemon confirmation result but don't fail - filesystem registry is the fallback
+		_ = confirmErr
 	}
 
-	// Register the session with grove-core registry
+	// Register the session with grove-core filesystem registry (always, for backwards compatibility)
 	registry, err := sessions.NewFileSystemRegistry()
 	if err != nil {
 		return fmt.Errorf("failed to create session registry: %w", err)
