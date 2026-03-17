@@ -12,7 +12,6 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/process"
-	"github.com/grovetools/hooks/internal/storage/interfaces"
 	notifications "github.com/grovetools/notify"
 	notificationsconfig "github.com/grovetools/notify/pkg/config"
 )
@@ -34,60 +33,18 @@ func StartBackgroundRefresh() {
 	// No-op: daemon handles this now
 }
 
-// GetAllSessions fetches sessions from the daemon (or LocalClient fallback) and merges with DB history.
-// This is now a thin client that delegates heavy scanning to core/pkg/sessions.
-func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*models.Session, error) {
-	// 1. Get active sessions from daemon (or LocalClient fallback which uses sessions.DiscoverAll)
-	client := daemon.New()
-	defer client.Close()
-
+// GetAllSessions fetches sessions from the daemon (or LocalClient fallback).
+// The daemon is the single source of truth — no SQLite merging.
+func GetAllSessions(client daemon.Client, hideCompleted bool) ([]*models.Session, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	activeSessions, err := client.GetSessions(ctx)
+	allSessions, err := client.GetSessions(ctx)
 	if err != nil {
-		// If daemon/local client fails, log and continue with empty active list
 		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Fprintf(os.Stderr, "Warning: failed to get sessions from client: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to get sessions from daemon: %v\n", err)
 		}
-		activeSessions = []*models.Session{}
-	}
-
-	// 2. Get archived/history from SQLite database
-	dbSessions, err := storage.GetAllSessions()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get db sessions: %w", err)
-	}
-
-	// 3. Merge: DB first (baseline), then overlay active sessions
-	mergedMap := make(map[string]*models.Session)
-
-	// Add DB sessions first as historical baseline
-	for _, s := range dbSessions {
-		mergedMap[s.ID] = s
-	}
-
-	// Overlay active sessions (they are more up-to-date regarding status/PID)
-	for _, s := range activeSessions {
-		if existing, ok := mergedMap[s.ID]; ok {
-			// Update mutable fields from active session
-			existing.Status = s.Status
-			existing.PID = s.PID
-			existing.LastActivity = s.LastActivity
-			existing.ClaudeSessionID = s.ClaudeSessionID
-			if s.Provider != "" {
-				existing.Provider = s.Provider
-			}
-		} else {
-			// New session not in DB yet
-			mergedMap[s.ID] = s
-		}
-	}
-
-	// Convert to slice
-	allSessions := make([]*models.Session, 0, len(mergedMap))
-	for _, s := range mergedMap {
-		allSessions = append(allSessions, s)
+		allSessions = []*models.Session{}
 	}
 
 	// Filter by hideCompleted if requested
@@ -110,7 +67,6 @@ func GetAllSessions(storage interfaces.SessionStorer, hideCompleted bool) ([]*mo
 			return p1 < p2
 		}
 
-		// Within same priority, sort by LastActivity (most recent first)
 		iTime := allSessions[i].LastActivity
 		if iTime.IsZero() {
 			iTime = allSessions[i].StartedAt

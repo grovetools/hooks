@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,11 +14,11 @@ import (
 
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/hooks/internal/storage/disk"
 	"github.com/grovetools/hooks/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -57,18 +58,12 @@ func newSessionsListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all sessions (primarily interactive Claude sessions)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Create storage
-			storage, err := disk.NewSQLiteStore()
-			if err != nil {
-				return fmt.Errorf("failed to create storage: %w", err)
-			}
-			defer storage.(*disk.SQLiteStore).Close()
+			// Create daemon client for session discovery
+			client := daemon.NewWithAutoStart()
+			defer client.Close()
 
-			// Clean up dead sessions first
-			_, _ = CleanupDeadSessions(storage)
-
-			// Fetch all sessions using the centralized discovery function
-			sessions, err := GetAllSessions(storage, hideCompleted)
+			// Fetch all sessions from the daemon
+			sessions, err := GetAllSessions(client, hideCompleted)
 			if err != nil {
 				return fmt.Errorf("failed to get all sessions: %w", err)
 			}
@@ -304,15 +299,14 @@ func newSessionsGetCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
 
-			// Create storage
-			storage, err := disk.NewSQLiteStore()
-			if err != nil {
-				return fmt.Errorf("failed to create storage: %w", err)
-			}
-			defer storage.(*disk.SQLiteStore).Close()
+			// Get session from daemon
+			client := daemon.NewWithAutoStart()
+			defer client.Close()
 
-			// Get session
-			sessionData, err := storage.GetSession(sessionID)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			baseSession, err := client.GetSession(ctx, sessionID)
 			if err != nil {
 				return fmt.Errorf("failed to get session: %w", err)
 			}
@@ -321,28 +315,17 @@ func newSessionsGetCmd() *cobra.Command {
 			if jsonOutput {
 				encoder := json.NewEncoder(os.Stdout)
 				encoder.SetIndent("", "  ")
-				return encoder.Encode(sessionData)
+				return encoder.Encode(baseSession)
 			}
 
-			// Handle both regular and extended sessions
-			var baseSession *models.Session
-			var sessionType string = "claude_session"
-			var planName, planDirectory, jobTitle, jobFilePath string
-
-			if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
-				baseSession = &extSession.Session
-				if extSession.Type != "" {
-					sessionType = extSession.Type
-				}
-				planName = extSession.PlanName
-				planDirectory = extSession.PlanDirectory
-				jobTitle = extSession.JobTitle
-				jobFilePath = extSession.JobFilePath
-			} else if session, ok := sessionData.(*models.Session); ok {
-				baseSession = session
-			} else {
-				return fmt.Errorf("unexpected session type: %T", sessionData)
+			sessionType := baseSession.Type
+			if sessionType == "" {
+				sessionType = "claude_session"
 			}
+			planName := baseSession.PlanName
+			planDirectory := baseSession.PlanDirectory
+			jobTitle := baseSession.JobTitle
+			jobFilePath := baseSession.JobFilePath
 
 			// Normalize session type for display
 			if sessionType == "claude_session" || sessionType == "" {
@@ -422,93 +405,18 @@ func truncate(s string, maxLen int) string {
 }
 
 func newSessionsArchiveCmd() *cobra.Command {
-	var (
-		archiveAll       bool
-		archiveCompleted bool
-		archiveFailed    bool
-		archiveRunning   bool
-		archiveIdle      bool
-	)
-
 	cmd := &cobra.Command{
 		Use:   "archive [session-id...]",
-		Short: "Archive one or more sessions",
-		Long: `Archive sessions by marking them as deleted. Archived sessions are hidden from normal queries.
-
-You can archive specific sessions by ID or use flags to archive multiple sessions:
-  - Use --all to archive all sessions regardless of status
-  - Use --completed to archive only completed sessions
-  - Use --failed to archive only failed sessions
-  - Use --running to archive only running sessions
-  - Use --idle to archive only idle sessions`,
+		Short: "Archive one or more sessions (deprecated)",
+		Long: `Archive sessions. The daemon now manages session retention automatically.
+This command is deprecated and will be removed in a future version.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Create storage
-			storage, err := disk.NewSQLiteStore()
-			if err != nil {
-				return fmt.Errorf("failed to create storage: %w", err)
-			}
-			defer storage.(*disk.SQLiteStore).Close()
-
-			var sessionIDs []string
-
-			// If specific session IDs provided, use those
-			if len(args) > 0 {
-				sessionIDs = args
-			} else if archiveAll || archiveCompleted || archiveFailed || archiveRunning || archiveIdle {
-				// Get all sessions
-				sessions, err := storage.GetAllSessions()
-				if err != nil {
-					return fmt.Errorf("failed to get sessions: %w", err)
-				}
-
-				// Filter based on flags
-				for _, s := range sessions {
-					shouldArchive := false
-
-					if archiveAll {
-						// Archive all sessions
-						shouldArchive = true
-					} else if archiveCompleted && s.Status == "completed" {
-						shouldArchive = true
-					} else if archiveFailed && (s.Status == "failed" || s.Status == "error") {
-						shouldArchive = true
-					} else if archiveRunning && s.Status == "running" {
-						shouldArchive = true
-					} else if archiveIdle && s.Status == "idle" {
-						shouldArchive = true
-					}
-
-					if shouldArchive {
-						sessionIDs = append(sessionIDs, s.ID)
-					}
-				}
-			} else {
-				return fmt.Errorf("no session IDs provided and no archive flags specified. Use --all, --completed, --failed, --running, --idle, or provide session IDs")
-			}
-
-			if len(sessionIDs) == 0 {
-				ulog.Info("No sessions to archive").Emit()
-				return nil
-			}
-
-			// Archive the sessions
-			if err := storage.ArchiveSessions(sessionIDs); err != nil {
-				return fmt.Errorf("failed to archive sessions: %w", err)
-			}
-
-			ulog.Success("Sessions archived").
-				Field("count", len(sessionIDs)).
-				Pretty(fmt.Sprintf("Archived %d session(s)", len(sessionIDs))).
+			ulog.Info("Session archival is now managed by the daemon automatically").
+				Pretty("The daemon manages session retention via the cleanup_after configuration.\nNo manual archival needed.").
 				Emit()
 			return nil
 		},
 	}
-
-	cmd.Flags().BoolVar(&archiveAll, "all", false, "Archive all sessions regardless of status")
-	cmd.Flags().BoolVar(&archiveCompleted, "completed", false, "Archive only completed sessions")
-	cmd.Flags().BoolVar(&archiveFailed, "failed", false, "Archive only failed sessions")
-	cmd.Flags().BoolVar(&archiveRunning, "running", false, "Archive only running sessions")
-	cmd.Flags().BoolVar(&archiveIdle, "idle", false, "Archive only idle sessions")
 
 	return cmd
 }
@@ -860,15 +768,11 @@ Example:
 			}
 			ulog.Info("").PrettyOnly().Pretty("").Emit()
 
-			// Create storage
-			storage, err := disk.NewSQLiteStore()
-			if err != nil {
-				return fmt.Errorf("failed to create storage: %w", err)
-			}
-			defer storage.(*disk.SQLiteStore).Close()
+			// Get all sessions from daemon
+			client := daemon.NewWithAutoStart()
+			defer client.Close()
 
-			// Get all sessions
-			sessions, err := GetAllSessions(storage, false)
+			sessions, err := GetAllSessions(client, false)
 			if err != nil {
 				return fmt.Errorf("failed to get sessions: %w", err)
 			}

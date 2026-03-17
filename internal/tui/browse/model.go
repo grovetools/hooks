@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux"
@@ -23,7 +24,6 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/flow/pkg/orchestration"
-	"github.com/grovetools/hooks/internal/storage/interfaces"
 	"github.com/grovetools/hooks/internal/utils"
 )
 
@@ -34,7 +34,7 @@ type FilterPreferences struct {
 }
 
 // GetAllSessionsFunc is the function type for getting all sessions
-type GetAllSessionsFunc func(storage interfaces.SessionStorer, hideCompleted bool) ([]*models.Session, error)
+type GetAllSessionsFunc func(client daemon.Client, hideCompleted bool) ([]*models.Session, error)
 
 // DispatchNotificationsFunc is the function type for dispatching state change notifications
 type DispatchNotificationsFunc func(oldSessions, newSessions []*models.Session)
@@ -92,7 +92,7 @@ type Model struct {
 	height          int
 	showDetails     bool
 	selectedIDs     map[string]bool // Track multiple selections by ID
-	storage         interfaces.SessionStorer
+	daemonClient    daemon.Client
 	lastRefresh     time.Time
 	keys            KeyMap
 	help            help.Model
@@ -124,7 +124,7 @@ func NewModel(
 	cfg *config.Config,
 	sessions []*models.Session,
 	workspaces []*workspace.WorkspaceNode,
-	storage interfaces.SessionStorer,
+	daemonClient daemon.Client,
 	hideCompleted bool,
 	filterPrefs FilterPreferences,
 	getAllSessions GetAllSessionsFunc,
@@ -149,7 +149,7 @@ func NewModel(
 		filteredSessions:      sessions,
 		filterInput:           ti,
 		selectedIDs:           make(map[string]bool),
-		storage:               storage,
+		daemonClient:          daemonClient,
 		lastRefresh:           time.Now(),
 		keys:                  keys,
 		help:                  help.New(keys),
@@ -264,7 +264,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		newSessions, err := m.getAllSessions(m.storage, m.hideCompleted)
+		newSessions, err := m.getAllSessions(m.daemonClient, m.hideCompleted)
 		if err != nil {
 			m.statusMessage = fmt.Sprintf("Error refreshing: %v", err)
 		} else {

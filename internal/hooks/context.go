@@ -11,12 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/hooks/internal/storage/disk"
+	"github.com/grovetools/hooks/internal/storage"
 	"github.com/grovetools/hooks/internal/storage/interfaces"
 	"github.com/grovetools/hooks/internal/utils"
 	"github.com/grovetools/nav/pkg/tmux"
@@ -46,11 +47,12 @@ type NotificationsConfig struct {
 }
 
 type HookContext struct {
-	Input     BaseHookInput
-	RawInput  []byte
-	Storage   interfaces.SessionStorer
-	StartTime time.Time
-	Config    *NotificationsConfig
+	Input        BaseHookInput
+	RawInput     []byte
+	Storage      interfaces.SessionStorer
+	DaemonClient daemon.Client
+	StartTime    time.Time
+	Config       *NotificationsConfig
 }
 
 // NewHookContext creates a new hook context with local storage
@@ -67,21 +69,19 @@ func NewHookContext() (*HookContext, error) {
 		return nil, err
 	}
 
-	// Create storage
-	storage, err := disk.NewSQLiteStore()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create storage: %w", err)
-	}
+	// Create daemon-backed storage (replaces SQLite)
+	backend := storage.NewDaemonBackend()
 
 	// Load configuration (placeholder for now)
 	loadedCfg := &NotificationsConfig{}
 
 	return &HookContext{
-		Input:     baseInput,
-		RawInput:  inputData,
-		Storage:   storage,
-		StartTime: time.Now(),
-		Config:    loadedCfg,
+		Input:        baseInput,
+		RawInput:     inputData,
+		Storage:      backend,
+		DaemonClient: backend.Client(),
+		StartTime:    time.Now(),
+		Config:       loadedCfg,
 	}, nil
 }
 
@@ -157,15 +157,10 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 
 					// Check current status and update if idle
 					if existingSessionData, err := hc.Storage.GetSession(actualSessionID); err == nil && existingSessionData != nil {
-						var status string
-						if extSession, ok := existingSessionData.(*disk.ExtendedSession); ok {
-							status = extSession.Status
-						} else if session, ok := existingSessionData.(*models.Session); ok {
-							status = session.Status
-						}
-
-						if status == "idle" {
-							hc.Storage.UpdateSessionStatus(actualSessionID, "running")
+						if session, ok := existingSessionData.(*models.Session); ok {
+							if session.Status == "idle" {
+								hc.Storage.UpdateSessionStatus(actualSessionID, "running")
+							}
 						}
 					}
 					return nil
@@ -277,22 +272,20 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		return fmt.Errorf("failed to register session: %w", err)
 	}
 
-	// Create extended session with workspace context
-	session := &disk.ExtendedSession{
-		Session: models.Session{
-			ID:               sessionID,
-			PID:              pid,
-			Repo:             repo,
-			Branch:           gitBranch,
-			TmuxKey:          tmuxKey,
-			WorkingDirectory: workingDir,
-			User:             username,
-			Status:           "running",
-			StartedAt:        now,
-			LastActivity:     now,
-			IsTest:           false,
-		},
-		Provider: provider,
+	// Create session with workspace context
+	session := &models.Session{
+		ID:               sessionID,
+		PID:              pid,
+		Repo:             repo,
+		Branch:           gitBranch,
+		TmuxKey:          tmuxKey,
+		WorkingDirectory: workingDir,
+		User:             username,
+		Status:           "running",
+		StartedAt:        now,
+		LastActivity:     now,
+		IsTest:           false,
+		Provider:         provider,
 	}
 
 	// Check for grove-flow integration environment variables
@@ -308,14 +301,6 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		session.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
 		session.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
 		session.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
-	}
-
-	// Populate workspace context fields if available
-	if projInfo != nil {
-		session.ProjectName = projInfo.Name
-		session.IsWorktree = projInfo.IsWorktree()
-		session.IsEcosystem = projInfo.IsEcosystem()
-		session.ParentEcosystemPath = projInfo.ParentEcosystemPath
 	}
 
 	return hc.Storage.EnsureSessionExists(session)
@@ -346,17 +331,14 @@ func getClaudePID() int {
 	return ppid
 }
 
-// GetSession retrieves a session from local storage
+// GetSession retrieves a session from the daemon.
 func (hc *HookContext) GetSession(sessionID string) (*models.Session, error) {
 	sessionData, err := hc.Storage.GetSession(sessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Handle both regular and extended sessions
-	if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
-		return &extSession.Session, nil
-	} else if session, ok := sessionData.(*models.Session); ok {
+	if session, ok := sessionData.(*models.Session); ok {
 		return session, nil
 	}
 

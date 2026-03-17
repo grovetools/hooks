@@ -16,7 +16,6 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/util/delegation"
-	"github.com/grovetools/hooks/internal/storage/disk"
 	"github.com/sirupsen/logrus"
 )
 
@@ -308,32 +307,30 @@ func RunStopHook() {
 		}
 	}
 
-	// Then try SQLite as fallback/supplement (for sessions not registered by grove-flow)
-	// Only override values that weren't set from filesystem metadata
+	// Try daemon as supplement for session metadata not set from filesystem
 	sessionData, err := ctx.Storage.GetSession(actualSessionID)
 	if err != nil {
 		slog.WithFields(logrus.Fields{
 			"session_id": actualSessionID,
 			"error":      err.Error(),
-		}).Debug("SQLite session lookup failed (may be expected for grove-flow sessions)")
+		}).Debug("Daemon session lookup failed (may be expected for new sessions)")
 	}
 
-	// Supplement metadata from SQLite if available (but don't require it)
+	// Supplement metadata from daemon if available (but don't require it)
 	if sessionData != nil {
-		// Check if it's an extended session with a type
-		if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
+		if session, ok := sessionData.(*models.Session); ok {
 			// Only override if not already set from filesystem
-			if sessionType == "claude_session" && extSession.Type != "" {
-				sessionType = extSession.Type
+			if sessionType == "claude_session" && session.Type != "" {
+				sessionType = session.Type
 			}
 			if workingDir == "" {
-				workingDir = extSession.WorkingDirectory
+				workingDir = session.WorkingDirectory
 			}
 			if jobFilePath == "" {
-				jobFilePath = extSession.JobFilePath
+				jobFilePath = session.JobFilePath
 			}
-			if provider == "" {
-				provider = extSession.Provider
+			if provider == "" && session.Provider != "" {
+				provider = session.Provider
 			}
 
 			slog.WithFields(logrus.Fields{
@@ -342,16 +339,7 @@ func RunStopHook() {
 				"provider":      provider,
 				"job_file_path": jobFilePath,
 				"working_dir":   workingDir,
-			}).Info("Session details after SQLite lookup")
-		} else if session, ok := sessionData.(*models.Session); ok {
-			if workingDir == "" {
-				workingDir = session.WorkingDirectory
-			}
-			slog.WithFields(logrus.Fields{
-				"session_id":   actualSessionID,
-				"session_type": sessionType,
-				"working_dir":  workingDir,
-			}).Info("Session details retrieved (basic session)")
+			}).Info("Session details after daemon lookup")
 		}
 	}
 

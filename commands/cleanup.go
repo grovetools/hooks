@@ -13,8 +13,6 @@ import (
 	"github.com/grovetools/core/pkg/process"
 	coresessions "github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/util/delegation"
-	"github.com/grovetools/hooks/internal/storage/disk"
-	"github.com/grovetools/hooks/internal/storage/interfaces"
 	"github.com/spf13/cobra"
 )
 
@@ -45,15 +43,8 @@ func NewCleanupCmd() *cobra.Command {
 				Pretty("Daemon not active. Performing manual cleanup...").
 				Emit()
 
-			// Create storage
-			storage, err := disk.NewSQLiteStore()
-			if err != nil {
-				return fmt.Errorf("failed to create storage: %w", err)
-			}
-			defer storage.(*disk.SQLiteStore).Close()
-
-			// Run cleanup with custom threshold
-			cleanedSessions, err := CleanupDeadSessionsWithThreshold(storage, time.Duration(inactivityMinutes)*time.Minute)
+			// Run cleanup with custom threshold (filesystem-only, no SQLite)
+			cleanedSessions, err := CleanupDeadSessionsWithThreshold(time.Duration(inactivityMinutes) * time.Minute)
 			if err != nil {
 				return fmt.Errorf("cleanup failed: %w", err)
 			}
@@ -88,18 +79,17 @@ func NewCleanupCmd() *cobra.Command {
 	return cmd
 }
 
-// CleanupDeadSessions checks all running/idle sessions and marks dead ones as completed
-// Uses default 30 minute inactivity threshold
-func CleanupDeadSessions(storage interfaces.SessionStorer) (int, error) {
-	return CleanupDeadSessionsWithThreshold(storage, 30*time.Minute)
+// CleanupDeadSessions checks filesystem session directories for dead processes.
+func CleanupDeadSessions() (int, error) {
+	return CleanupDeadSessionsWithThreshold(30 * time.Minute)
 }
 
-// CleanupDeadSessionsWithThreshold checks all running/idle sessions and marks inactive ones as completed
-// Returns the number of sessions cleaned up
-func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivityThreshold time.Duration) (int, error) {
+// CleanupDeadSessionsWithThreshold checks filesystem session directories for dead processes.
+// The daemon is authoritative for live state; this only handles filesystem PID cleanup.
+func CleanupDeadSessionsWithThreshold(inactivityThreshold time.Duration) (int, error) {
 	cleaned := 0
 
-	// 1. Clean up stale interactive Claude session directories
+	// Clean up stale interactive Claude session directories
 	groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 	if _, err := os.Stat(groveSessionsDir); err == nil {
 		entries, err := os.ReadDir(groveSessionsDir)
@@ -118,7 +108,6 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 					var pid int
 					if _, err := fmt.Sscanf(string(content), "%d", &pid); err == nil {
 						if !process.IsProcessAlive(pid) {
-							// Process is dead, this is a stale session
 							if os.Getenv("GROVE_DEBUG") != "" {
 								fmt.Printf("Found stale interactive session: %s (PID: %d)\n", sessionID, pid)
 							}
@@ -128,13 +117,11 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 							if metadataContent, err := os.ReadFile(metadataFile); err == nil {
 								var metadata coresessions.SessionMetadata
 								if err := json.Unmarshal(metadataContent, &metadata); err == nil {
-									// Check if it's a flow job
 									if (metadata.Type == "interactive_agent" || metadata.Type == "isolated_agent" || metadata.Type == "agent") && metadata.JobFilePath != "" {
-										// This is a flow job - trigger auto-completion
 										if os.Getenv("GROVE_DEBUG") != "" {
 											fmt.Printf("Triggering auto-completion for dead flow job: %s\n", metadata.JobFilePath)
 										}
-										go func(jobPath, sessDir string) {
+										go func(jobPath string) {
 											cmd := delegation.Command("flow", "plan", "complete", jobPath)
 											if os.Getenv("GROVE_DEBUG") != "" {
 												output, err := cmd.CombinedOutput()
@@ -146,93 +133,21 @@ func CleanupDeadSessionsWithThreshold(storage interfaces.SessionStorer, inactivi
 											} else {
 												cmd.Run()
 											}
-											// After completion, wait a bit for completion to finish
-											// Session directory is now preserved as permanent historical record
 											time.Sleep(10 * time.Second)
-										}(metadata.JobFilePath, sessionDir)
+										}(metadata.JobFilePath)
 										cleaned++
-										continue // Skip the removal below
+										continue
 									}
 								}
 							}
 
-							// Not a flow job, or couldn't read metadata - preserve as historical record
-							// Session directories are now permanent and never deleted
+							// Not a flow job — preserve as historical record
 							cleaned++
 							if os.Getenv("GROVE_DEBUG") != "" {
 								fmt.Printf("Marked stale session as historical: %s\n", sessionDir)
 							}
 						}
 					}
-				}
-			}
-		}
-	}
-
-	// 2. Clean up old database entries (for backwards compatibility during transition)
-	sessions, err := storage.GetAllSessions()
-	if err != nil {
-		return cleaned, fmt.Errorf("failed to get sessions: %w", err)
-	}
-
-	now := time.Now()
-
-	for _, session := range sessions {
-		// Skip oneshot jobs - they are managed by grove-flow
-		if session.Type == "oneshot_job" {
-			continue
-		}
-
-		// For running/idle sessions, check if still active
-		if session.Status == "running" || session.Status == "idle" {
-			// First check if process is dead (quick check)
-			if session.PID > 0 && !process.IsProcessAlive(session.PID) {
-				// Mark session as interrupted
-				if err := storage.UpdateSessionStatus(session.ID, "interrupted"); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
-					continue
-				}
-				cleaned++
-
-				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Printf("Cleaned up DB session %s (PID %d was dead)\n", session.ID, session.PID)
-				}
-				continue
-			}
-
-			// For sessions without PID (old sessions before PID tracking), check filesystem
-			if session.PID == 0 {
-				sessionDir := filepath.Join(groveSessionsDir, session.ID)
-				pidFile := filepath.Join(sessionDir, "pid.lock")
-
-				// If no pid.lock file exists, this is a zombie session
-				if _, err := os.Stat(pidFile); os.IsNotExist(err) {
-					// Mark session as interrupted (no filesystem tracking)
-					if err := storage.UpdateSessionStatus(session.ID, "interrupted"); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
-						continue
-					}
-					cleaned++
-
-					if os.Getenv("GROVE_DEBUG") != "" {
-						fmt.Printf("Cleaned up zombie session %s (no PID tracking)\n", session.ID)
-					}
-					continue
-				}
-			}
-
-			// Then check if session has been inactive for too long
-			timeSinceActivity := now.Sub(session.LastActivity)
-			if timeSinceActivity > inactivityThreshold {
-				// Mark session as completed due to inactivity
-				if err := storage.UpdateSessionStatus(session.ID, "completed"); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to update session %s: %v\n", session.ID, err)
-					continue
-				}
-				cleaned++
-
-				if os.Getenv("GROVE_DEBUG") != "" {
-					fmt.Printf("Cleaned up inactive session %s (inactive for %v)\n", session.ID, timeSinceActivity)
 				}
 			}
 		}

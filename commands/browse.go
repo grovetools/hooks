@@ -10,9 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/hooks/internal/storage/disk"
 	"github.com/grovetools/hooks/internal/tui/browse"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -102,18 +102,12 @@ func NewBrowseCmd() *cobra.Command {
 			EnableBackgroundRefresh()
 			StartBackgroundRefresh()
 
-			// Create storage for session cleanup
-			storage, err := disk.NewSQLiteStore()
-			if err != nil {
-				return fmt.Errorf("failed to create storage: %w", err)
-			}
-			defer storage.(*disk.SQLiteStore).Close()
+			// Create daemon client for session discovery
+			client := daemon.NewWithAutoStart()
+			defer client.Close()
 
-			// Clean up dead sessions first
-			_, _ = CleanupDeadSessions(storage)
-
-			// Fetch all sessions using the centralized discovery function
-			sessions, err := GetAllSessions(storage, hideCompleted)
+			// Fetch all sessions from the daemon
+			sessions, err := GetAllSessions(client, hideCompleted)
 			if err != nil {
 				return fmt.Errorf("failed to get all sessions: %w", err)
 			}
@@ -143,7 +137,7 @@ func NewBrowseCmd() *cobra.Command {
 				cfg,
 				sessions,
 				workspaces,
-				storage,
+				client,
 				hideCompleted,
 				prefs,
 				GetAllSessions,

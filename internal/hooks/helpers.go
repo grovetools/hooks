@@ -13,7 +13,6 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/models"
-	"github.com/grovetools/hooks/internal/storage/disk"
 	"github.com/grovetools/notify"
 )
 
@@ -115,21 +114,15 @@ func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {
 
 	// Get session details for context
 	sessionData, err := ctx.Storage.GetSession(data.SessionID)
-	var repo, branch, projectName, sessionType, jobTitle, planName string
-	var isWorktree bool
+	var repo, branch, sessionType, jobTitle, planName string
 
 	if err == nil && sessionData != nil {
-		if extSession, ok := sessionData.(*disk.ExtendedSession); ok {
-			repo = extSession.Repo
-			branch = extSession.Branch
-			projectName = extSession.ProjectName
-			isWorktree = extSession.IsWorktree
-			sessionType = extSession.Type
-			jobTitle = extSession.JobTitle
-			planName = extSession.PlanName
-		} else if session, ok := sessionData.(*models.Session); ok {
+		if session, ok := sessionData.(*models.Session); ok {
 			repo = session.Repo
 			branch = session.Branch
+			sessionType = session.Type
+			jobTitle = session.JobTitle
+			planName = session.PlanName
 		}
 	}
 
@@ -164,14 +157,8 @@ func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {
 		messageParts = append(messageParts, fmt.Sprintf("📂 Plan: %s", planName))
 	}
 
-	// Add project/worktree info
-	if projectName != "" {
-		if isWorktree {
-			messageParts = append(messageParts, fmt.Sprintf(" %s (worktree)", projectName))
-		} else {
-			messageParts = append(messageParts, fmt.Sprintf(" %s", projectName))
-		}
-	} else if repo != "" {
+	// Add repo info
+	if repo != "" {
 		messageParts = append(messageParts, fmt.Sprintf(" %s", repo))
 	}
 
@@ -266,16 +253,9 @@ func ExecuteHookCommand(workingDir string, hookCmd config.HookCommand) error {
 
 // getWorkingDirectory extracts the working directory from a session interface
 func getWorkingDirectory(session interface{}) string {
-	// Check if it's an extended session
-	if extSession, ok := session.(*disk.ExtendedSession); ok {
-		return extSession.WorkingDirectory
+	if s, ok := session.(*models.Session); ok {
+		return s.WorkingDirectory
 	}
-
-	// Check if it's a regular session
-	if baseSession, ok := session.(*models.Session); ok {
-		return baseSession.WorkingDirectory
-	}
-
 	return ""
 }
 
