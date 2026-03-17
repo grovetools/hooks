@@ -137,36 +137,42 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 
 	// Check if session directory already exists
 	if _, err := os.Stat(sessionDir); err == nil {
-		// Directory exists - check if PID is alive
-		if content, err := os.ReadFile(pidFile); err == nil {
-			var pid int
-			if _, err := fmt.Sscanf(string(content), "%d", &pid); err == nil {
-				if process.IsProcessAlive(pid) {
-					// Session is already running and tracked
-					// But we need to update the status if it's currently idle (resuming from idle)
-					// Read metadata to get the actual session ID (for interactive_agent jobs)
-					actualSessionID := sessionID
-					if metadataContent, err := os.ReadFile(metadataFile); err == nil {
-						var existingMetadata struct {
-							SessionID string `json:"session_id"`
-						}
-						if err := json.Unmarshal(metadataContent, &existingMetadata); err == nil && existingMetadata.SessionID != "" {
-							actualSessionID = existingMetadata.SessionID
-						}
-					}
+		// Read metadata to get the actual session ID (for interactive_agent jobs)
+		actualSessionID := sessionID
+		if metadataContent, err := os.ReadFile(metadataFile); err == nil {
+			var existingMetadata struct {
+				SessionID string `json:"session_id"`
+			}
+			if err := json.Unmarshal(metadataContent, &existingMetadata); err == nil && existingMetadata.SessionID != "" {
+				actualSessionID = existingMetadata.SessionID
+			}
+		}
 
-					// Check current status and update if idle (resuming from idle)
-					if existingSessionData, err := hc.Storage.GetSession(actualSessionID); err == nil && existingSessionData != nil {
-						if session, ok := existingSessionData.(*models.Session); ok && session != nil {
-							if session.Status == "idle" {
-								hc.Storage.UpdateSessionStatus(actualSessionID, "running")
-							}
-						}
-					}
+		// Check if daemon knows this session in a non-terminal state.
+		// The PID in pid.lock may be stale (short-lived hooks process), but the
+		// daemon tracks the session independently. If the daemon says it's idle,
+		// transition to running — the agent is resuming after an idle period.
+		if existingSessionData, err := hc.Storage.GetSession(actualSessionID); err == nil && existingSessionData != nil {
+			if session, ok := existingSessionData.(*models.Session); ok && session != nil {
+				if session.Status == "idle" {
+					hc.Storage.UpdateSessionStatus(actualSessionID, "running")
+				}
+				if session.Status == "idle" || session.Status == "running" || session.Status == "pending_user" {
 					return nil
 				}
 			}
 		}
+
+		// Also check PID liveness as fallback (for sessions not yet in daemon)
+		if content, err := os.ReadFile(pidFile); err == nil {
+			var pid int
+			if _, err := fmt.Sscanf(string(content), "%d", &pid); err == nil {
+				if process.IsProcessAlive(pid) {
+					return nil
+				}
+			}
+		}
+
 		// Stale directory, remove it before creating a new one
 		os.RemoveAll(sessionDir)
 	}
