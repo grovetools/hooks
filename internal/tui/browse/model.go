@@ -695,11 +695,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if key.Matches(msg, m.keys.MarkComplete) {
 			if session := m.getCurrentSession(); session != nil && !m.showDetails {
-				// Only allow completing chat and oneshot sessions
-				if session.Type == "interactive_agent" || session.Type == "isolated_agent" {
-					m.statusMessage = "Use 'flow plan complete' for agent sessions"
-					return m, nil
-				}
 				return m, m.markNoteComplete(session)
 			}
 		} else if m.searchActive && !m.showDetails {
@@ -1197,18 +1192,35 @@ func (m Model) SelectedSession() *models.Session {
 	return m.selectedSession
 }
 
-// markNoteComplete marks the given note as completed by updating its frontmatter
-// and notifying the daemon so it's removed from the session/job lists.
+// markNoteComplete marks the given session/job as completed.
+// For agent sessions (interactive_agent, isolated_agent), it delegates to
+// `flow plan complete` which handles process cleanup, tmux teardown, and archiving.
+// For chat/oneshot sessions, it directly updates frontmatter and notifies the daemon.
 func (m *Model) markNoteComplete(session *models.Session) tea.Cmd {
 	client := m.daemonClient
 	return func() tea.Msg {
-		// Read the note file
+		if session.JobFilePath == "" {
+			return noteCompleteMsg{err: fmt.Errorf("no job file path for session %s", session.ID)}
+		}
+
+		// Agent sessions need full cleanup via flow plan complete
+		if session.Type == "interactive_agent" || session.Type == "isolated_agent" {
+			cmd := exec.Command("flow", "plan", "complete", session.JobFilePath)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				return noteCompleteMsg{err: fmt.Errorf("flow plan complete failed: %w\n%s", err, string(output))}
+			}
+			return noteCompleteMsg{
+				sessionID: session.ID,
+				filename:  filepath.Base(session.JobFilePath),
+			}
+		}
+
+		// Chat/oneshot: update frontmatter directly
 		content, err := os.ReadFile(session.JobFilePath)
 		if err != nil {
 			return noteCompleteMsg{err: fmt.Errorf("failed to read note: %w", err)}
 		}
 
-		// Update the status to completed
 		updatedContent, err := orchestration.UpdateFrontmatter(content, map[string]interface{}{
 			"status": "completed",
 		})
@@ -1216,7 +1228,6 @@ func (m *Model) markNoteComplete(session *models.Session) tea.Cmd {
 			return noteCompleteMsg{err: fmt.Errorf("failed to update frontmatter: %w", err)}
 		}
 
-		// Write back to file
 		if err := os.WriteFile(session.JobFilePath, updatedContent, 0644); err != nil {
 			return noteCompleteMsg{err: fmt.Errorf("failed to write note: %w", err)}
 		}
