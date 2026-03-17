@@ -47,6 +47,67 @@ func GetAllSessions(client daemon.Client, hideCompleted bool) ([]*models.Session
 		allSessions = []*models.Session{}
 	}
 
+	// Merge jobs from the daemon's JobRunner/JobCollector into the session list.
+	// This makes idle/pending jobs (created by `flow chat`) visible in the TUI.
+	sessionIDs := make(map[string]struct{}, len(allSessions))
+	sessionJobPaths := make(map[string]struct{}, len(allSessions))
+	for _, s := range allSessions {
+		sessionIDs[s.ID] = struct{}{}
+		if s.JobFilePath != "" {
+			sessionJobPaths[s.JobFilePath] = struct{}{}
+		}
+	}
+
+	jobs, jobErr := client.ListJobs(ctx, models.JobFilter{})
+	if jobErr != nil {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "Warning: failed to get jobs from daemon: %v\n", jobErr)
+		}
+	} else {
+		for _, j := range jobs {
+			// Skip jobs already represented as sessions (by ID or file path)
+			if _, exists := sessionIDs[j.ID]; exists {
+				continue
+			}
+			jobPath := filepath.Join(j.PlanDir, j.JobFile)
+			if _, exists := sessionJobPaths[jobPath]; exists {
+				continue
+			}
+
+			session := &models.Session{
+				ID:               j.ID,
+				Status:           j.Status,
+				PlanName:         j.PlanName,
+				JobFilePath:      filepath.Join(j.PlanDir, j.JobFile),
+				WorkingDirectory: j.WorkDir,
+				Repo:             j.Repo,
+				Branch:           j.Branch,
+			}
+			if session.PlanName == "" {
+				session.PlanName = filepath.Base(j.PlanDir)
+			}
+
+			session.Type = string(j.Type)
+			if session.Type == "" {
+				session.Type = "chat"
+			}
+			session.JobTitle = j.Title
+			if session.JobTitle == "" {
+				session.JobTitle = strings.TrimSuffix(j.JobFile, ".md")
+			}
+
+			if !j.SubmittedAt.IsZero() {
+				session.StartedAt = j.SubmittedAt
+				session.LastActivity = j.SubmittedAt
+			} else {
+				session.StartedAt = time.Now()
+				session.LastActivity = time.Now()
+			}
+
+			allSessions = append(allSessions, session)
+		}
+	}
+
 	// Filter by hideCompleted if requested
 	if hideCompleted {
 		var filtered []*models.Session
