@@ -1,7 +1,6 @@
 package hooks
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
@@ -264,18 +262,9 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		coreMetadata.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
 		coreMetadata.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
 
-		// When running from flow, confirm the session with the daemon.
-		// The flow tool pre-registers the session intent, and this hook confirms it with the actual PID.
-		daemonClient := daemon.NewWithAutoStart()
-		confirmErr := daemonClient.ConfirmSession(context.Background(), daemon.SessionConfirmation{
-			JobID:          flowJobID,
-			NativeID:       sessionID,
-			PID:            pid,
-			TranscriptPath: transcriptPath,
-		})
-		daemonClient.Close()
-		// Log daemon confirmation result but don't fail - filesystem registry is the fallback
-		_ = confirmErr
+		// Note: Session confirmation is handled by flow's discoverAndRegisterSessionAsync.
+		// Hooks should NOT call ConfirmSession because each hook runs in a new process
+		// with a different PID, which would spam the monitor with false confirmations.
 	}
 
 	// Register the session with grove-core filesystem registry (always, for backwards compatibility)
