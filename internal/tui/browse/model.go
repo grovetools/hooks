@@ -695,6 +695,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if key.Matches(msg, m.keys.MarkComplete) {
 			if session := m.getCurrentSession(); session != nil && !m.showDetails {
+				// Only allow completing chat and oneshot sessions
+				if session.Type == "interactive_agent" || session.Type == "isolated_agent" {
+					m.statusMessage = "Use 'flow plan complete' for agent sessions"
+					return m, nil
+				}
 				return m, m.markNoteComplete(session)
 			}
 		} else if m.searchActive && !m.showDetails {
@@ -1193,7 +1198,9 @@ func (m Model) SelectedSession() *models.Session {
 }
 
 // markNoteComplete marks the given note as completed by updating its frontmatter
+// and notifying the daemon so it's removed from the session/job lists.
 func (m *Model) markNoteComplete(session *models.Session) tea.Cmd {
+	client := m.daemonClient
 	return func() tea.Msg {
 		// Read the note file
 		content, err := os.ReadFile(session.JobFilePath)
@@ -1212,6 +1219,13 @@ func (m *Model) markNoteComplete(session *models.Session) tea.Cmd {
 		// Write back to file
 		if err := os.WriteFile(session.JobFilePath, updatedContent, 0644); err != nil {
 			return noteCompleteMsg{err: fmt.Errorf("failed to write note: %w", err)}
+		}
+
+		// Notify daemon so session/job is updated in state
+		if client != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = client.EndSession(ctx, session.ID, "completed")
 		}
 
 		return noteCompleteMsg{
