@@ -155,9 +155,9 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 						}
 					}
 
-					// Check current status and update if idle
+					// Check current status and update if idle (resuming from idle)
 					if existingSessionData, err := hc.Storage.GetSession(actualSessionID); err == nil && existingSessionData != nil {
-						if session, ok := existingSessionData.(*models.Session); ok {
+						if session, ok := existingSessionData.(*models.Session); ok && session != nil {
 							if session.Status == "idle" {
 								hc.Storage.UpdateSessionStatus(actualSessionID, "running")
 							}

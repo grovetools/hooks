@@ -55,13 +55,37 @@ func (b *DaemonBackend) Close() error {
 
 // --- Session Management (routed to daemon) ---
 
-// EnsureSessionExists is a no-op for DaemonBackend.
-// Session registration is handled directly via daemon.Client.ConfirmSession()
-// in the hook context, not through this interface method.
+// EnsureSessionExists registers the session with the daemon so it can track
+// status transitions (idle→running, running→idle, etc.).
+// Only registers if the daemon doesn't already know about this session.
 func (b *DaemonBackend) EnsureSessionExists(session interface{}) error {
-	// Session registration is handled via daemon.Client.ConfirmSession/UpdateSessionStatus
-	// in hooks/internal/hooks/context.go directly, not through this interface.
-	return nil
+	s, ok := session.(*models.Session)
+	if !ok || s == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Skip if daemon already has this session (avoid re-registration with wrong PIDs)
+	if existing, _ := b.client.GetSession(ctx, s.ID); existing != nil {
+		return nil
+	}
+
+	// Register intent only — do NOT call ConfirmSession with PID here.
+	// The hooks process PID (from getClaudePID/os.Getppid) is the short-lived
+	// grove meta-tool PID, not the actual Claude Code PID. If we register that
+	// PID, the SessionCollector will immediately mark it as dead/interrupted.
+	// The actual Claude PID will be discovered and confirmed by flow's executor
+	// (discoverAndRegisterSessionAsync) which has access to the tmux pane PID.
+	return b.client.RegisterSessionIntent(ctx, daemon.SessionIntent{
+		JobID:       s.ID,
+		Provider:    s.Provider,
+		JobFilePath: s.JobFilePath,
+		PlanName:    s.PlanName,
+		Title:       s.JobTitle,
+		WorkDir:     s.WorkingDirectory,
+	})
 }
 
 // GetSession retrieves a session by ID from the daemon.
