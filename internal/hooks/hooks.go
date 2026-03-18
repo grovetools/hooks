@@ -385,94 +385,22 @@ func RunStopHook() {
 	}
 
 	// Determine final status based on exit reason and session type
-	finalStatus := "idle"
-	isComplete := false
+	outcome := DetermineOutcome(StopContext{
+		SessionType: sessionType,
+		Provider:    provider,
+		ExitReason:  data.ExitReason,
+	})
+	finalStatus := outcome.Status
+	isComplete := outcome.IsComplete
 
-	// Log the critical decision inputs
 	slog.WithFields(logrus.Fields{
 		"session_type":      sessionType,
 		"provider":          provider,
 		"exit_reason":       data.ExitReason,
 		"actual_session_id": actualSessionID,
-	}).Info("Determining session status - decision inputs")
-
-	// Debug file for troubleshooting
-	if debugFile, err := os.OpenFile(os.ExpandEnv("$HOME/.grove/hooks-debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		fmt.Fprintf(debugFile, "[%s] DECISION: session_type=%q provider=%q exit_reason=%q session_id=%q\n",
-			time.Now().Format(time.RFC3339), sessionType, provider, data.ExitReason, actualSessionID)
-		debugFile.Close()
-	}
-
-	if sessionType == "oneshot_job" {
-		// For oneshot jobs, always mark as completed when stop hook is called
-		finalStatus = "completed"
-		isComplete = true
-		slog.WithFields(logrus.Fields{
-			"session_type": sessionType,
-			"final_status": finalStatus,
-			"is_complete":  isComplete,
-			"reason":       "oneshot_job always completes on stop",
-		}).Info("Status decision: oneshot job completed")
-	} else if provider == "opencode" {
-		// OpenCode sessions (both standalone and grove-flow managed) stay running after each turn.
-		// The stop hook is triggered at the end of each assistant response, but the session
-		// is NOT actually complete - it's just idle waiting for the next user message.
-		//
-		// IMPORTANT: Never auto-complete opencode sessions from the stop hook.
-		// The user must explicitly complete them via TUI 'c' key or `flow plan complete`.
-		// Only mark as failed if there's an actual error.
-		if data.ExitReason == "error" || data.ExitReason == "killed" || data.ExitReason == "interrupted" {
-			finalStatus = "failed"
-			isComplete = true
-			slog.WithFields(logrus.Fields{
-				"session_type": sessionType,
-				"provider":     provider,
-				"exit_reason":  data.ExitReason,
-				"final_status": finalStatus,
-				"is_complete":  isComplete,
-				"reason":       "opencode session failed",
-			}).Info("Status decision: opencode session failed")
-		} else {
-			// For opencode, exit_reason "completed" just means the assistant finished responding.
-			// The opencode process itself is still running, waiting for user input.
-			// Set to idle, NOT complete. User must explicitly complete via TUI or CLI.
-			finalStatus = "idle"
-			isComplete = false
-			slog.WithFields(logrus.Fields{
-				"session_type": sessionType,
-				"provider":     provider,
-				"exit_reason":  data.ExitReason,
-				"final_status": finalStatus,
-				"is_complete":  isComplete,
-				"reason":       "opencode end-of-turn, keeping idle (explicit completion required)",
-			}).Info("Status decision: opencode session idle (end-of-turn)")
-		}
-	} else {
-		// For regular claude/codex sessions, use exit reason to determine status
-		if data.ExitReason == "completed" || data.ExitReason == "error" || data.ExitReason == "interrupted" || data.ExitReason == "killed" {
-			finalStatus = "completed"
-			isComplete = true
-			slog.WithFields(logrus.Fields{
-				"session_type": sessionType,
-				"provider":     provider,
-				"exit_reason":  data.ExitReason,
-				"final_status": finalStatus,
-				"is_complete":  isComplete,
-				"reason":       "terminal exit reason",
-			}).Info("Status decision: session completed")
-		} else {
-			// Normal end-of-turn stop (empty exit_reason or other) - set to idle
-			finalStatus = "idle"
-			slog.WithFields(logrus.Fields{
-				"session_type": sessionType,
-				"provider":     provider,
-				"exit_reason":  data.ExitReason,
-				"final_status": finalStatus,
-				"is_complete":  isComplete,
-				"reason":       "non-terminal exit reason",
-			}).Info("Status decision: session idle")
-		}
-	}
+		"final_status":      finalStatus,
+		"is_complete":       isComplete,
+	}).Info("Session outcome determined")
 
 	// Update database status using the actual session ID
 	if err := ctx.Storage.UpdateSessionStatus(actualSessionID, finalStatus); err != nil {

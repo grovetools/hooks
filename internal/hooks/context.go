@@ -18,7 +18,6 @@ import (
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/hooks/internal/storage"
-	"github.com/grovetools/hooks/internal/storage/interfaces"
 	"github.com/grovetools/hooks/internal/utils"
 	"github.com/grovetools/nav/pkg/tmux"
 )
@@ -49,7 +48,7 @@ type NotificationsConfig struct {
 type HookContext struct {
 	Input        BaseHookInput
 	RawInput     []byte
-	Storage      interfaces.SessionStorer
+	Storage      *storage.DaemonBackend
 	DaemonClient daemon.Client
 	StartTime    time.Time
 	Config       *NotificationsConfig
@@ -268,16 +267,6 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		// with a different PID, which would spam the monitor with false confirmations.
 	}
 
-	// Register the session with grove-core filesystem registry (always, for backwards compatibility)
-	registry, err := sessions.NewFileSystemRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to create session registry: %w", err)
-	}
-
-	if err := registry.Register(coreMetadata); err != nil {
-		return fmt.Errorf("failed to register session: %w", err)
-	}
-
 	// Create session with workspace context
 	session := &models.Session{
 		ID:               sessionID,
@@ -309,7 +298,20 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		session.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
 	}
 
-	return hc.Storage.EnsureSessionExists(session)
+	// Primary: register with daemon
+	err = hc.Storage.EnsureSessionExists(session)
+	if err != nil {
+		// Fallback: write filesystem registry for crash recovery when daemon is unavailable
+		registry, regErr := sessions.NewFileSystemRegistry()
+		if regErr != nil {
+			return fmt.Errorf("daemon registration failed (%v), and failed to create fallback registry: %w", err, regErr)
+		}
+		if regErr := registry.Register(coreMetadata); regErr != nil {
+			return fmt.Errorf("daemon registration failed (%v), and fallback registration failed: %w", err, regErr)
+		}
+	}
+
+	return nil
 }
 
 // getClaudePID attempts to find the Claude process PID from the environment.
