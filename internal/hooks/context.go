@@ -298,17 +298,23 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		session.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
 	}
 
-	// Primary: register with daemon
-	err = hc.Storage.EnsureSessionExists(session)
-	if err != nil {
-		// Fallback: write filesystem registry for crash recovery when daemon is unavailable
-		registry, regErr := sessions.NewFileSystemRegistry()
-		if regErr != nil {
-			return fmt.Errorf("daemon registration failed (%v), and failed to create fallback registry: %w", err, regErr)
+	// Register with daemon
+	daemonErr := hc.Storage.EnsureSessionExists(session)
+
+	// Always write filesystem registry — aglogs and flow depend on it to find
+	// the transcript path (the daemon doesn't store LogFilePath).
+	registry, regErr := sessions.NewFileSystemRegistry()
+	if regErr != nil {
+		if daemonErr != nil {
+			return fmt.Errorf("daemon registration failed (%v), and failed to create fallback registry: %w", daemonErr, regErr)
 		}
-		if regErr := registry.Register(coreMetadata); regErr != nil {
-			return fmt.Errorf("daemon registration failed (%v), and fallback registration failed: %w", err, regErr)
+		return fmt.Errorf("failed to create session registry: %w", regErr)
+	}
+	if regErr := registry.Register(coreMetadata); regErr != nil {
+		if daemonErr != nil {
+			return fmt.Errorf("daemon registration failed (%v), and fallback registration failed: %w", daemonErr, regErr)
 		}
+		return fmt.Errorf("failed to register session: %w", regErr)
 	}
 
 	return nil
