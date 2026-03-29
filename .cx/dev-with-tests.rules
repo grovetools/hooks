@@ -1,5 +1,0 @@
-**/*.go
-Makefile
-go.mod
-grove.yml
-
