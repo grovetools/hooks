@@ -318,7 +318,7 @@ func RunStopHook() {
 
 	// Supplement metadata from daemon if available (but don't require it)
 	if sessionData != nil {
-		if session, ok := sessionData.(*models.Session); ok {
+		if session, ok := sessionData.(*models.Session); ok && session != nil {
 			// Only override if not already set from filesystem
 			if sessionType == "claude_session" && session.Type != "" {
 				sessionType = session.Type
