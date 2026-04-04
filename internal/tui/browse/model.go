@@ -493,7 +493,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Handle context-aware actions for workspaces and plans
 			if node.isPlan {
 				// Action for plan: switch to workspace session and open flow plan TUI in new window
-				sessionName := node.workspace.Identifier()
+				sessionName := node.workspace.Identifier("_")
 				planName := node.plan.Name
 				windowName := fmt.Sprintf("plan-%s", planName)
 
@@ -518,7 +518,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			} else if !node.isSession { // It's a workspace
 				// Action for workspace: open tmux session
-				sessionName := node.workspace.Identifier()
+				sessionName := node.workspace.Identifier("_")
 				return m.switchToTmuxSession(sessionName)
 			}
 
@@ -568,7 +568,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.statusMessage = fmt.Sprintf("Warning: failed to update access history: %v", err)
 						}
 
-						sessionName := projInfo.Identifier()
+						sessionName := projInfo.Identifier("_")
 						windowName := "job-" + session.JobTitle
 						// Sanitize window name for tmux
 						windowName = strings.Map(func(r rune) rune {
