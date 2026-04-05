@@ -11,7 +11,6 @@ require (
 	github.com/grovetools/nav v0.6.1
 	github.com/grovetools/notify v0.6.0
 	github.com/grovetools/tend v0.6.0
-	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
 )
