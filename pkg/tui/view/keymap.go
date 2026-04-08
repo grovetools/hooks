@@ -38,7 +38,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "action"),
 		), k.Back, k.Select, k.SelectAll},
-		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.Edit, k.Open, k.CopyPath, k.OpenDir, k.ExportJSON},
+		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.ScopeToggle, k.Edit, k.Open, k.CopyPath, k.OpenDir, k.ExportJSON},
 		{k.MarkComplete, k.Kill, k.Help, k.Quit},
 	}
 }
@@ -57,7 +57,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		},
 		{
 			Name:     "View",
-			Bindings: []key.Binding{k.ToggleView, k.ToggleFilter, k.SearchFilter},
+			Bindings: []key.Binding{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.ScopeToggle},
 		},
 		{
 			Name:     "Actions",
@@ -123,11 +123,11 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 		Edit: key.NewBinding(
 			key.WithKeys("e"),
-			key.WithHelp("e", "action"),
+			key.WithHelp("e", "edit prompt"),
 		),
 		Open: key.NewBinding(
 			key.WithKeys("o"),
-			key.WithHelp("o", "action"),
+			key.WithHelp("o", "open agent session"),
 		),
 		JumpToWorkspace: key.NewBinding(
 			key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),
