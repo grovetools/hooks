@@ -1,4 +1,4 @@
-package browse
+package view
 
 import (
 	"github.com/charmbracelet/bubbles/key"

@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"github.com/grovetools/core/tui/keymap"
-	"github.com/grovetools/hooks/internal/tui/browse"
+	browse "github.com/grovetools/hooks/pkg/tui/view"
 )
 
 // BrowseKeymapInfo returns the keymap metadata for the hooks session browser TUI.

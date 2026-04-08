@@ -13,7 +13,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/hooks/internal/tui/browse"
+	browse "github.com/grovetools/hooks/pkg/tui/view"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
