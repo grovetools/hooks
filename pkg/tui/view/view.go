@@ -103,6 +103,9 @@ func (m Model) viewTable() string {
 				}
 				jobTypeIcon := getJobTypeIcon(node.session.Type)
 				firstCol = node.prefix + jobTypeIcon + " " + utils.TruncateStr(sessionTitle, 40)
+				if n := m.sessionRunCounts[node.session.ID]; n > 1 {
+					firstCol += " " + t.Muted.Render(fmt.Sprintf("(×%d)", n))
+				}
 			} else if node.isPlan {
 				statusIcon := getStatusIcon(node.plan.Status, "plan")
 				label := "Plan:"

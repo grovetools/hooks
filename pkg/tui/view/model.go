@@ -85,6 +85,14 @@ type Model struct {
 	filteredSessions []*models.Session
 	displayNodes     []*displayNode
 
+	// sessionRunCounts maps a surviving session's ID to the number of
+	// daemon session rows that were folded into it during dedup (see
+	// normalizeSessions in data.go). Always >= 1 for entries that
+	// originated from a job with a JobFilePath; absent for sessions
+	// without a JobFilePath. The renderer surfaces "(×N)" in the row
+	// label when N > 1 so collapsed retries are still visible.
+	sessionRunCounts map[string]int
+
 	selectedSession *models.Session
 	cursor          int
 	scrollOffset    int // For viewport scrolling
@@ -162,10 +170,13 @@ func NewModel(
 
 	keys := NewKeyMap(cfg)
 
+	normalized, runCounts := normalizeSessions(sessions)
+
 	model := Model{
-		sessions:              sessions,
+		sessions:              normalized,
 		workspaces:            workspaces,
-		filteredSessions:      sessions,
+		filteredSessions:      normalized,
+		sessionRunCounts:      runCounts,
 		filterInput:           ti,
 		selectedIDs:           make(map[string]bool),
 		daemonClient:          daemonClient,
@@ -885,49 +896,7 @@ func (m *Model) updateFilteredAndDisplayNodes() {
 		m.filteredSessions = append(m.filteredSessions, s)
 	}
 
-	// Dedupe by JobFilePath: keep the most recently active session
-	// per job. Without this, every restart / retry of the same job
-	// shows up as its own row (the daemon legitimately tracks each
-	// spawn) and the tree fills up with 16+ identical entries for
-	// the same .md file. Sessions without a JobFilePath are kept
-	// as-is (they aren't tied to a single job).
-	m.filteredSessions = dedupeSessionsByJobPath(m.filteredSessions)
-
 	m.buildDisplayTree()
-}
-
-// dedupeSessionsByJobPath collapses sessions that share a JobFilePath
-// down to the single most-recently-active entry. Sessions with an
-// empty JobFilePath are preserved as-is. Order is preserved for the
-// surviving sessions.
-func dedupeSessionsByJobPath(in []*models.Session) []*models.Session {
-	if len(in) == 0 {
-		return in
-	}
-	bestIdx := make(map[string]int, len(in))
-	for i, s := range in {
-		if s.JobFilePath == "" {
-			continue
-		}
-		if cur, ok := bestIdx[s.JobFilePath]; ok {
-			if in[i].LastActivity.After(in[cur].LastActivity) {
-				bestIdx[s.JobFilePath] = i
-			}
-			continue
-		}
-		bestIdx[s.JobFilePath] = i
-	}
-	out := make([]*models.Session, 0, len(in))
-	for i, s := range in {
-		if s.JobFilePath == "" {
-			out = append(out, s)
-			continue
-		}
-		if bestIdx[s.JobFilePath] == i {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 func createPlanListItem(planName string, sessions []*models.Session) PlanListItem {
@@ -1343,11 +1312,13 @@ func (m *Model) applySessions(newSessions []*models.Session) {
 		}
 	}
 
+	normalized, runCounts := normalizeSessions(newSessions)
 	if len(m.previousSessions) > 0 {
-		go m.dispatchNotifications(m.previousSessions, newSessions)
+		go m.dispatchNotifications(m.previousSessions, normalized)
 	}
 	m.previousSessions = m.sessions
-	m.sessions = newSessions
+	m.sessions = normalized
+	m.sessionRunCounts = runCounts
 	m.updateFilteredAndDisplayNodes()
 
 	if selectedID != "" {
