@@ -440,6 +440,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showDetails = false
 				return m, nil
 			}
+			// When embedded inside a host TUI, swallow the quit
+			// keystroke instead of returning tea.Quit — quitting
+			// would tear down the host program. The host owns
+			// global navigation (Tab) so the user can leave the
+			// panel via the rail.
+			if m.hosted {
+				return m, nil
+			}
 			return m, tea.Quit
 		}
 		if key.Matches(msg, m.keys.Back) {
@@ -458,6 +466,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.showDetails {
 				m.showDetails = false
+				return m, nil
+			}
+			if m.hosted {
 				return m, nil
 			}
 			return m, tea.Quit
@@ -560,6 +571,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil // Nothing selected
 			}
 
+			// When hosted, swallow Confirm/Open/Edit on
+			// non-session nodes (plans, workspaces): the
+			// fallthrough paths spawn tmux windows + return
+			// tea.Quit which would kill the host program.
+			if m.hosted && !node.isSession {
+				return m, nil
+			}
+
 			// Handle context-aware actions for workspaces and plans
 			if node.isPlan {
 				// Action for plan: switch to workspace session and open flow plan TUI in new window
@@ -607,8 +626,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Phase 3.1: when hosted, hand routing off to the
 					// terminal multiplexer via OpenAgentSessionMsg so
 					// the host can spawn / focus the agent panel
-					// without quitting the embedded TUI.
-					if m.hosted && (session.Status == "running" || session.Status == "idle") {
+					// without quitting the embedded TUI. We do this
+					// for ALL session statuses when hosted — the
+					// fallthrough tmux paths below all return
+					// tea.Quit, which would tear down the host.
+					if m.hosted {
 						sid := session.ID
 						return m, func() tea.Msg {
 							return embed.OpenAgentSessionMsg{SessionID: sid}

@@ -66,6 +66,13 @@ type Config struct {
 	// on first render. Optional — when nil, the panel shows all workspaces
 	// (mirroring the standalone CLI behavior).
 	InitialFocus *workspace.WorkspaceNode
+
+	// Hosted indicates the model is embedded inside a host TUI (the
+	// terminal multiplexer) rather than running as a standalone CLI.
+	// When true, the model swallows quit-style key actions (q / esc)
+	// instead of returning tea.Quit — quitting the embedded model would
+	// kill the host. The standalone CLI leaves this false.
+	Hosted bool
 }
 
 // New constructs a hooks session-browser model from a Config. The returned
@@ -117,6 +124,9 @@ func New(cfg Config) Model {
 		cfg.DispatchNotifications,
 		cfg.SaveFilterPreferences,
 	)
+	if cfg.Hosted {
+		m.hosted = true
+	}
 	if cfg.InitialFocus != nil {
 		m.activeWorkspace = cfg.InitialFocus
 		m.localScope = true
