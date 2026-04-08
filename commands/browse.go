@@ -2,8 +2,6 @@ package commands
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -12,54 +10,31 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/paths"
-	"github.com/grovetools/core/pkg/workspace"
-	browse "github.com/grovetools/hooks/pkg/tui/view"
-	"github.com/sirupsen/logrus"
+	"github.com/grovetools/core/tui/embed"
+	view "github.com/grovetools/hooks/pkg/tui/view"
 	"github.com/spf13/cobra"
 )
 
 var browseFiltersPath = filepath.Join(paths.StateDir(), "hooks", "browse_filters.json")
 
-// loadFilterPreferences loads saved filter preferences from disk
-func loadFilterPreferences() browse.FilterPreferences {
-	prefs := browse.FilterPreferences{
-		StatusFilters: map[string]bool{
-			"running":      true,
-			"idle":         true,
-			"pending_user": true,
-			"completed":    true,
-			"interrupted":  true,
-			"failed":       true,
-			"error":        true,
-			"hold":         true,
-			"todo":         true,
-			"abandoned":    false, // Default to not show abandoned
-		},
-		TypeFilters: map[string]bool{
-			"claude_code":       true,
-			"chat":              true,
-			"interactive_agent": true,
-			"isolated_agent":    true,
-			"oneshot":           true,
-			"headless_agent":    true,
-			"agent":             true,
-			"shell":             true,
-			"opencode_session":  true,
-		},
-	}
+// loadFilterPreferences loads saved filter preferences from disk, falling
+// back to the package defaults from view.DefaultFilterPreferences when the
+// file is missing or malformed.
+func loadFilterPreferences() view.FilterPreferences {
+	prefs := view.DefaultFilterPreferences()
 
-	// Try to load from file
 	data, err := os.ReadFile(browseFiltersPath)
 	if err != nil {
-		return prefs // Return defaults if file doesn't exist
+		return prefs
 	}
 
-	var saved browse.FilterPreferences
+	var saved view.FilterPreferences
 	if err := json.Unmarshal(data, &saved); err != nil {
-		return prefs // Return defaults if JSON is invalid
+		return prefs
 	}
 
-	// Merge saved preferences with defaults (in case new filters were added)
+	// Merge saved preferences with defaults so newly added filters
+	// surface (default true/false) on first run after an upgrade.
 	for k, v := range saved.StatusFilters {
 		prefs.StatusFilters[k] = v
 	}
@@ -70,14 +45,13 @@ func loadFilterPreferences() browse.FilterPreferences {
 	return prefs
 }
 
-// saveFilterPreferences saves filter preferences to disk
-func saveFilterPreferences(prefs browse.FilterPreferences) error {
+// saveFilterPreferences saves filter preferences to disk.
+func saveFilterPreferences(prefs view.FilterPreferences) error {
 	data, err := json.MarshalIndent(prefs, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	// Ensure directory exists
 	dir := filepath.Dir(browseFiltersPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -86,6 +60,12 @@ func saveFilterPreferences(prefs browse.FilterPreferences) error {
 	return os.WriteFile(browseFiltersPath, data, 0644)
 }
 
+// NewBrowseCmd is the standalone CLI entry point for the embedded
+// session-browser meta-panel. It is now a thin shim around view.New +
+// embed.RunStandalone — the historical session preflight, workspace
+// discovery, and exit-command-running boilerplate all moved into the
+// view package or became unnecessary now that the model owns its own
+// initial fetch and SSE-driven refresh loop.
 func NewBrowseCmd() *cobra.Command {
 	var hideCompleted bool
 
@@ -95,114 +75,41 @@ func NewBrowseCmd() *cobra.Command {
 		Use:     "browse",
 		Aliases: []string{"b"},
 		Short:   "Browse sessions interactively",
-		Long:    `Launch an interactive terminal UI to browse all sessions (Claude sessions and grove-flow jobs). Navigate with arrow keys, search by typing, and select sessions to view details.`,
+		Long: `Launch an interactive terminal UI to browse all sessions ` +
+			`(Claude sessions and grove-flow jobs). Navigate with arrow ` +
+			`keys, search by typing, and select sessions to view details.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-
-			// Enable background cache refresh for the TUI (long-running)
-			EnableBackgroundRefresh()
-			StartBackgroundRefresh()
-
-			// Create daemon client for session discovery
+			// Daemon client is shared with the view's session loader
+			// and SSE subscription. Closed on RunE exit so the daemon
+			// auto-stop logic kicks in for short-lived runs.
 			client := daemon.NewWithAutoStart()
 			defer client.Close()
 
-			// Fetch all sessions from the daemon
-			sessions, err := GetAllSessions(client, hideCompleted)
-			if err != nil {
-				return fmt.Errorf("failed to get all sessions: %w", err)
-			}
+			cfg, _ := config.LoadDefault()
 
-			if len(sessions) == 0 {
-				ulog.Info("No sessions found").Emit()
-				return nil
-			}
+			model := view.New(view.Config{
+				DaemonClient:          client,
+				Cfg:                   cfg,
+				HideCompleted:         hideCompleted,
+				FilterPreferences:     loadFilterPreferences(),
+				SaveFilterPreferences: saveFilterPreferences,
+				GetAllSessions:        GetAllSessions,
+				DispatchNotifications: DispatchStateChangeNotifications,
+			})
+			defer func() { _ = model.Close() }()
 
-			// Load filter preferences
-			prefs := loadFilterPreferences()
-
-			// Load grove config for keybinding overrides
-			cfg, _ := config.LoadDefault() // Ignore error, will use defaults if config unavailable
-
-			// Discover workspaces
-			logger := logrus.New()
-			logger.SetOutput(io.Discard) // Suppress logs in the TUI
-			workspaces, err := workspace.GetProjects(logger)
-			if err != nil {
-				// If workspace discovery fails, continue with empty workspaces
-				workspaces = []*workspace.WorkspaceNode{}
-			}
-
-			// Create the interactive model using the extracted browse package
-			m := browse.NewModel(
-				cfg,
-				sessions,
-				workspaces,
-				client,
-				hideCompleted,
-				prefs,
-				GetAllSessions,
-				DispatchStateChangeNotifications,
-				saveFilterPreferences,
-			)
-
-			// Run the interactive program
-			// Use alt screen only when not in Neovim (to allow editor functionality)
+			// Use alt screen unless we're running under the Neovim
+			// plugin (which needs the parent process to keep its
+			// terminal grid intact for the editor handoff).
 			var opts []tea.ProgramOption
 			if os.Getenv("GROVE_NVIM_PLUGIN") != "true" {
 				opts = append(opts, tea.WithAltScreen())
 			}
-			p := tea.NewProgram(m, opts...)
-			finalModel, err := p.Run()
-			if err != nil {
-				return fmt.Errorf("error running program: %w", err)
+
+			if _, err := embed.RunStandalone(model, opts...); err != nil {
+				ulog.Error("Error running program").Err(err).Emit()
+				return err
 			}
-
-			// Check if we need to run a command after the TUI exits
-			if bm, ok := finalModel.(browse.Model); ok {
-				if bm.CommandOnExit != nil {
-					// The TUI needs to exit before we can run a command that
-					// might switch the tmux client.
-					bm.CommandOnExit.Stdin = os.Stdin
-					bm.CommandOnExit.Stdout = os.Stdout
-					bm.CommandOnExit.Stderr = os.Stderr
-					if err := bm.CommandOnExit.Run(); err != nil {
-						ulog.Error("Error executing command on exit").
-							Err(err).
-							Emit()
-					}
-					return nil // Exit cleanly after command.
-				}
-				if bm.MessageOnExit != "" {
-					ulog.Info("Exit message").
-						Pretty(bm.MessageOnExit).
-						Emit()
-					return nil
-				}
-
-				// Check if a session was selected
-				if bm.SelectedSession() != nil {
-					// Output the selected session details
-					s := bm.SelectedSession()
-					ulog.Info("Session selected").
-						Field("session_id", s.ID).
-						Field("status", s.Status).
-						Field("type", s.Type).
-						Field("repo", s.Repo).
-						Field("branch", s.Branch).
-						Field("working_directory", s.WorkingDirectory).
-						Pretty(fmt.Sprintf("\nSelected Session: %s\nStatus: %s\nType: %s\n%sWorking Directory: %s",
-							s.ID, s.Status, s.Type,
-							func() string {
-								if s.Repo != "" {
-									return fmt.Sprintf("Repo: %s/%s\n", s.Repo, s.Branch)
-								}
-								return ""
-							}(),
-							s.WorkingDirectory)).
-						Emit()
-				}
-			}
-
 			return nil
 		},
 	}
