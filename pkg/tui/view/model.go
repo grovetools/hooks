@@ -118,6 +118,15 @@ type Model struct {
 	getAllSessions        GetAllSessionsFunc
 	dispatchNotifications DispatchNotificationsFunc
 	saveFilterPreferences SaveFilterPreferencesFunc
+
+	// SSE stream lifecycle. Stored as a pointer so the bubbletea
+	// value-receiver Update path doesn't copy the embedded sync
+	// primitives (sync.WaitGroup / sync.Once / sync.Mutex). Allocated
+	// once in NewModel and shared across all subsequent value copies.
+	// Close() forwards to stream.close() to cancel the context and wait
+	// for the in-flight read goroutine to exit. Mirrors the flow status
+	// teardown fix.
+	stream *streamLifecycle
 }
 
 func NewModel(
@@ -162,6 +171,7 @@ func NewModel(
 		getAllSessions:        getAllSessions,
 		dispatchNotifications: dispatchNotifications,
 		saveFilterPreferences: saveFilterPreferences,
+		stream:                newStreamLifecycle(),
 	}
 
 	// Build a proper provider if we have workspaces
@@ -218,13 +228,28 @@ func updateAccessHistory(workspacePath string) error {
 }
 
 func (m Model) Init() tea.Cmd {
+	// Phase 2.1: drop the 1-second tickMsg polling loop in favor of an
+	// SSE subscription to the daemon. The Update loop handles the
+	// resulting daemonStreamConnectedMsg / daemonStateUpdateMsg cycle
+	// and re-applies the session list as events arrive.
+	//
+	// tickMsg handling stays in Update for legacy callers that emit it
+	// after a manual mutation (kill, mark-complete) — those paths
+	// trigger a one-shot refetch instead of restarting a periodic tick.
 	return tea.Batch(
 		textinput.Blink,
 		loadAccessHistoryCmd(),
-		tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
-			return tickMsg(t)
-		}),
+		subscribeToDaemonCmd(m.daemonClient),
 	)
+}
+
+// Close releases the SSE stream lifecycle resources owned by this Model
+// instance. Idempotent — host panels should call this from their own
+// Close() override; standalone callers can ignore it (process exit tears
+// the stream down).
+func (m Model) Close() error {
+	m.stream.close()
+	return nil
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -245,10 +270,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.statusMessage = fmt.Sprintf("Marked '%s' as completed", msg.filename)
-		// Trigger a refresh to remove the note from the list
-		return m, tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-			return tickMsg(t)
-		})
+		// Trigger an asynchronous one-shot refetch to remove the note
+		// from the list. The daemon will also push an SSE event for the
+		// state change, but eager refetch keeps the UI snappy when the
+		// daemon is briefly offline.
+		return m, fetchSessionsCmd(m.getAllSessions, m.daemonClient, m.hideCompleted)
+
+	case daemonStreamConnectedMsg:
+		// SSE stream is open. Stash channel + cancel on the model's
+		// stream lifecycle and start consuming updates. Each update
+		// queues another read via readDaemonStreamCmd.
+		m.stream.store(msg.ch, msg.cancel)
+		return m, m.stream.readDaemonStreamCmd(msg.ch)
+
+	case daemonStreamErrorMsg:
+		// Subscription failed (daemon offline, etc.). Non-fatal — the
+		// initial fetched session list stays on screen. The user can
+		// still drive the panel via keyboard, just without live updates.
+		return m, nil
+
+	case daemonStateUpdateMsg:
+		// Apply the update if it carries session data, then queue the
+		// next read. Single-session lifecycle deltas (session intent /
+		// confirm / end) don't carry the bulk Sessions slice, so we
+		// kick off a background refetch to pull the latest list.
+		var follow tea.Cmd
+		if len(msg.update.Sessions) > 0 {
+			m.applySessions(msg.update.Sessions)
+		} else if msg.update.UpdateType == "session" {
+			follow = fetchSessionsCmd(m.getAllSessions, m.daemonClient, m.hideCompleted)
+		}
+		next := m.stream.readDaemonStreamCmd(m.stream.ch)
+		if follow == nil {
+			return m, next
+		}
+		return m, tea.Batch(follow, next)
+
+	case sessionsRefetchedMsg:
+		if msg.err == nil && msg.sessions != nil {
+			m.applySessions(msg.sessions)
+		}
+		return m, nil
 
 	case editFileAndQuitMsg:
 		// Print protocol string and quit - Neovim plugin will handle the file opening
@@ -256,55 +318,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case tickMsg:
-		// Preserve cursor position
-		var selectedID string
-		if m.cursor >= 0 && m.cursor < len(m.displayNodes) {
-			if m.displayNodes[m.cursor].isSession {
-				selectedID = m.displayNodes[m.cursor].session.ID
-			}
-		}
-
+		// Phase 2.1: tickMsg is no longer self-rescheduling. It still
+		// fires as a manual refresh trigger after some legacy actions
+		// (e.g. EditFinished from the standalone CLI nvim plugin path)
+		// but periodic polling is now driven by the SSE subscription
+		// kicked off in Init().
 		newSessions, err := m.getAllSessions(m.daemonClient, m.hideCompleted)
 		if err != nil {
 			m.statusMessage = fmt.Sprintf("Error refreshing: %v", err)
 		} else {
-			if len(m.previousSessions) > 0 {
-				go m.dispatchNotifications(m.previousSessions, newSessions)
-			}
-			m.previousSessions = m.sessions
-			m.sessions = newSessions
-			m.updateFilteredAndDisplayNodes()
+			m.applySessions(newSessions)
 		}
-
-		if selectedID != "" {
-			newCursor := -1
-			for i, n := range m.displayNodes {
-				if n.isSession && n.session.ID == selectedID {
-					newCursor = i
-					break
-				}
-			}
-			if newCursor != -1 {
-				m.cursor = newCursor
-			} else {
-				// ID disappeared, reset cursor if out of bounds
-				listLen := len(m.displayNodes)
-				if m.cursor >= listLen {
-					if listLen > 0 {
-						m.cursor = listLen - 1
-					} else {
-						m.cursor = 0
-					}
-				}
-			}
-		}
-
-		return m, tea.Batch(
-			loadAccessHistoryCmd(),
-			tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-				return tickMsg(t)
-			}),
-		)
+		return m, loadAccessHistoryCmd()
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1135,6 +1160,49 @@ func (m Model) switchToTmuxSession(sessionName string) (tea.Model, tea.Cmd) {
 	} else {
 		m.MessageOnExit = fmt.Sprintf("Attach to session with:\ntmux attach -t %s", sessionName)
 		return m, tea.Quit
+	}
+}
+
+// applySessions installs a fresh session slice on the model, preserving
+// the current cursor position by ID where possible. Used by both the
+// SSE update path (daemonStateUpdateMsg / sessionsRefetchedMsg) and the
+// legacy tickMsg manual refresh path so they share cursor / dispatch
+// semantics.
+func (m *Model) applySessions(newSessions []*models.Session) {
+	var selectedID string
+	if m.cursor >= 0 && m.cursor < len(m.displayNodes) {
+		if m.displayNodes[m.cursor].isSession {
+			selectedID = m.displayNodes[m.cursor].session.ID
+		}
+	}
+
+	if len(m.previousSessions) > 0 {
+		go m.dispatchNotifications(m.previousSessions, newSessions)
+	}
+	m.previousSessions = m.sessions
+	m.sessions = newSessions
+	m.updateFilteredAndDisplayNodes()
+
+	if selectedID != "" {
+		newCursor := -1
+		for i, n := range m.displayNodes {
+			if n.isSession && n.session.ID == selectedID {
+				newCursor = i
+				break
+			}
+		}
+		if newCursor != -1 {
+			m.cursor = newCursor
+		} else {
+			listLen := len(m.displayNodes)
+			if m.cursor >= listLen {
+				if listLen > 0 {
+					m.cursor = listLen - 1
+				} else {
+					m.cursor = 0
+				}
+			}
+		}
 	}
 }
 

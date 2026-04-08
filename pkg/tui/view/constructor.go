@@ -119,14 +119,6 @@ func New(cfg Config) Model {
 	)
 }
 
-// Close releases any resources owned by the model. In Phase 1.2 this is a
-// no-op stub; Phase 2.1 will cancel the SSE stream context and wait for the
-// background reader goroutine to exit (mirroring the flow status / memory
-// view fix).
-func (m Model) Close() error {
-	return nil
-}
-
 // defaultGetAllSessions is the in-process session loader used when the
 // caller doesn't supply one. It performs the same daemon.GetSessions +
 // ListJobs merge that hooks/commands/discovery.go does so embedding hosts
