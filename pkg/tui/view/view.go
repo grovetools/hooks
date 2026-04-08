@@ -13,6 +13,17 @@ import (
 	"github.com/grovetools/hooks/internal/utils"
 )
 
+// isTerminalStatus returns true for session statuses that represent a
+// finished (non-running) lifecycle state. Defined once at package level
+// to avoid per-render map allocations inside View().
+func isTerminalStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "interrupted", "error", "abandoned":
+		return true
+	}
+	return false
+}
+
 func (m Model) View() string {
 	if m.help.ShowAll {
 		return m.help.View()
@@ -71,15 +82,7 @@ func (m Model) viewTable() string {
 				s := node.session
 				lastAccessed, found := m.accessHistory[node.workspace.Path]
 
-				terminalStates := map[string]bool{
-					"completed":   true,
-					"failed":      true,
-					"interrupted": true,
-					"error":       true,
-					"abandoned":   true,
-				}
-
-				if terminalStates[s.Status] && s.EndedAt != nil {
+				if isTerminalStatus(s.Status) && s.EndedAt != nil {
 					if !found || lastAccessed.Before(*s.EndedAt) {
 						isNew = true
 					}
@@ -187,15 +190,7 @@ func (m Model) viewTable() string {
 				shouldHighlight := false
 				highlightThreshold := 1 * time.Minute
 
-				terminalStates := map[string]bool{
-					"completed":   true,
-					"failed":      true,
-					"interrupted": true,
-					"error":       true,
-					"abandoned":   true,
-				}
-
-				if terminalStates[s.Status] {
+				if isTerminalStatus(s.Status) {
 					if s.EndedAt != nil && !s.StartedAt.IsZero() {
 						age = utils.FormatDuration(s.EndedAt.Sub(s.StartedAt))
 						if now.Sub(*s.EndedAt) < highlightThreshold {
@@ -308,11 +303,7 @@ func (m Model) viewTree() string {
 				if node.workspace != nil {
 					lastAccessed, found := m.accessHistory[node.workspace.Path]
 
-					terminalStates := map[string]bool{
-						"completed": true, "failed": true, "interrupted": true, "error": true, "abandoned": true,
-					}
-
-					if terminalStates[s.Status] && s.EndedAt != nil {
+					if isTerminalStatus(s.Status) && s.EndedAt != nil {
 						if !found || lastAccessed.Before(*s.EndedAt) {
 							isNew = true
 						}
@@ -385,11 +376,7 @@ func (m Model) viewTree() string {
 				shouldHighlight := false
 				highlightThreshold := 1 * time.Minute
 
-				terminalStates := map[string]bool{
-					"completed": true, "failed": true, "interrupted": true, "error": true, "abandoned": true,
-				}
-
-				if terminalStates[s.Status] {
+				if isTerminalStatus(s.Status) {
 					if s.EndedAt != nil && !s.StartedAt.IsZero() {
 						age = utils.FormatDuration(s.EndedAt.Sub(s.StartedAt))
 						if now.Sub(*s.EndedAt) < highlightThreshold {
