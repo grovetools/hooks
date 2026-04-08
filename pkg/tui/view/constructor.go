@@ -172,6 +172,12 @@ func defaultGetAllSessions(client daemon.Client, hideCompleted bool) ([]*models.
 		if _, ok := seenPaths[jobPath]; ok {
 			continue
 		}
+		// Mark this jobPath as seen so subsequent jobs in the same
+		// ListJobs response that share the path don't all get added
+		// as separate rows. Without this the panel rendered every
+		// retry of the same job as its own entry.
+		seenPaths[jobPath] = struct{}{}
+		seenIDs[j.ID] = struct{}{}
 		s := &models.Session{
 			ID:               j.ID,
 			Status:           j.Status,
