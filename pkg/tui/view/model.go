@@ -21,6 +21,7 @@ import (
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -118,6 +119,15 @@ type Model struct {
 	getAllSessions        GetAllSessionsFunc
 	dispatchNotifications DispatchNotificationsFunc
 	saveFilterPreferences SaveFilterPreferencesFunc
+
+	// Embed contract: when hosted inside the terminal multiplexer, the
+	// host issues embed.SetWorkspaceMsg / FocusMsg / BlurMsg as the
+	// active workspace changes. activeWorkspace scopes the session list
+	// when localScope is true; standalone callers leave both unset and
+	// the panel falls back to the legacy global view.
+	activeWorkspace *workspace.WorkspaceNode
+	localScope      bool
+	hosted          bool
 
 	// SSE stream lifecycle. Stored as a pointer so the bubbletea
 	// value-receiver Update path doesn't copy the embedded sync
@@ -254,6 +264,29 @@ func (m Model) Close() error {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+
+	// Embed contract messages from the host multiplexer take precedence
+	// so workspace repointing happens before any session-level message
+	// processing in the same update tick.
+	switch hm := msg.(type) {
+	case embed.SetWorkspaceMsg:
+		m.activeWorkspace = hm.Node
+		m.localScope = true
+		m.hosted = true
+		m.updateFilteredAndDisplayNodes()
+		return m, nil
+	case embed.FocusMsg:
+		// Trigger an opportunistic refetch on focus so the panel always
+		// shows fresh data when the user pops back to it. The SSE
+		// stream usually keeps state current, but a missed event during
+		// a host workspace switch is harmless to recover from this way.
+		return m, fetchSessionsCmd(m.getAllSessions, m.daemonClient, m.hideCompleted)
+	case embed.BlurMsg:
+		// No-op for now: we keep the SSE stream alive while blurred so
+		// the user doesn't see stale data when refocusing. Hosts that
+		// want to pause work entirely should call Close().
+		return m, nil
+	}
 
 	switch msg := msg.(type) {
 	case gChordTimeoutMsg:
@@ -445,6 +478,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key.Matches(msg, m.keys.ToggleFilter) && !m.showDetails && !m.searchActive {
 			m.showFilterView = !m.showFilterView
+			return m, nil
+		}
+
+		if key.Matches(msg, m.keys.ScopeToggle) && !m.searchActive && !m.showFilterView {
+			// Toggle the local/global scope. Local restricts the
+			// session list to the active workspace; global shows
+			// every session the daemon knows about. Mirrors the
+			// memory panel's alt+s pattern.
+			m.localScope = !m.localScope
+			m.updateFilteredAndDisplayNodes()
+			m.cursor = 0
+			m.scrollOffset = 0
 			return m, nil
 		}
 
@@ -739,9 +784,29 @@ func (m *Model) updateFilteredAndDisplayNodes() {
 	filter := strings.ToLower(m.filterInput.Value())
 	m.filteredSessions = []*models.Session{}
 
+	// Phase 2.2: when hosted inside the terminal multiplexer with a
+	// local scope active, restrict the visible sessions to those whose
+	// working directory falls under the active workspace path. Path
+	// normalization handles macOS/Windows case-insensitive matches.
+	var scopePath string
+	if m.localScope && m.activeWorkspace != nil {
+		if normalized, err := pathutil.NormalizeForLookup(m.activeWorkspace.Path); err == nil {
+			scopePath = normalized
+		}
+	}
+
 	for _, s := range m.sessions {
 		if !m.statusFilters[s.Status] {
 			continue
+		}
+		if scopePath != "" {
+			sessionPath, err := pathutil.NormalizeForLookup(s.WorkingDirectory)
+			if err != nil || sessionPath == "" {
+				continue
+			}
+			if sessionPath != scopePath && !strings.HasPrefix(sessionPath+"/", scopePath+"/") {
+				continue
+			}
 		}
 		sessionType := s.Type
 		if sessionType == "" || sessionType == "claude_session" {

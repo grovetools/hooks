@@ -106,7 +106,7 @@ func New(cfg Config) Model {
 		workspaces = []*workspace.WorkspaceNode{}
 	}
 
-	return NewModel(
+	m := NewModel(
 		cfg.Cfg,
 		sessions,
 		workspaces,
@@ -117,6 +117,13 @@ func New(cfg Config) Model {
 		cfg.DispatchNotifications,
 		cfg.SaveFilterPreferences,
 	)
+	if cfg.InitialFocus != nil {
+		m.activeWorkspace = cfg.InitialFocus
+		m.localScope = true
+		m.hosted = true
+		m.updateFilteredAndDisplayNodes()
+	}
+	return m
 }
 
 // defaultGetAllSessions is the in-process session loader used when the

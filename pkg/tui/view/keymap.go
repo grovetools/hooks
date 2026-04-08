@@ -24,6 +24,7 @@ type KeyMap struct {
 	Open            key.Binding
 	JumpToWorkspace key.Binding
 	MarkComplete    key.Binding
+	ScopeToggle     key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -135,6 +136,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		MarkComplete: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "mark complete"),
+		),
+		ScopeToggle: key.NewBinding(
+			key.WithKeys("alt+s"),
+			key.WithHelp("alt+s", "local/global scope"),
 		),
 	}
 
