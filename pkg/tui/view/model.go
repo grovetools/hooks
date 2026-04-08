@@ -604,6 +604,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						sessionType = "claude_code"
 					}
 
+					// Phase 3.1: when hosted, hand routing off to the
+					// terminal multiplexer via OpenAgentSessionMsg so
+					// the host can spawn / focus the agent panel
+					// without quitting the embedded TUI.
+					if m.hosted && (session.Status == "running" || session.Status == "idle") {
+						sid := session.ID
+						return m, func() tea.Msg {
+							return embed.OpenAgentSessionMsg{SessionID: sid}
+						}
+					}
+
 					if sessionType == "claude_code" && session.TmuxKey != "" && (session.Status == "running" || session.Status == "idle") {
 						// Update access history for this workspace
 						if node.workspace != nil {
@@ -663,6 +674,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				} else if key.Matches(msg, m.keys.Edit) { // e -> edit job file
 					if session.JobFilePath != "" {
+						// Phase 3.1: when hosted in the terminal
+						// multiplexer, emit embed.EditRequestMsg so
+						// the host suspends the bubbletea loop and
+						// runs $EDITOR — the in-process exec path
+						// would corrupt the host's altscreen.
+						if m.hosted {
+							path := session.JobFilePath
+							return m, func() tea.Msg {
+								return embed.EditRequestMsg{Path: path}
+							}
+						}
 						if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
 							return m, func() tea.Msg {
 								return editFileAndQuitMsg{filePath: session.JobFilePath}
@@ -739,29 +761,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if key.Matches(msg, m.keys.Kill) {
 			if session := m.getCurrentSession(); session != nil && !m.showDetails {
-				if session.Type == "" || session.Type == "claude_session" {
-					groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
-					sessionDir := filepath.Join(groveSessionsDir, session.ID)
-					pidFile := filepath.Join(sessionDir, "pid.lock")
-					pidContent, err := os.ReadFile(pidFile)
-					if err != nil {
-						m.statusMessage = fmt.Sprintf("Error: failed to read PID file: %v", err)
-						return m, nil
-					}
-					var pid int
-					if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err != nil {
-						m.statusMessage = fmt.Sprintf("Error: invalid PID: %v", err)
-						return m, nil
-					}
-					if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-						m.statusMessage = fmt.Sprintf("Error: failed to kill PID %d: %v", pid, err)
-						return m, nil
-					}
-					os.RemoveAll(sessionDir)
-					m.statusMessage = fmt.Sprintf("Killed session %s (PID %d)", session.ID[:8], pid)
-				} else {
+				if session.Type != "" && session.Type != "claude_session" {
 					m.statusMessage = "Error: Can only kill Claude sessions, not flow jobs"
+					return m, nil
 				}
+				// Phase 3.1: prefer the daemon-mediated kill path so
+				// the daemon can clean up its in-memory store and
+				// background workers atomically. The LocalClient
+				// returns an error from KillSession; we treat any
+				// daemon-side failure as a signal to fall back to
+				// the in-process syscall path so the standalone CLI
+				// keeps working when groved is offline.
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				err := m.daemonClient.KillSession(ctx, session.ID)
+				cancel()
+				if err == nil {
+					m.statusMessage = fmt.Sprintf("Killed session %s", session.ID[:min(8, len(session.ID))])
+					return m, nil
+				}
+				// Fall back to in-process syscall + filesystem cleanup
+				// so the standalone CLI still works without the daemon.
+				groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
+				sessionDir := filepath.Join(groveSessionsDir, session.ID)
+				pidFile := filepath.Join(sessionDir, "pid.lock")
+				pidContent, readErr := os.ReadFile(pidFile)
+				if readErr != nil {
+					m.statusMessage = fmt.Sprintf("Error: daemon kill failed (%v) and PID file unreadable: %v", err, readErr)
+					return m, nil
+				}
+				var pid int
+				if _, scanErr := fmt.Sscanf(string(pidContent), "%d", &pid); scanErr != nil {
+					m.statusMessage = fmt.Sprintf("Error: invalid PID: %v", scanErr)
+					return m, nil
+				}
+				if killErr := syscall.Kill(pid, syscall.SIGTERM); killErr != nil {
+					m.statusMessage = fmt.Sprintf("Error: failed to kill PID %d: %v", pid, killErr)
+					return m, nil
+				}
+				os.RemoveAll(sessionDir)
+				m.statusMessage = fmt.Sprintf("Killed session %s (PID %d, fallback)", session.ID[:min(8, len(session.ID))], pid)
 			}
 		} else if key.Matches(msg, m.keys.MarkComplete) {
 			if session := m.getCurrentSession(); session != nil && !m.showDetails {
