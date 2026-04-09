@@ -950,6 +950,21 @@ func (m *Model) buildDisplayTree() {
 	workspaceSessionMap := make(map[string]map[string][]*models.Session)
 	var unmatchedSessions []*models.Session
 
+	// Pre-normalize every workspace path once so the session x workspace
+	// inner loop below is O(1) map lookups instead of O(N*M) EvalSymlinks
+	// calls. Even with pathutil's 2s memoization cache, hoisting this
+	// keeps the critical path free of hash-map lookups and cache timestamp
+	// comparisons — and makes the cost model obvious to future readers.
+	// Workspaces that fail to normalize are omitted here and therefore
+	// skipped in the match loop (matches the pre-hoist behaviour: the
+	// old code `continue`d the inner iteration on error).
+	wsNormalized := make(map[string]string, len(m.workspaces))
+	for _, ws := range m.workspaces {
+		if norm, err := pathutil.NormalizeForLookup(ws.Path); err == nil {
+			wsNormalized[ws.Path] = norm
+		}
+	}
+
 	for _, session := range m.filteredSessions {
 		var bestMatch *workspace.WorkspaceNode
 		bestMatchDepth := -1
@@ -961,9 +976,9 @@ func (m *Model) buildDisplayTree() {
 		}
 
 		for _, ws := range m.workspaces {
-			wsPath, err := pathutil.NormalizeForLookup(ws.Path)
-			if err != nil {
-				continue // Skip if path normalization fails
+			wsPath, ok := wsNormalized[ws.Path]
+			if !ok {
+				continue // Normalization failed above; skip.
 			}
 			if strings.HasPrefix(sessionWorkDir+"/", wsPath+"/") || sessionWorkDir == wsPath {
 				if ws.Depth > bestMatchDepth {
