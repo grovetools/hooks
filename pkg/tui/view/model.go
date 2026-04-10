@@ -40,8 +40,6 @@ type GetAllSessionsFunc func(client daemon.Client, hideCompleted bool) ([]*model
 // DispatchNotificationsFunc is the function type for dispatching state change notifications
 type DispatchNotificationsFunc func(oldSessions, newSessions []*models.Session)
 
-// SaveFilterPreferencesFunc is the function type for saving filter preferences
-type SaveFilterPreferencesFunc func(prefs FilterPreferences) error
 
 type viewMode int
 
@@ -126,8 +124,6 @@ type Model struct {
 	// Function dependencies (to avoid import cycles)
 	getAllSessions        GetAllSessionsFunc
 	dispatchNotifications DispatchNotificationsFunc
-	saveFilterPreferences SaveFilterPreferencesFunc
-
 	// Embed contract: when hosted inside the terminal multiplexer, the
 	// host issues embed.SetWorkspaceMsg / FocusMsg / BlurMsg as the
 	// active workspace changes. activeWorkspace scopes the session list
@@ -156,7 +152,6 @@ func NewModel(
 	filterPrefs FilterPreferences,
 	getAllSessions GetAllSessionsFunc,
 	dispatchNotifications DispatchNotificationsFunc,
-	saveFilterPreferences SaveFilterPreferencesFunc,
 ) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter by session ID, repo, branch, or working directory..."
@@ -191,7 +186,6 @@ func NewModel(
 		accessHistory:         make(map[string]time.Time),
 		getAllSessions:        getAllSessions,
 		dispatchNotifications: dispatchNotifications,
-		saveFilterPreferences: saveFilterPreferences,
 		stream:                newStreamLifecycle(),
 	}
 
@@ -1405,7 +1399,7 @@ func (m Model) updateFilterView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			StatusFilters: m.statusFilters,
 			TypeFilters:   m.typeFilters,
 		}
-		m.saveFilterPreferences(prefs)
+		_ = saveFilterState(prefs)
 		m.updateFilteredAndDisplayNodes()
 		m.cursor = 0
 		m.scrollOffset = 0

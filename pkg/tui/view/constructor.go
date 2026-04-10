@@ -42,13 +42,10 @@ type Config struct {
 	// HideCompleted filters out terminal-state sessions on initial load.
 	HideCompleted bool
 
-	// FilterPreferences seeds the status/type filter checkboxes. The
-	// constructor uses sane defaults if zero.
+	// FilterPreferences seeds the status/type filter checkboxes. When
+	// zero, the constructor loads persisted state from disk, falling
+	// back to DefaultFilterPreferences() if nothing is saved.
 	FilterPreferences FilterPreferences
-
-	// SaveFilterPreferences is invoked whenever the user toggles a filter
-	// in the filter view. Optional — defaults to a no-op.
-	SaveFilterPreferences SaveFilterPreferencesFunc
 
 	// GetAllSessions overrides how sessions are fetched. Defaults to a
 	// closure that calls client.GetSessions and merges in jobs from the
@@ -91,11 +88,13 @@ func New(cfg Config) Model {
 	if cfg.DispatchNotifications == nil {
 		cfg.DispatchNotifications = func(_, _ []*models.Session) {}
 	}
-	if cfg.SaveFilterPreferences == nil {
-		cfg.SaveFilterPreferences = func(FilterPreferences) error { return nil }
-	}
 	if cfg.FilterPreferences.StatusFilters == nil || cfg.FilterPreferences.TypeFilters == nil {
-		cfg.FilterPreferences = DefaultFilterPreferences()
+		// Load persisted filter state; fall back to defaults on error.
+		if state, err := loadState(); err == nil {
+			cfg.FilterPreferences = state.FilterPreferences
+		} else {
+			cfg.FilterPreferences = DefaultFilterPreferences()
+		}
 	}
 
 	// Initial session fetch — use the configured loader so the panel
@@ -122,7 +121,6 @@ func New(cfg Config) Model {
 		cfg.FilterPreferences,
 		cfg.GetAllSessions,
 		cfg.DispatchNotifications,
-		cfg.SaveFilterPreferences,
 	)
 	if cfg.Hosted {
 		m.hosted = true

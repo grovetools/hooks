@@ -1,64 +1,16 @@
 package commands
 
 import (
-	"encoding/json"
 	"os"
-	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
-	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/tui/embed"
 	view "github.com/grovetools/hooks/pkg/tui/view"
 	"github.com/spf13/cobra"
 )
-
-var browseFiltersPath = filepath.Join(paths.StateDir(), "hooks", "browse_filters.json")
-
-// loadFilterPreferences loads saved filter preferences from disk, falling
-// back to the package defaults from view.DefaultFilterPreferences when the
-// file is missing or malformed.
-func loadFilterPreferences() view.FilterPreferences {
-	prefs := view.DefaultFilterPreferences()
-
-	data, err := os.ReadFile(browseFiltersPath)
-	if err != nil {
-		return prefs
-	}
-
-	var saved view.FilterPreferences
-	if err := json.Unmarshal(data, &saved); err != nil {
-		return prefs
-	}
-
-	// Merge saved preferences with defaults so newly added filters
-	// surface (default true/false) on first run after an upgrade.
-	for k, v := range saved.StatusFilters {
-		prefs.StatusFilters[k] = v
-	}
-	for k, v := range saved.TypeFilters {
-		prefs.TypeFilters[k] = v
-	}
-
-	return prefs
-}
-
-// saveFilterPreferences saves filter preferences to disk.
-func saveFilterPreferences(prefs view.FilterPreferences) error {
-	data, err := json.MarshalIndent(prefs, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	dir := filepath.Dir(browseFiltersPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	return os.WriteFile(browseFiltersPath, data, 0644)
-}
 
 // NewBrowseCmd is the standalone CLI entry point for the embedded
 // session-browser meta-panel. It is now a thin shim around view.New +
@@ -91,8 +43,6 @@ func NewBrowseCmd() *cobra.Command {
 				DaemonClient:          client,
 				Cfg:                   cfg,
 				HideCompleted:         hideCompleted,
-				FilterPreferences:     loadFilterPreferences(),
-				SaveFilterPreferences: saveFilterPreferences,
 				GetAllSessions:        GetAllSessions,
 				DispatchNotifications: DispatchStateChangeNotifications,
 			})
