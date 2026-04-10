@@ -21,7 +21,7 @@ func New(cfg view.Config) Model {
 	inner := view.New(cfg)
 	page := &sessionsPage{inner: inner}
 	return Model{pager: pager.NewWith([]pager.Page{page}, pager.KeyMapFromBase(keymap.NewBase()), pager.Config{
-		OuterPadding: [4]int{0, 0, 0, 0},
+		OuterPadding: [4]int{1, 2, 0, 2},
 	})}
 }
 

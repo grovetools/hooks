@@ -248,6 +248,11 @@ func updateAccessHistory(workspacePath string) error {
 	return workspace.UpdateAccessHistory(configDir, workspacePath)
 }
 
+// IsTextInputFocused reports whether the search input is currently active.
+func (m Model) IsTextInputFocused() bool {
+	return m.searchActive
+}
+
 func (m Model) Init() tea.Cmd {
 	// Phase 2.1: drop the 1-second tickMsg polling loop in favor of an
 	// SSE subscription to the daemon. The Update loop handles the
