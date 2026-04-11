@@ -4,6 +4,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/compositor"
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
@@ -56,10 +57,23 @@ func NewBrowseCmd() *cobra.Command {
 				opts = append(opts, tea.WithAltScreen())
 			}
 
-			if _, err := embed.RunStandalone(model, opts...); err != nil {
+			host := embed.NewStandaloneHost(model)
+			compModel := compositor.NewModel(host)
+			p := tea.NewProgram(compModel, opts...)
+			finalModel, err := p.Run()
+			if err != nil {
 				ulog.Error("Error running program").Err(err).Emit()
 				return err
 			}
+
+			// Free compositor resources and unwrap to recover the
+			// StandaloneHost so post-exit assertions succeed.
+			if cm, ok := finalModel.(*compositor.Model); ok {
+				cm.Free()
+				finalModel = cm.Unwrap()
+			}
+			_ = finalModel // StandaloneHost; model closed via defer
+
 			return nil
 		},
 	}
