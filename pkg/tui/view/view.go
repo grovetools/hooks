@@ -239,22 +239,6 @@ func (m Model) viewTable() string {
 		b.WriteString(tableStr)
 	}
 
-	b.WriteString("\n")
-	if len(m.selectedIDs) > 0 {
-		b.WriteString(t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedIDs))) + " ")
-	}
-	if len(m.displayNodes) > viewportHeight {
-		scrollInfo := fmt.Sprintf("(%d-%d of %d)", startIdx+1, endIdx, len(m.displayNodes))
-		b.WriteString(t.Muted.Render(scrollInfo) + " ")
-	}
-	if m.statusMessage != "" {
-		if strings.HasPrefix(m.statusMessage, "Error:") {
-			b.WriteString(t.Error.Render(m.statusMessage) + " ")
-		} else {
-			b.WriteString(t.Success.Render(m.statusMessage) + " ")
-		}
-	}
-	b.WriteString(m.help.View())
 	return b.String()
 }
 
@@ -476,22 +460,6 @@ func (m Model) viewTree() string {
 		}
 	}
 
-	b.WriteString("\n")
-	if len(m.selectedIDs) > 0 {
-		b.WriteString(t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedIDs))) + " ")
-	}
-	if len(m.displayNodes) > viewportHeight {
-		scrollInfo := fmt.Sprintf("(%d-%d of %d)", startIdx+1, endIdx, len(m.displayNodes))
-		b.WriteString(t.Muted.Render(scrollInfo) + " ")
-	}
-	if m.statusMessage != "" {
-		if strings.HasPrefix(m.statusMessage, "Error:") {
-			b.WriteString(t.Error.Render(m.statusMessage) + " ")
-		} else {
-			b.WriteString(t.Success.Render(m.statusMessage) + " ")
-		}
-	}
-	b.WriteString(m.help.View())
 	return b.String()
 }
 
@@ -655,6 +623,51 @@ func (m Model) generateScrollbar(viewHeight, totalItems int) []string {
 		}
 	}
 	return scrollbar
+}
+
+// FooterView returns the status line and help text intended for the
+// pager's pinned footer. The main View() no longer renders this
+// inline — the host calls SetFooter(m.FooterView()) so the pager
+// pins it to the bottom of the pane.
+func (m Model) FooterView() string {
+	// Full-help overlay, detail view, and filter view handle their
+	// own footer content internally (inside a box / overlay), so
+	// the pager footer is only needed for table and tree views.
+	if m.help.ShowAll || m.showDetails || m.showFilterView {
+		return ""
+	}
+
+	t := theme.DefaultTheme
+	var parts []string
+
+	if len(m.selectedIDs) > 0 {
+		parts = append(parts, t.Highlight.Render(fmt.Sprintf("[%d selected]", len(m.selectedIDs))))
+	}
+
+	viewportHeight := m.getViewportHeight()
+	if len(m.displayNodes) > viewportHeight {
+		endIdx := m.scrollOffset + viewportHeight
+		if endIdx > len(m.displayNodes) {
+			endIdx = len(m.displayNodes)
+		}
+		scrollInfo := fmt.Sprintf("(%d-%d of %d)", m.scrollOffset+1, endIdx, len(m.displayNodes))
+		parts = append(parts, t.Muted.Render(scrollInfo))
+	}
+
+	if m.statusMessage != "" {
+		if strings.HasPrefix(m.statusMessage, "Error:") {
+			parts = append(parts, t.Error.Render(m.statusMessage))
+		} else {
+			parts = append(parts, t.Success.Render(m.statusMessage))
+		}
+	}
+
+	helpText := m.help.View()
+	if helpText != "" {
+		parts = append(parts, helpText)
+	}
+
+	return strings.Join(parts, " ")
 }
 
 func getStatusStyle(status string) lipgloss.Style {

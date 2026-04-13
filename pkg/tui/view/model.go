@@ -1239,9 +1239,12 @@ func (m *Model) addParentWorkspaces(ws *workspace.WorkspaceNode, workspacesToSho
 }
 
 func (m *Model) getViewportHeight() int {
+	// headerLines accounts for the search bar row + newline + table
+	// header. Footer space is no longer reserved here — the pager's
+	// FooterHeight config deducts it from the height passed to
+	// SetSize, so m.height already excludes the footer slot.
 	const headerLines = 3
-	const footerLines = 2
-	availableHeight := m.height - headerLines - footerLines
+	availableHeight := m.height - headerLines
 	if availableHeight < 1 {
 		return 1
 	}

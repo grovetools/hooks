@@ -3,6 +3,7 @@ package pager
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/grovetools/core/tui/components/pager"
@@ -22,6 +23,7 @@ func New(cfg view.Config) Model {
 	page := &sessionsPage{inner: inner}
 	return Model{pager: pager.NewWith([]pager.Page{page}, pager.KeyMapFromBase(keymap.NewBase()), pager.Config{
 		OuterPadding: [4]int{1, 2, 0, 2},
+		FooterHeight: 1,
 	})}
 }
 
@@ -34,6 +36,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	// Build footer from the active page's status/help line and
+	// delegate to the pager which pins it at the bottom of the
+	// pane. The pager's OuterPadding provides the horizontal
+	// indent so no extra padding is needed here.
+	for _, p := range m.pager.Pages() {
+		if sp, ok := p.(*sessionsPage); ok {
+			m.pager.SetFooter(sp.inner.FooterView())
+			break
+		}
+	}
 	return m.pager.View()
 }
 
@@ -64,7 +76,11 @@ func (p *sessionsPage) Name() string  { return "Sessions" }
 func (p *sessionsPage) Init() tea.Cmd { return p.inner.Init() }
 
 func (p *sessionsPage) View() string {
-	return strings.TrimPrefix(p.inner.View(), "\n")
+	body := strings.TrimPrefix(p.inner.View(), "\n")
+	if p.width > 0 {
+		body = lipgloss.NewStyle().MaxWidth(p.width).Render(body)
+	}
+	return body
 }
 
 func (p *sessionsPage) Update(msg tea.Msg) (pager.Page, tea.Cmd) {
