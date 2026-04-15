@@ -92,18 +92,34 @@ func buildResultSummary(data PostToolUseInput) map[string]any {
 			if command, ok := inputMap["command"].(string); ok {
 				summary["command"] = command
 			}
-		case "Edit", "Write", "MultiEdit":
+		case "Edit", "Write", "MultiEdit", "Replace":
 			if filePath, ok := inputMap["file_path"].(string); ok {
-				summary["modified_files"] = []string{filePath}
+				summary["modified_files"] = []string{normalizeFilePath(filePath)}
 			}
-		case "Read":
+		case "Read", "View":
 			if filePath, ok := inputMap["file_path"].(string); ok {
-				summary["files_read"] = []string{filePath}
+				summary["files_read"] = []string{normalizeFilePath(filePath)}
 			}
 		}
 	}
 
 	return summary
+}
+
+// normalizeFilePath makes an absolute file path relative to the working directory (git root).
+func normalizeFilePath(filePath string) string {
+	if !filepath.IsAbs(filePath) {
+		return filePath
+	}
+	workingDir := getWorkingDirFromEnv()
+	if workingDir == "" {
+		return filePath
+	}
+	rel, err := filepath.Rel(workingDir, filePath)
+	if err != nil {
+		return filePath
+	}
+	return rel
 }
 
 func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {

@@ -189,6 +189,9 @@ func RunPostToolUseHook() {
 		success := data.ToolError == nil
 		resultSummary := buildResultSummary(data)
 
+		// Stream file access events to JSONL for context tracking
+		appendFileAccessEntries(data.SessionID, resultSummary)
+
 		errorMsg := ""
 		if data.ToolError != nil {
 			errorMsg = *data.ToolError
@@ -220,6 +223,103 @@ func RunPostToolUseHook() {
 
 		cleanupToolID(data.SessionID)
 	}
+}
+
+// fileAccessEntry represents a single file access event for JSONL streaming.
+type fileAccessEntry struct {
+	Timestamp string `json:"timestamp"`
+	Tool      string `json:"tool"`
+	Path      string `json:"path"`
+	Action    string `json:"action"`
+}
+
+// appendFileAccessEntries streams file read/modify events to an append-only JSONL file
+// at .artifacts/<job-name>/accessed_files.jsonl within the active plan directory.
+func appendFileAccessEntries(sessionID string, resultSummary map[string]any) {
+	var entries []fileAccessEntry
+	toolName, _ := resultSummary["tool_name"].(string)
+	now := time.Now().Format(time.RFC3339)
+
+	if files, ok := resultSummary["files_read"].([]string); ok {
+		for _, f := range files {
+			entries = append(entries, fileAccessEntry{Timestamp: now, Tool: toolName, Path: f, Action: "read"})
+		}
+	}
+	if files, ok := resultSummary["modified_files"].([]string); ok {
+		for _, f := range files {
+			entries = append(entries, fileAccessEntry{Timestamp: now, Tool: toolName, Path: f, Action: "modified"})
+		}
+	}
+
+	if len(entries) == 0 {
+		return
+	}
+
+	planDir, jobName := resolveFileAccessTarget(sessionID)
+	if planDir == "" {
+		return
+	}
+
+	artifactsDir := filepath.Join(planDir, ".artifacts", jobName)
+	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
+		return
+	}
+
+	jsonlPath := filepath.Join(artifactsDir, "accessed_files.jsonl")
+	f, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	for _, entry := range entries {
+		line, err := json.Marshal(entry)
+		if err != nil {
+			continue
+		}
+		f.Write(line)
+		f.Write([]byte("\n"))
+	}
+}
+
+// resolveFileAccessTarget determines the plan directory and job name for storing
+// file access entries. It first checks session metadata (fast path for flow-launched
+// sessions), then falls back to plan directory resolution.
+func resolveFileAccessTarget(sessionID string) (planDir, jobName string) {
+	// Fast path: read session metadata to get job file path directly
+	groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
+	metadataFile := filepath.Join(groveSessionsDir, sessionID, "metadata.json")
+
+	if metadataContent, err := os.ReadFile(metadataFile); err == nil {
+		var metadata struct {
+			SessionID   string `json:"session_id"`
+			JobFilePath string `json:"job_file_path"`
+		}
+		if err := json.Unmarshal(metadataContent, &metadata); err == nil && metadata.JobFilePath != "" {
+			dir := filepath.Dir(metadata.JobFilePath)
+			name := metadata.SessionID
+			if name == "" {
+				name = sessionID
+			}
+			if _, err := os.Stat(dir); err == nil {
+				return dir, name
+			}
+		}
+	}
+
+	// Slow path: resolve via plan preservation config + flow plan current
+	workingDir := getWorkingDirFromEnv()
+	if workingDir == "" {
+		return "", ""
+	}
+
+	preservationConfig := loadPlanPreservationConfig(workingDir)
+	dir, err := findActivePlanDir(workingDir, preservationConfig)
+	if err != nil {
+		return "", ""
+	}
+
+	return dir, sessionID
 }
 
 func RunStopHook() {
