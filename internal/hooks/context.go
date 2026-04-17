@@ -30,6 +30,11 @@ type BaseHookInput struct {
 	// Current transcript position (if available)
 	CurrentUUID string `json:"current_uuid,omitempty"`
 	ParentUUID  string `json:"parent_uuid,omitempty"`
+	// Cwd is the Claude Code session's working directory as reported by
+	// the harness. Used to scope the hook's daemon client to the same
+	// ecosystem as the user-facing session, regardless of where the
+	// short-lived hook process happened to inherit its cwd from.
+	Cwd string `json:"cwd,omitempty"`
 }
 
 // HookContext provides common functionality for all hooks
@@ -68,8 +73,9 @@ func NewHookContext() (*HookContext, error) {
 		return nil, err
 	}
 
-	// Create daemon-backed storage (replaces SQLite)
-	backend := storage.NewDaemonBackend()
+	// Create daemon-backed storage scoped to the Claude Code session cwd
+	// so the hook talks to the same daemon as the session it's hooking.
+	backend := storage.NewDaemonBackend(baseInput.Cwd)
 
 	// Load configuration (placeholder for now)
 	loadedCfg := &NotificationsConfig{}

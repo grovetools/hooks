@@ -24,9 +24,13 @@ type DaemonBackend struct {
 	eventLog string // path to events.jsonl fallback file
 }
 
-// NewDaemonBackend creates a new daemon-backed storage instance.
-func NewDaemonBackend() *DaemonBackend {
-	client := daemon.NewWithAutoStart()
+// NewDaemonBackend creates a new daemon-backed storage instance scoped to
+// the given directory. Pass the Claude Code session cwd (from the hook
+// input) so the hook talks to the same scoped daemon that matches the
+// user-facing session — not whatever scope the short-lived hook process
+// happens to inherit.
+func NewDaemonBackend(scopeDir string) *DaemonBackend {
+	client := daemon.NewWithAutoStart(scopeDir)
 	eventLog := filepath.Join(paths.StateDir(), "hooks", "events.jsonl")
 	return &DaemonBackend{
 		client:   client,
