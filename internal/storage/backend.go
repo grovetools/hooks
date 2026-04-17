@@ -24,13 +24,17 @@ type DaemonBackend struct {
 	eventLog string // path to events.jsonl fallback file
 }
 
-// NewDaemonBackend creates a new daemon-backed storage instance scoped to
-// the given directory. Pass the Claude Code session cwd (from the hook
-// input) so the hook talks to the same scoped daemon that matches the
-// user-facing session — not whatever scope the short-lived hook process
-// happens to inherit.
-func NewDaemonBackend(scopeDir string) *DaemonBackend {
-	client := daemon.NewWithAutoStart(scopeDir)
+// NewDaemonBackend creates a new daemon-backed storage instance.
+//
+// The daemon client inherits GROVE_SCOPE from the parent process
+// environment. Claude Code inherits from its launcher (treemux pane, or
+// a shell for ad-hoc sessions); treemux sets GROVE_SCOPE on startup
+// based on its own launch cwd, flow propagates the plan's scope to
+// spawned agents. When Claude Code is launched outside any scope-aware
+// host (plain shell, no treemux), GROVE_SCOPE is unset and the hook
+// uses the global/unscoped daemon — the right default for ad-hoc use.
+func NewDaemonBackend() *DaemonBackend {
+	client := daemon.NewWithAutoStart()
 	eventLog := filepath.Join(paths.StateDir(), "hooks", "events.jsonl")
 	return &DaemonBackend{
 		client:   client,

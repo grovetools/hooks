@@ -73,9 +73,8 @@ func NewHookContext() (*HookContext, error) {
 		return nil, err
 	}
 
-	// Create daemon-backed storage scoped to the Claude Code session cwd
-	// so the hook talks to the same daemon as the session it's hooking.
-	backend := storage.NewDaemonBackend(baseInput.Cwd)
+	// Create daemon-backed storage. Client inherits GROVE_SCOPE from env.
+	backend := storage.NewDaemonBackend()
 
 	// Load configuration (placeholder for now)
 	loadedCfg := &NotificationsConfig{}
