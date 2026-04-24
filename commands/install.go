@@ -18,8 +18,10 @@ type HookEntry struct {
 }
 
 type Hook struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
+	Type        string `json:"type"`
+	Command     string `json:"command"`
+	AsyncRewake bool   `json:"asyncRewake,omitempty"`
+	Timeout     int    `json:"timeout,omitempty"`
 }
 
 func NewInstallCmd() *cobra.Command {
@@ -148,6 +150,7 @@ func runInstall(targetDir string, global bool) error {
 				Matcher: ".*",
 				Hooks: []Hook{
 					{Type: "command", Command: "grove hooks stop"},
+					{Type: "command", Command: "grove hooks stop-async", AsyncRewake: true, Timeout: 600},
 				},
 			},
 		},
@@ -240,13 +243,21 @@ func mergeHooks(settings ClaudeSettings, newHooks map[string][]HookEntry) {
 
 		// Append new Grove hooks
 		for _, entry := range newEntries {
-			// Convert HookEntry to map structure to match existing JSON structure
-			hooksList := make([]map[string]string, len(entry.Hooks))
+			// Convert HookEntry to map structure to match existing JSON structure.
+			// Preserve optional fields (asyncRewake, timeout) so they survive the JSON round-trip.
+			hooksList := make([]map[string]interface{}, len(entry.Hooks))
 			for i, h := range entry.Hooks {
-				hooksList[i] = map[string]string{
+				hookMap := map[string]interface{}{
 					"type":    h.Type,
 					"command": h.Command,
 				}
+				if h.AsyncRewake {
+					hookMap["asyncRewake"] = true
+				}
+				if h.Timeout > 0 {
+					hookMap["timeout"] = h.Timeout
+				}
+				hooksList[i] = hookMap
 			}
 
 			entryMap := map[string]interface{}{
