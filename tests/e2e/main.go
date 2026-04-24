@@ -40,6 +40,10 @@ func main() {
 		// Plan edit sync tests
 		PlanEditSyncScenario(),
 		PlanEditNonPlanFileScenario(),
+		// Async on_stop hook tests
+		AsyncHookPassesSilentScenario(),
+		AsyncHookExitsTwoRewakesScenario(),
+		AsyncHookCancelPreviousScenario(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {
