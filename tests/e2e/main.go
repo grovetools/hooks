@@ -44,6 +44,9 @@ func main() {
 		AsyncHookPassesSilentScenario(),
 		AsyncHookExitsTwoRewakesScenario(),
 		AsyncHookCancelPreviousScenario(),
+		// PostToolUse reminder hook tests
+		PostToolUseReminderFiresScenario(),
+		PostToolUseReminderSkipsOnMissScenario(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {
