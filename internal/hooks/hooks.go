@@ -451,24 +451,11 @@ func RunStopHook() {
 		}).Debug("Using cwd from stop input as working directory")
 	}
 
-	// Execute repository-specific hook commands if we have a working directory
-	// Note: workingDir may come from filesystem metadata, SQLite, or stop input cwd
-	if workingDir != "" {
-		if err := ExecuteRepoHookCommands(ctx, workingDir); err != nil {
-			// Check if this is a blocking error from exit code 2
-			if blockingErr, ok := err.(*HookBlockingError); ok {
-				slog.WithFields(logrus.Fields{
-					"message": blockingErr.Message,
-				}).Error("Hook command returned blocking error")
-				// Write the error message to stderr and exit with code 2
-				fmt.Fprintf(os.Stderr, "%s\n", blockingErr.Message)
-				os.Exit(2)
-			}
-			slog.WithFields(logrus.Fields{
-				"error": err.Error(),
-			}).Error("Failed to execute repo hook commands")
-		}
-	}
+	// on_stop hooks are dispatched by `grove hooks stop-async` (registered as a
+	// separate Stop entry in .claude/settings.json with asyncRewake: true).
+	// The sync stop hook is now pure bookkeeping; ExecuteRepoHookCommands is
+	// retained for safety during rollout but no longer invoked here.
+	_ = workingDir
 
 	// Generate session summary
 	summary := generateSessionSummary(data)

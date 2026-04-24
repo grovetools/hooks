@@ -18,6 +18,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newPreToolUseCmd())
 	rootCmd.AddCommand(newPostToolUseCmd())
 	rootCmd.AddCommand(newStopCmd())
+	rootCmd.AddCommand(NewStopAsyncCmd())
 	rootCmd.AddCommand(newSubagentStopCmd())
 	rootCmd.AddCommand(NewSessionsCmd())
 	rootCmd.AddCommand(NewInstallCmd())
