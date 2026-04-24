@@ -37,6 +37,7 @@ type PostToolUseInput struct {
 	ToolUseID      string  `json:"tool_use_id,omitempty"`
 	CurrentUUID    string  `json:"current_uuid,omitempty"`
 	ParentUUID     string  `json:"parent_uuid,omitempty"`
+	Cwd            string  `json:"cwd,omitempty"`
 }
 
 type StopInput struct {

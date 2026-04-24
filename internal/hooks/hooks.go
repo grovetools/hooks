@@ -223,6 +223,99 @@ func RunPostToolUseHook() {
 
 		cleanupToolID(data.SessionID)
 	}
+
+	dispatchPostToolUseReminders(data)
+}
+
+// dispatchPostToolUseReminders loads PostToolUse reminder hooks from the
+// repo's grove.toml and emits a combined additionalContext JSON response
+// when one or more entries match the current tool call.
+func dispatchPostToolUseReminders(data PostToolUseInput) {
+	workingDir := data.Cwd
+	if workingDir == "" {
+		workingDir = os.Getenv("PWD")
+	}
+	if workingDir == "" {
+		return
+	}
+
+	cfg, err := config.LoadFrom(workingDir)
+	if err != nil {
+		return
+	}
+
+	var hooksConfig config.HooksConfig
+	if err := cfg.UnmarshalExtension("hooks", &hooksConfig); err != nil {
+		return
+	}
+	if len(hooksConfig.PostToolUse) == 0 {
+		return
+	}
+
+	toolInput, _ := data.ToolInput.(map[string]any)
+	if toolInput == nil {
+		return
+	}
+
+	var contexts []string
+	var matchedNames []string
+	for _, entry := range hooksConfig.PostToolUse {
+		if entry.If == "" || entry.AdditionalContext == "" {
+			continue
+		}
+		if !evaluatePermissionRule(entry.If, data.ToolName, toolInput) {
+			continue
+		}
+		contexts = append(contexts, entry.AdditionalContext)
+		matchedNames = append(matchedNames, entry.Name)
+	}
+
+	if len(contexts) == 0 {
+		return
+	}
+
+	logPostToolUseReminders(data, matchedNames)
+
+	response := map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":     "PostToolUse",
+			"additionalContext": strings.Join(contexts, "\n\n---\n\n"),
+		},
+	}
+	payload, err := json.Marshal(response)
+	if err != nil {
+		return
+	}
+	fmt.Print(string(payload))
+}
+
+// logPostToolUseReminders appends one line per matched reminder to the
+// per-session post_tool_use.log under the grove hooks state dir.
+func logPostToolUseReminders(data PostToolUseInput, matched []string) {
+	if data.SessionID == "" {
+		return
+	}
+	dir := filepath.Join(paths.StateDir(), "hooks", "sessions", data.SessionID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "post_tool_use.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	summary := ""
+	if b, err := json.Marshal(data.ToolInput); err == nil {
+		summary = string(b)
+		if len(summary) > 80 {
+			summary = summary[:80]
+		}
+	}
+	ts := time.Now().Format(time.RFC3339)
+	for _, name := range matched {
+		fmt.Fprintf(f, "[%s] hook=%s tool=%s input_summary=%s\n", ts, name, data.ToolName, summary)
+	}
 }
 
 // fileAccessEntry represents a single file access event for JSONL streaming.
