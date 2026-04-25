@@ -187,6 +187,14 @@ func runSingleAsyncHook(hc config.HookCommand, workingDir, stateDir string) (str
 		}
 	}
 
+	// marker-file gating: a `grove hooks disable` marker wins over env-var
+	// checks so operators can toggle hooks while a Claude session is live
+	// (env vars are captured at Claude Code startup and can't be changed).
+	if IsHookDisabledByMarker(workingDir, hc.Name) {
+		appendSummary(summaryPath, "skipped")
+		return "", false
+	}
+
 	// env-var gating: explicit disable wins, then opt-in via enable_env.
 	if hc.DisableEnv != "" && os.Getenv(hc.DisableEnv) != "" {
 		appendSummary(summaryPath, "skipped")

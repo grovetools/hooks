@@ -47,6 +47,10 @@ func main() {
 		// PostToolUse reminder hook tests
 		PostToolUseReminderFiresScenario(),
 		PostToolUseReminderSkipsOnMissScenario(),
+		// Hook disable/enable marker-file tests
+		HookDisableMarkerSkipsHookScenario(),
+		HookEnableRemovesMarkerScenario(),
+		HookListShowsStateScenario(),
 	}
 
 	if err := app.Execute(context.Background(), scenarios); err != nil {
