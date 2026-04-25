@@ -26,7 +26,7 @@ func InstallCommandScenario() *harness.Scenario {
 				testDir := ctx.NewDir("install-test-fresh")
 
 				// Ensure the directory exists
-				if err := os.MkdirAll(testDir, 0755); err != nil {
+				if err := os.MkdirAll(testDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create test directory: %w", err)
 				}
 
@@ -96,7 +96,7 @@ func InstallCommandScenario() *harness.Scenario {
 				// Create a directory with existing settings
 				testDir := ctx.NewDir("install-test-existing")
 				claudeDir := filepath.Join(testDir, ".claude")
-				if err := os.MkdirAll(claudeDir, 0755); err != nil {
+				if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create .claude directory: %w", err)
 				}
 
@@ -125,7 +125,7 @@ func InstallCommandScenario() *harness.Scenario {
 				}
 
 				settingsPath := filepath.Join(claudeDir, "settings.local.json")
-				if err := os.WriteFile(settingsPath, data, 0644); err != nil {
+				if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
 					return fmt.Errorf("failed to write existing settings: %w", err)
 				}
 
@@ -242,8 +242,8 @@ func InstallCommandScenario() *harness.Scenario {
 					return fmt.Errorf("PreToolUse should have exactly one hook")
 				}
 				hook := hooksList[0].(map[string]interface{})
-				if hook["command"] != "grove-hooks pretooluse" {
-					return fmt.Errorf("PreToolUse command should be 'grove-hooks pretooluse'")
+				if hook["command"] != "grove hooks pretooluse" {
+					return fmt.Errorf("PreToolUse command should be 'grove hooks pretooluse'")
 				}
 
 				// Check PostToolUse configuration

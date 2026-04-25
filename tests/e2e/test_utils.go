@@ -57,6 +57,26 @@ func SetupTestDatabase(ctx *harness.Context) error {
 	os.Setenv("XDG_DATA_HOME", filepath.Join(sandboxedHome, ".local", "share"))
 	ctx.Set("xdg_data_home", filepath.Join(sandboxedHome, ".local", "share"))
 
+	// Clear grove-flow environment variables that leak from the parent
+	// process when these tests are launched from inside a flow job. The
+	// hooks code uses GROVE_FLOW_JOB_ID etc. to remap session IDs, which
+	// would cause test-created sessions to be filed under the parent
+	// agent's job ID — making them invisible by their true ID.
+	leakedEnvs := []string{
+		"GROVE_FLOW_JOB_ID",
+		"GROVE_FLOW_JOB_TITLE",
+		"GROVE_FLOW_PLAN_NAME",
+		"GROVE_FLOW_JOB_PATH",
+		"GROVE_FLOW_ISOLATED",
+		"GROVE_SCOPE",
+	}
+	savedEnvs := make(map[string]string, len(leakedEnvs))
+	for _, name := range leakedEnvs {
+		savedEnvs[name] = os.Getenv(name)
+		os.Unsetenv(name)
+	}
+	ctx.Set("saved_leaked_envs", savedEnvs)
+
 	return nil
 }
 
@@ -80,6 +100,15 @@ func CleanupTestDatabase(ctx *harness.Context) error {
 
 	// Unset the environment variable
 	os.Unsetenv("GROVE_HOOKS_DB_PATH")
+
+	// Restore any leaked grove-flow envs we cleared in SetupTestDatabase.
+	if saved, ok := ctx.Get("saved_leaked_envs").(map[string]string); ok {
+		for name, val := range saved {
+			if val != "" {
+				os.Setenv(name, val)
+			}
+		}
+	}
 
 	// Note: We don't remove ctx.RootDir - grove-tend manages that
 	return nil

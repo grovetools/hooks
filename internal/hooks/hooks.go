@@ -296,10 +296,10 @@ func logPostToolUseReminders(data PostToolUseInput, matched []string) {
 		return
 	}
 	dir := filepath.Join(paths.StateDir(), "hooks", "sessions", data.SessionID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "post_tool_use.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(filepath.Join(dir, "post_tool_use.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
@@ -354,12 +354,12 @@ func appendFileAccessEntries(sessionID string, resultSummary map[string]any) {
 	}
 
 	artifactsDir := filepath.Join(planDir, ".artifacts", jobName)
-	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		return
 	}
 
 	jsonlPath := filepath.Join(artifactsDir, "accessed_files.jsonl")
-	f, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
@@ -420,7 +420,7 @@ func RunStopHook() {
 	slog.Info("RunStopHook() called")
 
 	// Write to a known debug file for troubleshooting
-	debugFile, _ := os.OpenFile(os.ExpandEnv("$HOME/.grove/hooks-debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	debugFile, _ := os.OpenFile(os.ExpandEnv("$HOME/.grove/hooks-debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if debugFile != nil {
 		defer debugFile.Close()
 		fmt.Fprintf(debugFile, "[%s] RunStopHook called\n", time.Now().Format(time.RFC3339))
@@ -626,6 +626,24 @@ func RunStopHook() {
 		// DELETION LOGIC REMOVED TO PREVENT RACE CONDITION WITH TRANSCRIPT ARCHIVING
 		// Cleanup is now handled by 'grove-hooks sessions cleanup'
 		// -----------------------------------------------------------------------
+		// Persist the completed status to metadata.json so RecoverSessions
+		// returns the terminal status instead of defaulting to "running"
+		// when it sees the (still-alive parent) PID in pid.lock. The
+		// directory and pid.lock are intentionally preserved — cleanup is
+		// handled by `grove-hooks sessions cleanup`, and removing pid.lock
+		// here would make RecoverSessions skip the entry entirely instead
+		// of reporting it as completed.
+		metadataPath := filepath.Join(groveSessionsDir, data.SessionID, "metadata.json")
+		if metadataContent, err := os.ReadFile(metadataPath); err == nil {
+			var metadata map[string]any
+			if json.Unmarshal(metadataContent, &metadata) == nil {
+				metadata["status"] = finalStatus
+				if updated, err := json.MarshalIndent(metadata, "", "  "); err == nil {
+					_ = os.WriteFile(metadataPath, updated, 0o644)
+				}
+			}
+		}
+
 		slog.WithFields(logrus.Fields{
 			"session_id":        data.SessionID,
 			"actual_session_id": actualSessionID,
