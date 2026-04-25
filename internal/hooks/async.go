@@ -187,6 +187,16 @@ func runSingleAsyncHook(hc config.HookCommand, workingDir, stateDir string) (str
 		}
 	}
 
+	// env-var gating: explicit disable wins, then opt-in via enable_env.
+	if hc.DisableEnv != "" && os.Getenv(hc.DisableEnv) != "" {
+		appendSummary(summaryPath, "skipped")
+		return "", false
+	}
+	if hc.EnableEnv != "" && os.Getenv(hc.EnableEnv) == "" {
+		appendSummary(summaryPath, "skipped")
+		return "", false
+	}
+
 	// run_if gating
 	if hc.RunIf == "changes" {
 		hasChanges, err := hasGitChanges(workingDir)
