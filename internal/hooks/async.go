@@ -44,9 +44,9 @@ func slugifyHookName(name string) string {
 // It reads stop input from stdin, loads the repo's grove.toml, and runs each
 // [[hooks.on_stop]] command in parallel. Per-hook artifacts (pid lockfile,
 // log, summary) are stored under StateDir()/hooks/sessions/<session_id>/on_stop.
-// If any hook exits 2, aggregated stderr is written to os.Stderr and the
-// process exits 2 so Claude Code's asyncRewake surfaces the failure to the
-// agent. Otherwise the process exits 0.
+// Any hook that exits non-zero (or times out) causes stop-async to exit 2 with
+// aggregated stderr, so Claude Code's asyncRewake surfaces the failure to the
+// agent. If all hooks exit 0, stop-async exits 0 and the session stays stopped.
 func RunStopAsyncHook() {
 	inputData, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -236,24 +236,38 @@ func runSingleAsyncHook(hc config.HookCommand, workingDir, stateDir string) (str
 	runErr := cmd.Wait()
 
 	status := "passed"
-	exited2 := false
+	blocking := false
+	exitCode := 0
 	if ctx.Err() == context.DeadlineExceeded {
 		status = "killed"
+		blocking = true
+		exitCode = -1
 	} else if runErr != nil {
 		status = "failed"
+		blocking = true
 		if exitError, ok := runErr.(*exec.ExitError); ok {
 			if ws, ok := exitError.Sys().(syscall.WaitStatus); ok {
-				if ws.ExitStatus() == 2 {
-					exited2 = true
-				}
+				exitCode = ws.ExitStatus()
 			}
 		}
 	}
 
 	appendSummary(summaryPath, status)
 
-	if exited2 {
-		return strings.TrimSpace(stderrBuf.String()), true
+	if blocking {
+		msg := strings.TrimSpace(stderrBuf.String())
+		header := fmt.Sprintf("hook %q failed", hc.Name)
+		if status == "killed" {
+			header = fmt.Sprintf("hook %q timed out after %ds", hc.Name, timeout)
+		} else if exitCode != 0 {
+			header = fmt.Sprintf("hook %q exited %d", hc.Name, exitCode)
+		}
+		if msg == "" {
+			msg = header
+		} else {
+			msg = header + ":\n" + msg
+		}
+		return msg, true
 	}
 	return "", false
 }

@@ -150,6 +150,13 @@ func runInstall(targetDir string, global bool) error {
 				Matcher: ".*",
 				Hooks: []Hook{
 					{Type: "command", Command: "grove hooks stop"},
+				},
+			},
+			// asyncRewake hooks must live in their own matcher block — Claude Code
+			// does not dispatch async siblings when a sync hook shares the entry.
+			{
+				Matcher: ".*",
+				Hooks: []Hook{
 					{Type: "command", Command: "grove hooks stop-async", AsyncRewake: true, Timeout: 600},
 				},
 			},
