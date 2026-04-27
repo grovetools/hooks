@@ -10,8 +10,9 @@ import (
 	"text/tabwriter"
 
 	"github.com/grovetools/core/config"
-	corehooks "github.com/grovetools/hooks/internal/hooks"
 	"github.com/spf13/cobra"
+
+	corehooks "github.com/grovetools/hooks/internal/hooks"
 )
 
 // resolveRepoRoot finds the directory containing grove.{toml,yml,yaml} by

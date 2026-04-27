@@ -25,6 +25,7 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/flow/pkg/orchestration"
+
 	"github.com/grovetools/hooks/internal/utils"
 )
 
@@ -1426,7 +1427,7 @@ func (m *Model) markNoteComplete(session *models.Session) tea.Cmd {
 
 		// Agent sessions need full cleanup via flow plan complete
 		if session.Type == "interactive_agent" || session.Type == "isolated_agent" {
-			cmd := exec.Command("flow", "plan", "complete", session.JobFilePath)
+			cmd := exec.Command("flow", "plan", "complete", session.JobFilePath) //nolint:gosec // args are not user-controlled
 			if output, err := cmd.CombinedOutput(); err != nil {
 				return noteCompleteMsg{err: fmt.Errorf("flow plan complete failed: %w\n%s", err, string(output))}
 			}

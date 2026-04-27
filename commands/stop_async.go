@@ -1,8 +1,9 @@
 package commands
 
 import (
-	"github.com/grovetools/hooks/internal/hooks"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/hooks/internal/hooks"
 )
 
 // NewStopAsyncCmd returns the `grove hooks stop-async` subcommand. It reads a

@@ -2,8 +2,9 @@ package commands
 
 import (
 	"github.com/grovetools/core/cli"
-	"github.com/grovetools/hooks/internal/hooks"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/hooks/internal/hooks"
 )
 
 // NewRootCmd creates the root command for grove-hooks.

@@ -6,8 +6,9 @@ import (
 	"path/filepath"
 
 	grovelogging "github.com/grovetools/core/logging"
-	"github.com/grovetools/hooks/internal/opencode/plugin"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/hooks/internal/opencode/plugin"
 )
 
 // NewOpencodeCmd creates the `opencode` command and its subcommands.

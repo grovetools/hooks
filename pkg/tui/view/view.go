@@ -10,6 +10,7 @@ import (
 	"github.com/grovetools/core/tui/components"
 	gtable "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/hooks/internal/utils"
 )
 
@@ -664,7 +665,7 @@ func getStatusStyle(status string) lipgloss.Style {
 	}
 }
 
-func getStatusIcon(status string, sessionType string) string {
+func getStatusIcon(status, sessionType string) string {
 	// First determine the icon character
 	var icon string
 	if sessionType == "workspace" {

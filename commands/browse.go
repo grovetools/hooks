@@ -9,8 +9,9 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/embed"
-	view "github.com/grovetools/hooks/pkg/tui/view"
 	"github.com/spf13/cobra"
+
+	view "github.com/grovetools/hooks/pkg/tui/view"
 )
 
 // NewBrowseCmd is the standalone CLI entry point for the embedded

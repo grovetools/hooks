@@ -13,7 +13,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/models"
-	"github.com/grovetools/notify"
+	notifications "github.com/grovetools/notify"
 )
 
 // HookBlockingError represents an error that should block the session from stopping
@@ -228,7 +228,7 @@ func generateSessionSummary(data StopInput) map[string]any {
 func ExecuteHookCommand(workingDir string, hookCmd config.HookCommand) error {
 	log.Printf("Running: %s", hookCmd.Command)
 
-	cmd := exec.Command("sh", "-c", hookCmd.Command)
+	cmd := exec.Command("sh", "-c", hookCmd.Command) //nolint:gosec // command from trusted config
 	cmd.Dir = workingDir
 
 	// Capture stderr to handle exit code 2 blocking behavior

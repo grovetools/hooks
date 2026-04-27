@@ -9,6 +9,7 @@ import (
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
+
 	"github.com/grovetools/hooks/pkg/tui/view"
 )
 

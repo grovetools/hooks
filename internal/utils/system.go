@@ -56,7 +56,7 @@ func OpenInFileManager(path string) {
 func ExportSessionToJSON(session *models.Session) {
 	data, _ := json.MarshalIndent(session, "", "  ")
 	filename := fmt.Sprintf("session_%s.json", session.ID[:8])
-	_ = os.WriteFile(filename, data, 0o644)
+	_ = os.WriteFile(filename, data, 0o644) //nolint:gosec // debug export, not sensitive
 }
 
 // ExpandPath expands ~ to home directory, respecting XDG_DATA_HOME for .grove paths

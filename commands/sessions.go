@@ -19,8 +19,9 @@ import (
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/hooks/internal/utils"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/hooks/internal/utils"
 )
 
 var ulog = grovelogging.NewUnifiedLogger("grove-hooks.commands")

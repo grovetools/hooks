@@ -125,7 +125,7 @@ func InstallCommandScenario() *harness.Scenario {
 				}
 
 				settingsPath := filepath.Join(claudeDir, "settings.local.json")
-				if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
+				if err := os.WriteFile(settingsPath, data, 0o644); err != nil { //nolint:gosec // test file, not sensitive
 					return fmt.Errorf("failed to write existing settings: %w", err)
 				}
 

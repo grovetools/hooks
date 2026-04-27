@@ -53,7 +53,7 @@ func updateJobStatusInFile(filePath, newStatus string) error {
 		return err
 	}
 	newContent := strings.Replace(string(content), "status: pending", fmt.Sprintf("status: %s", newStatus), 1)
-	return os.WriteFile(filePath, []byte(newContent), 0o644)
+	return os.WriteFile(filePath, []byte(newContent), 0o644) //nolint:gosec // test file, not sensitive
 }
 
 // RealtimeStatusUpdateScenario tests that job statuses are updated in real-time

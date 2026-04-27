@@ -17,9 +17,10 @@ import (
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/nav/pkg/tmux"
+
 	"github.com/grovetools/hooks/internal/storage"
 	"github.com/grovetools/hooks/internal/utils"
-	"github.com/grovetools/nav/pkg/tmux"
 )
 
 // BaseHookInput contains fields common to all hooks
@@ -128,7 +129,7 @@ func getCurrentBranch(workingDir string) string {
 }
 
 // EnsureSessionExists creates a session if it doesn't exist
-func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath string) error {
+func (hc *HookContext) EnsureSessionExists(sessionID, transcriptPath string) error {
 	// Create sessions directory if it doesn't exist
 	groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 	if err := os.MkdirAll(groveSessionsDir, 0o755); err != nil {

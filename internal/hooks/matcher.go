@@ -14,7 +14,7 @@ import (
 //
 // Empty rules, malformed rules, mismatched tool names, and unsupported tools
 // all return false.
-func evaluatePermissionRule(rule string, toolName string, toolInput map[string]any) bool {
+func evaluatePermissionRule(rule, toolName string, toolInput map[string]any) bool {
 	ruleTool, glob, ok := parsePermissionRule(rule)
 	if !ok {
 		return false

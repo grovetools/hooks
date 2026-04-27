@@ -215,7 +215,7 @@ func runSingleAsyncHook(hc config.HookCommand, workingDir, stateDir string) (str
 	}
 
 	// Write our PID to the lockfile; remove on exit.
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil { //nolint:gosec // pid file
 		return "", false
 	}
 	defer os.Remove(pidPath)
@@ -234,7 +234,7 @@ func runSingleAsyncHook(hc config.HookCommand, workingDir, stateDir string) (str
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", hc.Command)
+	cmd := exec.CommandContext(ctx, "sh", "-c", hc.Command) //nolint:gosec // command from trusted config
 	cmd.Dir = workingDir
 
 	// Capture combined stdout+stderr to the log file AND a stderr-only buffer
@@ -249,7 +249,7 @@ func runSingleAsyncHook(hc config.HookCommand, workingDir, stateDir string) (str
 	}
 	// Overwrite the lockfile with the child's PID so cancel_previous targets
 	// the actual hook process rather than the short-lived grove-hooks parent.
-	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
+	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644) //nolint:gosec // pid file
 
 	runErr := cmd.Wait()
 

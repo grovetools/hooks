@@ -54,7 +54,7 @@ Test session path: %s
 
 All artifacts are in this temp directory for easy inspection.
 `, sandboxedHome, sandboxedHome, testSessionDir)
-				_ = os.WriteFile(markerFile, []byte(info), 0o644)
+				_ = os.WriteFile(markerFile, []byte(info), 0o644) //nolint:gosec // test marker file
 
 				return nil
 			}),
