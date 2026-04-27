@@ -352,7 +352,7 @@ func markInterruptedJobsInPlan(planDir string, dryRun bool) (int, error) {
 			} else {
 				// Update the frontmatter
 				newContent := strings.Replace(contentStr, "status: running", "status: interrupted", 1)
-				if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+				if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 					return updated, fmt.Errorf("failed to update %s: %w", filePath, err)
 				}
 				fmt.Printf("Updated: %s\n", filePath)
@@ -438,4 +438,3 @@ func parseJobFrontmatter(content string) jobInfo {
 	}
 	return info
 }
-

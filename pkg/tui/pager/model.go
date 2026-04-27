@@ -3,8 +3,8 @@ package pager
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"

@@ -462,7 +462,7 @@ func updatePlanJob(jobFilePath, newContent, sourceFile string) error {
 	existingContent, err := os.ReadFile(jobFilePath)
 	if err != nil {
 		// If we can't read, just write the new content
-		return os.WriteFile(jobFilePath, []byte(newContent), 0644)
+		return os.WriteFile(jobFilePath, []byte(newContent), 0o644)
 	}
 
 	existingStr := string(existingContent)
@@ -481,12 +481,12 @@ func updatePlanJob(jobFilePath, newContent, sourceFile string) error {
 
 			// Combine preserved frontmatter with new content
 			updatedContent := "---" + frontmatter + "---\n\n" + newContent
-			return os.WriteFile(jobFilePath, []byte(updatedContent), 0644)
+			return os.WriteFile(jobFilePath, []byte(updatedContent), 0o644)
 		}
 	}
 
 	// No frontmatter found, just write new content
-	return os.WriteFile(jobFilePath, []byte(newContent), 0644)
+	return os.WriteFile(jobFilePath, []byte(newContent), 0o644)
 }
 
 // extractPlanContent extracts the plan content from tool input
@@ -765,7 +765,8 @@ func toKebabCase(prefix, title string) string {
 // savePlanAsJob saves the plan content as a new grove-flow job using flow plan add
 func savePlanAsJob(planDir, title, planContent, sourceFile string, preservationConfig *PlanPreservationConfig) error {
 	// Use flow plan add to create the job with proper frontmatter
-	args := []string{"plan", "add", planDir,
+	args := []string{
+		"plan", "add", planDir,
 		"--type", preservationConfig.JobType,
 		"--title", title,
 	}

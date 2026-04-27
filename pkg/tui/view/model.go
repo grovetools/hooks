@@ -40,7 +40,6 @@ type GetAllSessionsFunc func(client daemon.Client, hideCompleted bool) ([]*model
 // DispatchNotificationsFunc is the function type for dispatching state change notifications
 type DispatchNotificationsFunc func(oldSessions, newSessions []*models.Session)
 
-
 type viewMode int
 
 const (
@@ -110,7 +109,7 @@ type Model struct {
 	typeFilters     map[string]bool
 	searchActive    bool // Whether search input is active
 	viewMode        viewMode
-	gPressed        bool // Track first 'g' press for 'gg' chord
+	gPressed        bool         // Track first 'g' press for 'gg' chord
 	jumpMap         map[rune]int // Maps keyboard shortcuts (1-9) to displayNode indices
 
 	// For "new" indicator
@@ -1450,7 +1449,7 @@ func (m *Model) markNoteComplete(session *models.Session) tea.Cmd {
 			return noteCompleteMsg{err: fmt.Errorf("failed to update frontmatter: %w", err)}
 		}
 
-		if err := os.WriteFile(session.JobFilePath, updatedContent, 0644); err != nil {
+		if err := os.WriteFile(session.JobFilePath, updatedContent, 0o644); err != nil {
 			return noteCompleteMsg{err: fmt.Errorf("failed to write note: %w", err)}
 		}
 

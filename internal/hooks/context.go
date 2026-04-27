@@ -131,7 +131,7 @@ func getCurrentBranch(workingDir string) string {
 func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath string) error {
 	// Create sessions directory if it doesn't exist
 	groveSessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
-	if err := os.MkdirAll(groveSessionsDir, 0755); err != nil {
+	if err := os.MkdirAll(groveSessionsDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 

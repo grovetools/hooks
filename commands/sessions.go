@@ -435,7 +435,6 @@ This updates the job frontmatter files directly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			updated := 0
 
-
 			// Discover all workspaces using grove-core
 			discoveryService := workspace.NewDiscoveryService(nil)
 			discoveryResult, err := discoveryService.DiscoverAll()
@@ -557,7 +556,6 @@ WARNING: This will terminate the Claude process immediately.`,
 			if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err != nil {
 				return fmt.Errorf("invalid PID in lock file: %w", err)
 			}
-
 
 			// Check if process is alive
 			if !process.IsProcessAlive(pid) {
@@ -706,7 +704,7 @@ Example:
 			newContent := strings.Join(lines, "\n")
 
 			// Write back to file
-			if err := os.WriteFile(jobFilePath, []byte(newContent), 0644); err != nil {
+			if err := os.WriteFile(jobFilePath, []byte(newContent), 0o644); err != nil {
 				return fmt.Errorf("failed to write job file: %w", err)
 			}
 
@@ -741,7 +739,6 @@ Example:
   grove-hooks sessions mark-old-completed --dry-run
   grove-hooks sessions mark-old-completed --before 2025-10-01`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-
 			// Determine cutoff date
 			var cutoffDate time.Time
 			var err error
@@ -945,7 +942,7 @@ func updateJobStatus(jobFilePath, newStatus string) error {
 	newContent := strings.Join(lines, "\n")
 
 	// Write back to file
-	if err := os.WriteFile(jobFilePath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(jobFilePath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write job file: %w", err)
 	}
 

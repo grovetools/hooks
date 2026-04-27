@@ -42,14 +42,14 @@ func runOpencodeInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	pluginDir := filepath.Join(homeDir, ".config", "opencode", "plugin")
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create opencode plugin directory: %w", err)
 	}
 
 	pluginPath := filepath.Join(pluginDir, "grove-integration.ts")
 
 	// Write the embedded plugin content to the file.
-	if err := os.WriteFile(pluginPath, plugin.GroveIntegrationPlugin, 0644); err != nil {
+	if err := os.WriteFile(pluginPath, plugin.GroveIntegrationPlugin, 0o644); err != nil {
 		return fmt.Errorf("failed to write opencode plugin: %w", err)
 	}
 

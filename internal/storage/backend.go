@@ -181,11 +181,11 @@ func (b *DaemonBackend) appendEvent(eventType, sessionID string, data interface{
 
 	// Ensure directory exists
 	dir := filepath.Dir(b.eventLog)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil // Best-effort
 	}
 
-	f, err := os.OpenFile(b.eventLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(b.eventLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil // Best-effort
 	}

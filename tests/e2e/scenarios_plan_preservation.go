@@ -45,7 +45,7 @@ flow:
 			// Step 2: Create a flow plan directory to save plans to
 			harness.NewStep("Create flow plan directory", func(ctx *harness.Context) error {
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				if err := os.MkdirAll(planDir, 0755); err != nil {
+				if err := os.MkdirAll(planDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create plan directory: %w", err)
 				}
 
@@ -269,7 +269,7 @@ func PlanPreservationDisabledScenario() *harness.Scenario {
 
 				// Create plan directory
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				_ = os.MkdirAll(planDir, 0755)
+				_ = os.MkdirAll(planDir, 0o755)
 				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
 				ctx.Set("plan_dir", planDir)
 
@@ -414,7 +414,7 @@ func PlanPreservationEmptyPlanScenario() *harness.Scenario {
 				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				_ = os.MkdirAll(planDir, 0755)
+				_ = os.MkdirAll(planDir, 0o755)
 				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
 				ctx.Set("plan_dir", planDir)
 
@@ -496,7 +496,7 @@ func PlanEditSyncScenario() *harness.Scenario {
 
 				// Create flow plan directory
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				if err := os.MkdirAll(planDir, 0755); err != nil {
+				if err := os.MkdirAll(planDir, 0o755); err != nil {
 					return err
 				}
 				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
@@ -504,7 +504,7 @@ func PlanEditSyncScenario() *harness.Scenario {
 
 				// Create a fake ~/.claude/plans directory in the test root for isolation
 				claudePlansDir := filepath.Join(ctx.RootDir, ".claude", "plans")
-				if err := os.MkdirAll(claudePlansDir, 0755); err != nil {
+				if err := os.MkdirAll(claudePlansDir, 0o755); err != nil {
 					return err
 				}
 				ctx.Set("claude_plans_dir", claudePlansDir)
@@ -661,7 +661,7 @@ func PlanEditNonPlanFileScenario() *harness.Scenario {
 				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				_ = os.MkdirAll(planDir, 0755)
+				_ = os.MkdirAll(planDir, 0o755)
 				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
 				ctx.Set("plan_dir", planDir)
 

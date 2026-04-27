@@ -108,7 +108,7 @@ func HooksSymlinkExecutionScenario() *harness.Scenario {
 				ctx.Set("symlink_dir", symlinkDir)
 
 				// Ensure the directory exists
-				if err := os.MkdirAll(symlinkDir, 0755); err != nil {
+				if err := os.MkdirAll(symlinkDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create symlink directory: %w", err)
 				}
 

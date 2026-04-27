@@ -58,7 +58,7 @@ func storeToolID(sessionID, toolID string) {
 	tmpDir := os.TempDir()
 	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("claude-tool-%s.json", sessionID))
 	data, _ := json.Marshal(map[string]string{"tool_id": toolID})
-	_ = os.WriteFile(tmpFile, data, 0644)
+	_ = os.WriteFile(tmpFile, data, 0o644)
 }
 
 func getStoredToolID(sessionID string) string {
@@ -326,7 +326,7 @@ func updateJobFileStatus(jobFilePath, newStatus string) error {
 
 	// Write the file back
 	newContent := strings.Join(lines, "\n")
-	if err := os.WriteFile(jobFilePath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(jobFilePath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write job file: %w", err)
 	}
 

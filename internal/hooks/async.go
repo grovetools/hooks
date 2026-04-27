@@ -129,9 +129,9 @@ func resolveAsyncWorkingDir(data StopInput) string {
 // the aggregated exit code (2 if any hook exited 2, otherwise 0).
 func executeAsyncHooks(cmds []config.HookCommand, workingDir, stateDir string) int {
 	var (
-		wg            sync.WaitGroup
-		stderrMu      sync.Mutex
-		blockingErrs  []string
+		wg           sync.WaitGroup
+		stderrMu     sync.Mutex
+		blockingErrs []string
 	)
 
 	for _, hc := range cmds {

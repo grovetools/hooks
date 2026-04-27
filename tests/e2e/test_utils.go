@@ -42,7 +42,7 @@ func SetupTestDatabase(ctx *harness.Context) error {
 	// writes session files to the test directory instead of the real home.
 	// os.UserHomeDir() respects the HOME environment variable on Unix systems.
 	sandboxedHome := filepath.Join(tempDir, "home")
-	if err := os.MkdirAll(sandboxedHome, 0755); err != nil {
+	if err := os.MkdirAll(sandboxedHome, 0o755); err != nil {
 		return fmt.Errorf("failed to create sandboxed home: %w", err)
 	}
 

@@ -278,12 +278,12 @@ EOF
 				}
 				// The context might be truncated, so check for either the full plan name or a truncated version
 				// Since we saw "grove-tend-flow-integration..." in the output, let's check for that pattern
-				if !strings.Contains(result.Stdout, "integration-test-plan") && 
+				if !strings.Contains(result.Stdout, "integration-test-plan") &&
 				   !strings.Contains(result.Stdout, "integration") {
 					return fmt.Errorf("should show plan name or part of it in context. Output: %s", result.Stdout)
 				}
 				// Check for status - either running or completed
-				if !strings.Contains(result.Stdout, "running") && 
+				if !strings.Contains(result.Stdout, "running") &&
 				   !strings.Contains(result.Stdout, "completed") {
 					return fmt.Errorf("should show running or completed status. Output: %s", result.Stdout)
 				}
@@ -311,11 +311,11 @@ func FlowWorktreeScenario() *harness.Scenario {
 				// Init git repo with proper structure
 				_ = git.Init(ctx.RootDir)
 				_ = git.SetupTestConfig(ctx.RootDir)
-				
+
 				// Create a basic project structure
 				_ = fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "# Test Project\n\nProject for worktree testing")
 				_ = fs.WriteString(filepath.Join(ctx.RootDir, ".gitignore"), "*.log\n.grove-worktrees/\n")
-				
+
 				// Create grove.yml with worktree configuration
 				configContent := `name: worktree-test-project
 flow:
@@ -324,30 +324,30 @@ flow:
   worktree_base: .grove-worktrees
 `
 				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
-				
+
 				// Commit the initial structure
 				_ = git.Add(ctx.RootDir, ".")
 				_ = git.Commit(ctx.RootDir, "Initial project setup")
-				
+
 				// Create a feature branch for testing
 				cmd := command.New("git", "checkout", "-b", "feature-branch").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to create feature branch: %w", result.Error)
 				}
-				
+
 				// Add a feature file to the branch
 				_ = fs.WriteString(filepath.Join(ctx.RootDir, "feature.txt"), "This is a feature file")
 				_ = git.Add(ctx.RootDir, "feature.txt")
 				_ = git.Commit(ctx.RootDir, "Add feature file")
-				
+
 				// Go back to main branch
 				cmd = command.New("git", "checkout", "main").Dir(ctx.RootDir)
 				result = cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to checkout main: %w", result.Error)
 				}
-				
+
 				// Setup test database
 				return SetupTestDatabase(ctx)
 			}),
@@ -369,11 +369,11 @@ flow:
 					"-p", "Process the feature in a worktree based on feature-branch").Dir(ctx.RootDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				// Store the plan path for verification
 				planPath := filepath.Join(ctx.RootDir, "plans", "worktree-plan")
 				ctx.Set("plan_path", planPath)
-				
+
 				return result.Error
 			}),
 
@@ -386,7 +386,7 @@ flow:
 
 				// Create temporary bin directory with our binaries
 				tempBinDir := ctx.NewDir("temp_bin")
-				_ = os.MkdirAll(tempBinDir, 0755)
+				_ = os.MkdirAll(tempBinDir, 0o755)
 
 				// Symlink grove-hooks
 				symlinkPath := filepath.Join(tempBinDir, "grove-hooks")
@@ -407,7 +407,7 @@ EOF
 `
 				llmPath := filepath.Join(tempBinDir, "llm")
 				_ = fs.WriteString(llmPath, llmScript)
-				_ = os.Chmod(llmPath, 0755)
+				_ = os.Chmod(llmPath, 0o755)
 
 				// Update PATH
 				originalPath := os.Getenv("PATH")
@@ -420,7 +420,7 @@ EOF
 
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				// Check if worktree was created
 				worktreePath := filepath.Join(ctx.RootDir, ".grove-worktrees", "feature-branch")
 				if _, err := os.Stat(worktreePath); err != nil {
@@ -429,18 +429,18 @@ EOF
 					}
 				} else {
 					ctx.ShowCommandOutput("Info", "Worktree created at", worktreePath)
-					
+
 					// Verify the worktree has the feature file
 					featureFile := filepath.Join(worktreePath, "feature.txt")
 					if _, err := os.Stat(featureFile); err == nil {
 						ctx.ShowCommandOutput("Info", "Feature file found in worktree", featureFile)
 					}
 				}
-				
+
 				if result.Error != nil {
 					ctx.ShowCommandOutput("Note", "Flow command failed but continuing to check database", "")
 				}
-				
+
 				return nil
 			}),
 
@@ -471,8 +471,8 @@ EOF
 				// Find the worktree job
 				var worktreeJob map[string]interface{}
 				for _, session := range sessions {
-					if session["type"] == "oneshot_job" && 
-					   strings.Contains(fmt.Sprintf("%v", session["job_title"]), "Worktree") {
+					if session["type"] == "oneshot_job" &&
+						strings.Contains(fmt.Sprintf("%v", session["job_title"]), "Worktree") {
 						worktreeJob = session
 						break
 					}
@@ -518,10 +518,10 @@ EOF
 				if err := assert.Contains(result.Stdout, "job", "should show job type"); err != nil {
 					return err
 				}
-				
+
 				// Check for worktree-related content
-				if !strings.Contains(result.Stdout, "worktree") && 
-				   !strings.Contains(result.Stdout, "Worktree") {
+				if !strings.Contains(result.Stdout, "worktree") &&
+					!strings.Contains(result.Stdout, "Worktree") {
 					ctx.ShowCommandOutput("Note", "Output doesn't mention worktree explicitly", result.Stdout)
 				}
 
@@ -536,7 +536,7 @@ EOF
 					ctx.ShowCommandOutput("Info", "Cleaning up worktrees directory", worktreesDir)
 					os.RemoveAll(worktreesDir)
 				}
-				
+
 				return CleanupTestDatabase(ctx)
 			}),
 		},
@@ -558,7 +558,7 @@ func FlowRealLLMScenario() *harness.Scenario {
 				// Check if user has provided API configuration
 				apiKeyCmd := os.Getenv("GEMINI_API_KEY_COMMAND")
 				apiKey := os.Getenv("GEMINI_API_KEY")
-				
+
 				if apiKeyCmd != "" || apiKey != "" {
 					ctx.ShowCommandOutput("Info", "API configuration found", "Will attempt real API calls")
 					ctx.Set("api_configured", true)
@@ -574,7 +574,7 @@ func FlowRealLLMScenario() *harness.Scenario {
 				// Init git repo
 				_ = git.Init(ctx.RootDir)
 				_ = git.SetupTestConfig(ctx.RootDir)
-				
+
 				// Create grove.yml with optional API key configuration
 				// User can provide GEMINI_API_KEY_COMMAND env var with their preferred command
 				geminiConfig := ""
@@ -585,7 +585,7 @@ func FlowRealLLMScenario() *harness.Scenario {
   api_key_command: "%s"
 `, apiKeyCmd)
 				}
-				
+
 				configContent := fmt.Sprintf(`name: hooks-flow-integration
 flow:
   plans_directory: ./plans
@@ -596,7 +596,7 @@ hooks:
   binary: grove-hooks
 %s`, geminiConfig)
 				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
-				
+
 				// Create a simple code file to analyze
 				codeContent := `package main
 
@@ -607,11 +607,11 @@ func main() {
 }
 `
 				_ = fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), codeContent)
-				
+
 				// Commit everything
 				_ = git.Add(ctx.RootDir, ".")
 				_ = git.Commit(ctx.RootDir, "Initial setup with Go code")
-				
+
 				// Actually use real grove-hooks database - don't set test database path
 				// This means sessions will appear in your actual grove-hooks list
 				ctx.ShowCommandOutput("Info", "Using real grove-hooks database", "Sessions will be tracked in your actual database")
@@ -625,16 +625,16 @@ func main() {
 				testID := generateTestUUID()
 				planName := fmt.Sprintf("code-analysis-%s", testID)
 				jobTitle := fmt.Sprintf("Analyze Go Code %s", testID)
-				
+
 				// Log the generated values
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Generated test UUID: %s", testID), "")
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Plan name: %s", planName), "")
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Job title: %s", jobTitle), "")
-				
+
 				// Store for later steps
 				ctx.Set("test_plan_name", planName)
 				ctx.Set("test_job_title", jobTitle)
-				
+
 				// Create the plan
 				cmd := command.New("flow", "plan", "init", planName).Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -657,7 +657,7 @@ Keep your response concise (under 100 words).`
 					"-p", prompt).Dir(ctx.RootDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				return result.Error
 			}),
 
@@ -666,12 +666,12 @@ Keep your response concise (under 100 words).`
 				// Use the real grove-hooks from PATH
 				cmd := command.New("grove-hooks", "sessions", "list", "--json")
 				result := cmd.Run()
-				
+
 				var sessions []map[string]interface{}
 				if result.Stdout != "" {
 					_ = json.Unmarshal([]byte(result.Stdout), &sessions)
 				}
-				
+
 				// Store initial session IDs to detect new ones later
 				initialIDs := make(map[string]bool)
 				for _, session := range sessions {
@@ -679,11 +679,11 @@ Keep your response concise (under 100 words).`
 						initialIDs[id] = true
 					}
 				}
-				
+
 				ctx.Set("initial_session_ids", initialIDs)
 				ctx.Set("initial_session_count", len(sessions))
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Initial session count: %d", len(sessions)), "")
-				
+
 				return nil
 			}),
 
@@ -691,21 +691,21 @@ Keep your response concise (under 100 words).`
 			harness.NewStep("Run flow plan with real Gemini API", func(ctx *harness.Context) error {
 				// Make sure grove-hooks is available in PATH
 				// Flow should call the real grove-hooks binary from PATH
-				
+
 				// Run flow with real Gemini
 				// Note: NOT providing a mock llm binary this time
 				// Pass through GEMINI env vars if they exist
 				envVars := []string{
 					"GROVE_HOOKS_ENABLED=true",
 					// Ensure we're NOT using a test database
-					"GROVE_HOOKS_DB_PATH=",  // Empty string to clear any test DB path
+					"GROVE_HOOKS_DB_PATH=", // Empty string to clear any test DB path
 				}
-				
+
 				// Pass through the API key if provided
 				if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
 					envVars = append(envVars, fmt.Sprintf("GEMINI_API_KEY=%s", apiKey))
 				}
-				
+
 				// Use the plan name from context
 				planName := ctx.Get("test_plan_name").(string)
 				cmd := command.New("flow", "plan", "run", planName, "--yes", "-v").
@@ -714,13 +714,13 @@ Keep your response concise (under 100 words).`
 
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				// Store whether Gemini was actually called - check both stdout and stderr
 				fullOutput := result.Stdout + result.Stderr
-				if strings.Contains(fullOutput, "Calling Gemini API") || 
-				   strings.Contains(fullOutput, "Calling gemini") ||
-				   strings.Contains(fullOutput, "Token usage") ||
-				   strings.Contains(fullOutput, "Total API Usage") {
+				if strings.Contains(fullOutput, "Calling Gemini API") ||
+					strings.Contains(fullOutput, "Calling gemini") ||
+					strings.Contains(fullOutput, "Token usage") ||
+					strings.Contains(fullOutput, "Total API Usage") {
 					ctx.Set("gemini_called", true)
 					ctx.ShowCommandOutput("Success", "Real Gemini API was called", "")
 				} else {
@@ -732,12 +732,12 @@ Keep your response concise (under 100 words).`
 					}
 					ctx.ShowCommandOutput("Debug", "Did not detect Gemini call markers", outputSnippet)
 				}
-				
+
 				// Don't fail on API errors - we want to see what happened
 				if result.Error != nil {
 					ctx.ShowCommandOutput("Note", "Flow command had an error but continuing", result.Stderr)
 				}
-				
+
 				return nil
 			}),
 
@@ -747,20 +747,20 @@ Keep your response concise (under 100 words).`
 				cmd := command.New("grove-hooks", "sessions", "list", "--json")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				var sessions []map[string]interface{}
 				if result.Stdout != "" {
 					if err := json.Unmarshal([]byte(result.Stdout), &sessions); err != nil {
 						ctx.ShowCommandOutput("Warning", "Failed to parse sessions JSON", err.Error())
 					}
 				}
-				
+
 				initialIDs := ctx.Get("initial_session_ids").(map[string]bool)
 				initialCount := ctx.Get("initial_session_count").(int)
 				currentCount := len(sessions)
-				
+
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Session count: initial=%d, current=%d", initialCount, currentCount), "")
-				
+
 				// Find new sessions by comparing IDs
 				var newSessions []map[string]interface{}
 				var foundOneshotJob bool
@@ -775,7 +775,7 @@ Keep your response concise (under 100 words).`
 						}
 					}
 				}
-				
+
 				if len(newSessions) > 0 {
 					ctx.ShowCommandOutput("Success", fmt.Sprintf("Grove-hooks tracked %d new session(s)", len(newSessions)), "")
 				} else {
@@ -787,11 +787,11 @@ Keep your response concise (under 100 words).`
 						}
 					}
 				}
-				
+
 				if !foundOneshotJob {
 					ctx.ShowCommandOutput("Expected", "No oneshot job found", "Flow may be using Gemini directly without grove-hooks integration")
 				}
-				
+
 				// Also check the job output
 				jobFile := filepath.Join(ctx.RootDir, "plans", "code-analysis", "01-analyze-go-code.md")
 				if content, err := os.ReadFile(jobFile); err == nil {
@@ -807,7 +807,7 @@ Keep your response concise (under 100 words).`
 						}
 					}
 				}
-				
+
 				// The test passes either way - we're documenting the current behavior
 				wasGeminiCalled := ctx.Get("gemini_called").(bool)
 				if wasGeminiCalled && foundOneshotJob {
@@ -815,7 +815,7 @@ Keep your response concise (under 100 words).`
 				} else if wasGeminiCalled && !foundOneshotJob {
 					ctx.ShowCommandOutput("Result", "Gemini was called but NOT tracked", "Grove-hooks integration needs to be added to flow")
 				}
-				
+
 				return nil
 			}),
 

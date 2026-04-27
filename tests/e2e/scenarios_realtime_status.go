@@ -53,9 +53,8 @@ func updateJobStatusInFile(filePath, newStatus string) error {
 		return err
 	}
 	newContent := strings.Replace(string(content), "status: pending", fmt.Sprintf("status: %s", newStatus), 1)
-	return os.WriteFile(filePath, []byte(newContent), 0644)
+	return os.WriteFile(filePath, []byte(newContent), 0o644)
 }
-
 
 // RealtimeStatusUpdateScenario tests that job statuses are updated in real-time
 // based on filesystem checks (lock files, PIDs) without waiting for cache expiration
@@ -97,7 +96,7 @@ flow:
 				}
 
 				plansDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				if err := os.MkdirAll(plansDir, 0755); err != nil {
+				if err := os.MkdirAll(plansDir, 0o755); err != nil {
 					return err
 				}
 
@@ -233,9 +232,13 @@ flow:
 
 				// Find the job files to create locks for
 				oneshotFile, err := findJobFileByTitle(plansDir, "Test Oneshot Job")
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				headlessFile, err := findJobFileByTitle(plansDir, "Test Headless Agent Job")
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 
 				// Create lock files for oneshot and headless jobs
 				_ = fs.WriteString(oneshotFile+".lock", pidStr)
@@ -307,9 +310,13 @@ flow:
 				// Use a PID that's very unlikely to exist
 				deadPID := "99999"
 				oneshotFile, err := findJobFileByTitle(plansDir, "Test Oneshot Job")
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				headlessFile, err := findJobFileByTitle(plansDir, "Test Headless Agent Job")
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 
 				_ = fs.WriteString(oneshotFile+".lock", deadPID)
 				_ = fs.WriteString(headlessFile+".lock", deadPID)
