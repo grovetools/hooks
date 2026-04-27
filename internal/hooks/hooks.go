@@ -370,8 +370,8 @@ func appendFileAccessEntries(sessionID string, resultSummary map[string]any) {
 		if err != nil {
 			continue
 		}
-		f.Write(line)
-		f.Write([]byte("\n"))
+		_, _ = f.Write(line)
+		_, _ = f.Write([]byte("\n"))
 	}
 }
 

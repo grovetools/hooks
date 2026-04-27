@@ -159,7 +159,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 		if existingSessionData, err := hc.Storage.GetSession(actualSessionID); err == nil && existingSessionData != nil {
 			if session, ok := existingSessionData.(*models.Session); ok && session != nil {
 				if session.Status == "idle" {
-					hc.Storage.UpdateSessionStatus(actualSessionID, "running")
+					_ = hc.Storage.UpdateSessionStatus(actualSessionID, "running")
 				}
 				if session.Status == "idle" || session.Status == "running" || session.Status == "pending_user" {
 					return nil
@@ -191,11 +191,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID string, transcriptPath stri
 	}
 
 	// Get project info using grove-core workspace package
-	projInfo, err := workspace.GetProjectByPath(workingDir)
-	if err != nil {
-		// Log the error but continue, as this is for enrichment
-		// Note: We don't have a logger here, so we'll just continue silently
-	}
+	projInfo, _ := workspace.GetProjectByPath(workingDir)
 
 	// Determine repo name from WorkspaceNode
 	repo := ""

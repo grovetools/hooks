@@ -69,18 +69,18 @@ func RealtimeStatusUpdateScenario() *harness.Scenario {
 			// Step 1: Setup test environment
 			harness.NewStep("Setup test environment with grove-flow plan", func(ctx *harness.Context) error {
 				// Init git repo
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
-				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial commit")
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				// Create grove.yml
 				configContent := `name: realtime-test
 flow:
   plans_directory: ./plans
 `
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 
 				// Setup database
 				return SetupTestDatabase(ctx)
@@ -238,8 +238,8 @@ flow:
 				if err != nil { return err }
 
 				// Create lock files for oneshot and headless jobs
-				fs.WriteString(oneshotFile+".lock", pidStr)
-				fs.WriteString(headlessFile+".lock", pidStr)
+				_ = fs.WriteString(oneshotFile+".lock", pidStr)
+				_ = fs.WriteString(headlessFile+".lock", pidStr)
 
 				ctx.ShowCommandOutput("Info", fmt.Sprintf("Created lock files with live PID: %d", currentPID), "")
 				return nil
@@ -311,8 +311,8 @@ flow:
 				headlessFile, err := findJobFileByTitle(plansDir, "Test Headless Agent Job")
 				if err != nil { return err }
 
-				fs.WriteString(oneshotFile+".lock", deadPID)
-				fs.WriteString(headlessFile+".lock", deadPID)
+				_ = fs.WriteString(oneshotFile+".lock", deadPID)
+				_ = fs.WriteString(headlessFile+".lock", deadPID)
 
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {

@@ -19,7 +19,7 @@ import (
 // generateTestUUID generates a short UUID for test uniqueness
 func generateTestUUID() string {
 	b := make([]byte, 4)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
@@ -49,11 +49,11 @@ func FlowOneshotTrackingScenario_Disabled() *harness.Scenario {
 			// Step 1: Setup a full project environment
 			harness.NewStep("Setup project with git, grove.yml, and test DB", func(ctx *harness.Context) error {
 				// Init git repo
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
-				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial commit")
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				// Create grove.yml for flow
 				configContent := `name: test-project
@@ -61,7 +61,7 @@ flow:
   plans_directory: ./plans
   oneshot_model: mock-model # A model that doesn't need API keys
 `
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 
 				// Setup a dedicated, temporary database for this test
 				return SetupTestDatabase(ctx)
@@ -97,7 +97,7 @@ flow:
 
 				// Create a temporary bin dir
 				tempBinDir := ctx.NewDir("temp_bin")
-				os.MkdirAll(tempBinDir, 0755)
+				_ = os.MkdirAll(tempBinDir, 0755)
 
 				// Symlink our test binary as 'grove-hooks'
 				symlinkPath := filepath.Join(tempBinDir, "grove-hooks")
@@ -126,8 +126,8 @@ cat <<EOF
 EOF
 `, llmStartedSignal, llmContinueSignal)
 				llmPath := filepath.Join(tempBinDir, "llm")
-				fs.WriteString(llmPath, llmScript)
-				os.Chmod(llmPath, 0755)
+				_ = fs.WriteString(llmPath, llmScript)
+				_ = os.Chmod(llmPath, 0755)
 
 				// Prepend this temp bin to the PATH for the command
 				originalPath := os.Getenv("PATH")
@@ -188,7 +188,7 @@ EOF
 				ctx.ShowCommandOutput("Success", "grove-hooks correctly identifies job status as 'running'.", "")
 
 				// Now, signal the mock LLM to continue
-				fs.WriteString(llmContinueSignal, "continue")
+				_ = fs.WriteString(llmContinueSignal, "continue")
 				ctx.ShowCommandOutput("Info", "Signaled mock LLM to continue.", "")
 
 				// Wait for the flow process to complete
@@ -309,12 +309,12 @@ func FlowWorktreeScenario() *harness.Scenario {
 			// Step 1: Setup a full project environment with git
 			harness.NewStep("Setup project with git and test DB", func(ctx *harness.Context) error {
 				// Init git repo with proper structure
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
 				
 				// Create a basic project structure
-				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "# Test Project\n\nProject for worktree testing")
-				fs.WriteString(filepath.Join(ctx.RootDir, ".gitignore"), "*.log\n.grove-worktrees/\n")
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "# Test Project\n\nProject for worktree testing")
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, ".gitignore"), "*.log\n.grove-worktrees/\n")
 				
 				// Create grove.yml with worktree configuration
 				configContent := `name: worktree-test-project
@@ -323,11 +323,11 @@ flow:
   oneshot_model: mock-model
   worktree_base: .grove-worktrees
 `
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 				
 				// Commit the initial structure
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial project setup")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial project setup")
 				
 				// Create a feature branch for testing
 				cmd := command.New("git", "checkout", "-b", "feature-branch").Dir(ctx.RootDir)
@@ -337,9 +337,9 @@ flow:
 				}
 				
 				// Add a feature file to the branch
-				fs.WriteString(filepath.Join(ctx.RootDir, "feature.txt"), "This is a feature file")
-				git.Add(ctx.RootDir, "feature.txt")
-				git.Commit(ctx.RootDir, "Add feature file")
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "feature.txt"), "This is a feature file")
+				_ = git.Add(ctx.RootDir, "feature.txt")
+				_ = git.Commit(ctx.RootDir, "Add feature file")
 				
 				// Go back to main branch
 				cmd = command.New("git", "checkout", "main").Dir(ctx.RootDir)
@@ -386,7 +386,7 @@ flow:
 
 				// Create temporary bin directory with our binaries
 				tempBinDir := ctx.NewDir("temp_bin")
-				os.MkdirAll(tempBinDir, 0755)
+				_ = os.MkdirAll(tempBinDir, 0755)
 
 				// Symlink grove-hooks
 				symlinkPath := filepath.Join(tempBinDir, "grove-hooks")
@@ -406,8 +406,8 @@ cat <<EOF
 EOF
 `
 				llmPath := filepath.Join(tempBinDir, "llm")
-				fs.WriteString(llmPath, llmScript)
-				os.Chmod(llmPath, 0755)
+				_ = fs.WriteString(llmPath, llmScript)
+				_ = os.Chmod(llmPath, 0755)
 
 				// Update PATH
 				originalPath := os.Getenv("PATH")
@@ -572,8 +572,8 @@ func FlowRealLLMScenario() *harness.Scenario {
 			// Step 2: Setup project with grove-flow configuration
 			harness.NewStep("Setup project with real LLM config", func(ctx *harness.Context) error {
 				// Init git repo
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
 				
 				// Create grove.yml with optional API key configuration
 				// User can provide GEMINI_API_KEY_COMMAND env var with their preferred command
@@ -595,7 +595,7 @@ hooks:
   enabled: true
   binary: grove-hooks
 %s`, geminiConfig)
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 				
 				// Create a simple code file to analyze
 				codeContent := `package main
@@ -606,11 +606,11 @@ func main() {
     fmt.Println("Hello, World!")
 }
 `
-				fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), codeContent)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), codeContent)
 				
 				// Commit everything
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial setup with Go code")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial setup with Go code")
 				
 				// Actually use real grove-hooks database - don't set test database path
 				// This means sessions will appear in your actual grove-hooks list
@@ -669,7 +669,7 @@ Keep your response concise (under 100 words).`
 				
 				var sessions []map[string]interface{}
 				if result.Stdout != "" {
-					json.Unmarshal([]byte(result.Stdout), &sessions)
+					_ = json.Unmarshal([]byte(result.Stdout), &sessions)
 				}
 				
 				// Store initial session IDs to detect new ones later

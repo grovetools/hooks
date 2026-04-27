@@ -584,7 +584,7 @@ WARNING: This will terminate the Claude process immediately.`,
 			if !force {
 				fmt.Printf("Kill session %s (PID %d)? [y/N] ", sessionID, pid)
 				var response string
-				fmt.Scanln(&response)
+				_, _ = fmt.Scanln(&response)
 				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
 					ulog.Info("Kill operation cancelled").Emit()
 					return nil

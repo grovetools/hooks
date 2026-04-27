@@ -68,7 +68,6 @@ type displayNode struct {
 
 	// Pre-calculated for rendering
 	prefix          string // Tree structure prefix (e.g., "│   ├─ ")
-	depth           int
 	workspaceStatus string // Aggregated status for workspace nodes (e.g., "running" if any session is active)
 	jumpKey         rune   // Keyboard shortcut for quick navigation (1-9)
 }

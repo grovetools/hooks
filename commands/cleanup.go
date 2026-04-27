@@ -131,7 +131,7 @@ func CleanupDeadSessionsWithThreshold(inactivityThreshold time.Duration) (int, e
 													fmt.Fprintf(os.Stderr, "Debug: Auto-completed dead flow job %s\n", jobPath)
 												}
 											} else {
-												cmd.Run()
+												_ = cmd.Run()
 											}
 											time.Sleep(10 * time.Second)
 										}(metadata.JobFilePath)

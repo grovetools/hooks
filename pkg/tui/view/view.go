@@ -597,34 +597,6 @@ func (m Model) viewFilterOptions() string {
 	return components.RenderBox("Filters", content.String(), m.width)
 }
 
-func (m Model) generateScrollbar(viewHeight, totalItems int) []string {
-	if totalItems == 0 || viewHeight == 0 || totalItems <= viewHeight {
-		return []string{}
-	}
-	scrollbar := make([]string, viewHeight)
-	thumbSize := max(1, (viewHeight*viewHeight)/totalItems)
-	maxScroll := totalItems - viewHeight
-	scrollProgress := 0.0
-	if maxScroll > 0 {
-		scrollProgress = float64(m.scrollOffset) / float64(maxScroll)
-	}
-	if scrollProgress < 0 {
-		scrollProgress = 0
-	}
-	if scrollProgress > 1 {
-		scrollProgress = 1
-	}
-	thumbStart := int(scrollProgress * float64(viewHeight-thumbSize))
-	for i := 0; i < viewHeight; i++ {
-		if i >= thumbStart && i < thumbStart+thumbSize {
-			scrollbar[i] = "█"
-		} else {
-			scrollbar[i] = "░"
-		}
-	}
-	return scrollbar
-}
-
 // FooterView returns the status line and help text intended for the
 // pager's pinned footer. The main View() no longer renders this
 // inline — the host calls SetFooter(m.FooterView()) so the pager
@@ -747,13 +719,6 @@ func getStatusIcon(status string, sessionType string) string {
 	// Apply the status color to the icon
 	statusStyle := getStatusStyle(status)
 	return statusStyle.Render(icon)
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func getJobTypeIcon(jobType string) string {

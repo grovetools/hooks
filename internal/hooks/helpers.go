@@ -58,7 +58,7 @@ func storeToolID(sessionID, toolID string) {
 	tmpDir := os.TempDir()
 	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("claude-tool-%s.json", sessionID))
 	data, _ := json.Marshal(map[string]string{"tool_id": toolID})
-	os.WriteFile(tmpFile, data, 0644)
+	_ = os.WriteFile(tmpFile, data, 0644)
 }
 
 func getStoredToolID(sessionID string) string {
@@ -69,7 +69,7 @@ func getStoredToolID(sessionID string) string {
 		return ""
 	}
 	var stored map[string]string
-	json.Unmarshal(data, &stored)
+	_ = json.Unmarshal(data, &stored)
 	return stored["tool_id"]
 }
 
@@ -265,14 +265,6 @@ func ExecuteHookCommand(workingDir string, hookCmd config.HookCommand) error {
 	}
 
 	return nil
-}
-
-// getWorkingDirectory extracts the working directory from a session interface
-func getWorkingDirectory(session interface{}) string {
-	if s, ok := session.(*models.Session); ok {
-		return s.WorkingDirectory
-	}
-	return ""
 }
 
 // updateJobFileStatus updates the status field in a grove-flow job file's YAML frontmatter

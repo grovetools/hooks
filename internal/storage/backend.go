@@ -191,6 +191,6 @@ func (b *DaemonBackend) appendEvent(eventType, sessionID string, data interface{
 	}
 	defer f.Close()
 
-	_, err = f.Write(append(line, '\n'))
+	_, _ = f.Write(append(line, '\n'))
 	return nil // Best-effort
 }

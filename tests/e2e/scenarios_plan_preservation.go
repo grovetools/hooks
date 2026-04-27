@@ -24,19 +24,19 @@ func PlanPreservationScenario() *harness.Scenario {
 			// Step 1: Setup project environment
 			harness.NewStep("Setup project with git, grove.yml, and flow plan", func(ctx *harness.Context) error {
 				// Init git repo
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
 
 				// Create grove.yml
 				configContent := `name: plan-preservation-test
 flow:
   plans_directory: ./plans
 `
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 
 				// Create initial commit
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial commit")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				// Setup test database
 				return SetupTestDatabase(ctx)
@@ -53,7 +53,7 @@ flow:
 				planConfig := `name: test-plan
 description: Test plan for plan preservation
 `
-				fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), planConfig)
+				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), planConfig)
 
 				// Create an initial job file so we can test numbering
 				initialJob := `---
@@ -65,7 +65,7 @@ status: pending
 
 This is the initial job.
 `
-				fs.WriteString(filepath.Join(planDir, "01-initial-job.md"), initialJob)
+				_ = fs.WriteString(filepath.Join(planDir, "01-initial-job.md"), initialJob)
 
 				ctx.Set("plan_dir", planDir)
 				ctx.ShowCommandOutput("Info", "Created plan directory", planDir)
@@ -260,17 +260,17 @@ func PlanPreservationDisabledScenario() *harness.Scenario {
 		Steps: []harness.Step{
 			// Step 1: Setup
 			harness.NewStep("Setup project environment", func(ctx *harness.Context) error {
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
 
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: test\n")
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial commit")
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: test\n")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				// Create plan directory
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				os.MkdirAll(planDir, 0755)
-				fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
+				_ = os.MkdirAll(planDir, 0755)
+				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
 				ctx.Set("plan_dir", planDir)
 
 				return SetupTestDatabase(ctx)
@@ -347,11 +347,11 @@ func PlanPreservationNoPlanScenario() *harness.Scenario {
 		Tags:        []string{"hooks", "flow", "plan-preservation"},
 		Steps: []harness.Step{
 			harness.NewStep("Setup project without flow plan", func(ctx *harness.Context) error {
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
-				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "# Test\n")
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial commit")
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "# Test\n")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial commit")
 				return SetupTestDatabase(ctx)
 			}),
 
@@ -407,15 +407,15 @@ func PlanPreservationEmptyPlanScenario() *harness.Scenario {
 		Tags:        []string{"hooks", "flow", "plan-preservation"},
 		Steps: []harness.Step{
 			harness.NewStep("Setup project with flow plan", func(ctx *harness.Context) error {
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: test\n")
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial commit")
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: test\n")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				os.MkdirAll(planDir, 0755)
-				fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
+				_ = os.MkdirAll(planDir, 0755)
+				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
 				ctx.Set("plan_dir", planDir)
 
 				return SetupTestDatabase(ctx)
@@ -488,18 +488,18 @@ func PlanEditSyncScenario() *harness.Scenario {
 		Tags:        []string{"hooks", "flow", "plan-preservation", "edit"},
 		Steps: []harness.Step{
 			harness.NewStep("Setup project with flow plan and fake Claude plans dir", func(ctx *harness.Context) error {
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: plan-edit-test\n")
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial commit")
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: plan-edit-test\n")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				// Create flow plan directory
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
 				if err := os.MkdirAll(planDir, 0755); err != nil {
 					return err
 				}
-				fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
+				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
 				ctx.Set("plan_dir", planDir)
 
 				// Create a fake ~/.claude/plans directory in the test root for isolation
@@ -520,7 +520,7 @@ Build a feature to process user requests.
 2. Add validation logic
 `
 				planFilePath := filepath.Join(claudePlansDir, "fluffy-noodling-balloon.md")
-				fs.WriteString(planFilePath, initialPlan)
+				_ = fs.WriteString(planFilePath, initialPlan)
 				ctx.Set("plan_file_path", planFilePath)
 				ctx.Set("initial_plan", initialPlan)
 
@@ -549,7 +549,7 @@ Build a feature to process user requests.
 
 **Updated:** Added testing step during editing.
 `
-				fs.WriteString(planFilePath, updatedPlan)
+				_ = fs.WriteString(planFilePath, updatedPlan)
 				ctx.Set("updated_plan", updatedPlan)
 
 				// Create the JSON input for posttooluse with Edit tool
@@ -654,19 +654,19 @@ func PlanEditNonPlanFileScenario() *harness.Scenario {
 		Tags:        []string{"hooks", "flow", "plan-preservation", "edit"},
 		Steps: []harness.Step{
 			harness.NewStep("Setup project with flow plan", func(ctx *harness.Context) error {
-				git.Init(ctx.RootDir)
-				git.SetupTestConfig(ctx.RootDir)
-				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: non-plan-edit-test\n")
-				git.Add(ctx.RootDir, ".")
-				git.Commit(ctx.RootDir, "Initial commit")
+				_ = git.Init(ctx.RootDir)
+				_ = git.SetupTestConfig(ctx.RootDir)
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), "name: non-plan-edit-test\n")
+				_ = git.Add(ctx.RootDir, ".")
+				_ = git.Commit(ctx.RootDir, "Initial commit")
 
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				os.MkdirAll(planDir, 0755)
-				fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
+				_ = os.MkdirAll(planDir, 0755)
+				_ = fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: test-plan\n")
 				ctx.Set("plan_dir", planDir)
 
 				// Create a regular source file
-				fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), "package main\n\nfunc main() {}\n")
+				_ = fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), "package main\n\nfunc main() {}\n")
 
 				return SetupTestDatabase(ctx)
 			}),

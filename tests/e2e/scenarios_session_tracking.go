@@ -54,7 +54,7 @@ Test session path: %s
 
 All artifacts are in this temp directory for easy inspection.
 `, sandboxedHome, sandboxedHome, testSessionDir)
-				os.WriteFile(markerFile, []byte(info), 0644)
+				_ = os.WriteFile(markerFile, []byte(info), 0644)
 
 				return nil
 			}),
@@ -435,11 +435,11 @@ func SessionDiscoveryService() *harness.Scenario {
 				staleSessionDir := filepath.Join(sandboxedHome, ".local", "state", "grove", "hooks", "sessions", staleSessionID)
 
 				// Create a stale session manually with fake dead PID
-				os.MkdirAll(staleSessionDir, 0755)
+				_ = os.MkdirAll(staleSessionDir, 0755)
 
 				// Write a PID that definitely doesn't exist (use a very high number)
 				pidFile := filepath.Join(staleSessionDir, "pid.lock")
-				os.WriteFile(pidFile, []byte("999999"), 0644)
+				_ = os.WriteFile(pidFile, []byte("999999"), 0644)
 
 				// Write minimal metadata
 				metadataFile := filepath.Join(staleSessionDir, "metadata.json")
@@ -450,7 +450,7 @@ func SessionDiscoveryService() *harness.Scenario {
 					"user": "test",
 					"started_at": "2024-01-01T00:00:00Z"
 				}`, staleSessionID)
-				os.WriteFile(metadataFile, []byte(metadata), 0644)
+				_ = os.WriteFile(metadataFile, []byte(metadata), 0644)
 
 				hooksBinary, err := FindProjectBinary()
 				if err != nil {
