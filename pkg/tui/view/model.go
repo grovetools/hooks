@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
@@ -602,7 +603,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				if os.Getenv("TMUX") != "" {
+				if mux.ActiveMux() != mux.MuxNone {
 					tmuxClient, _ := tmux.NewClient()
 					cmd, err := tmuxClient.NewWindowAndClosePopup(context.Background(), sessionName, windowName, fmt.Sprintf("flow plan status -t %s", planName))
 					if err != nil {
@@ -654,7 +655,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							}
 						}
 
-						if os.Getenv("TMUX") != "" {
+						if mux.ActiveMux() != mux.MuxNone {
 							tmuxClient, _ := tmux.NewClient()
 							if err := tmuxClient.SwitchClient(context.Background(), session.TmuxKey); err != nil {
 								m.statusMessage = fmt.Sprintf("Failed to switch to session: %v", err)
@@ -690,7 +691,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return r
 						}, windowName)
 
-						if os.Getenv("TMUX") != "" {
+						if mux.ActiveMux() != mux.MuxNone {
 							tmuxClient, _ := tmux.NewClient()
 							cmd, err := tmuxClient.SelectWindowAndClosePopup(context.Background(), sessionName, windowName)
 							if err != nil {
@@ -1301,7 +1302,7 @@ func (m Model) switchToTmuxSession(sessionName string) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if os.Getenv("TMUX") != "" {
+	if mux.ActiveMux() != mux.MuxNone {
 		// Switch to the session and close popup (works regardless of -E flag)
 		if err := tmuxClient.SwitchClient(context.Background(), sessionName); err != nil {
 			m.statusMessage = fmt.Sprintf("Failed to switch to session: %v", err)
