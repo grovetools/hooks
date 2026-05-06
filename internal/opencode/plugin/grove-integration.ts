@@ -44,7 +44,9 @@ function getGrovePaths(): GrovePaths | null {
 }
 
 // --- Structured Logging ---
-// Writes JSON logs to .grove/logs/workspace-YYYY-MM-DD.log for compatibility with `core logs`
+// Writes JSON logs to XDG state directory for compatibility with `core logs`.
+// Prefers GROVE_LOG_DIR env var (set by grove-flow when launching agents),
+// falls back to state_dir/logs from `core paths`.
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -58,7 +60,13 @@ interface LogEntry {
 
 function getLogFilePath(homeDir: string, workingDir: string): string {
   const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-  const logsDir = join(workingDir, ".grove", "logs");
+  let logsDir = process.env.GROVE_LOG_DIR;
+  if (!logsDir) {
+    const paths = getGrovePaths();
+    logsDir = paths
+      ? join(paths.state_dir, "logs")
+      : join(homeDir, ".local", "state", "grove", "logs");
+  }
   if (!existsSync(logsDir)) {
     mkdirSync(logsDir, { recursive: true });
   }
