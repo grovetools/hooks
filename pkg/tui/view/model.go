@@ -714,7 +714,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.hosted {
 							path := session.JobFilePath
 							return m, func() tea.Msg {
-								return embed.EditRequestMsg{Path: path}
+								return embed.SplitEditorRequestMsg{Path: path, Focus: false}
 							}
 						}
 						if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
