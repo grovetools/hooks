@@ -677,6 +677,59 @@ func RunStopHook() {
 	}
 }
 
+// RunSessionStartHook handles the SessionStart hook. It registers the
+// session immediately — closing the window where sessions only existed after
+// the first PreToolUse (the empty-registry bug class) — and records the
+// transcript path before any tool runs. SessionStart supports a response
+// contract (additionalContext), so stdout must stay pristine: this handler
+// writes nothing to stdout.
+func RunSessionStartHook() {
+	ctx, err := NewHookContext()
+	if err != nil {
+		log.Printf("Error initializing hook context: %v", err)
+		os.Exit(1)
+	}
+
+	var data SessionStartInput
+	if err := json.Unmarshal(ctx.RawInput, &data); err != nil {
+		log.Printf("Error parsing JSON: %v", err)
+		os.Exit(1)
+	}
+
+	if err := ctx.EnsureSessionExists(data.SessionID, data.TranscriptPath); err != nil {
+		log.Printf("Failed to ensure session exists: %v", err)
+	}
+}
+
+// RunSubagentStartHook handles the SubagentStart hook (fires for both
+// workflow-spawned agents and Agent-tool spawns; CC v2.1.172 probe). It logs
+// a 'subagentstart' event mirroring the stop handler and forwards an
+// agent_started workflow event to the daemon, best-effort.
+func RunSubagentStartHook() {
+	ctx, err := NewHookContext()
+	if err != nil {
+		log.Printf("Error initializing hook context: %v", err)
+		os.Exit(1)
+	}
+
+	var data SubagentStartInput
+	if err := json.Unmarshal(ctx.RawInput, &data); err != nil {
+		log.Printf("Error parsing JSON: %v", err)
+		os.Exit(1)
+	}
+
+	eventData := map[string]any{
+		"agent_id":   data.AgentID,
+		"agent_type": data.AgentType,
+	}
+	if err := ctx.LogEvent(models.EventType("subagentstart"), eventData); err != nil {
+		log.Printf("Failed to log event: %v", err)
+	}
+
+	ev := workflowEventFromSubagentStart(data, time.Now())
+	forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), ev)
+}
+
 func RunSubagentStopHook() {
 	ctx, err := NewHookContext()
 	if err != nil {
@@ -710,6 +763,11 @@ func RunSubagentStopHook() {
 	}
 	if len(data.BackgroundTasks) > 0 {
 		eventData["background_tasks"] = data.BackgroundTasks
+		// Workflow name attribution (background_tasks[] entries with
+		// type == "workflow" carry the workflow name; CC v2.1.172 probe).
+		if name := extractWorkflowName(data.BackgroundTasks); name != "" {
+			eventData["workflow_name"] = name
+		}
 	}
 	if len(data.SessionCrons) > 0 {
 		eventData["session_crons"] = data.SessionCrons
@@ -737,8 +795,11 @@ func RunSubagentStopHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
-	// For now, we'll just log this as an event
-	// In the future, we might want to add a separate subagent tracking table
+	// Forward an agent_completed workflow event to the daemon, best-effort.
+	// RunID comes from the wf_<runId> dir embedded in agent_transcript_path
+	// (empty RunID = ad-hoc Agent-tool spawn).
+	ev := workflowEventFromSubagentStop(data, time.Now())
+	forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), ev)
 }
 
 // ExecuteRepoHookCommands executes on_stop commands from grove.yml

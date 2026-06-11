@@ -20,6 +20,8 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newPostToolUseCmd())
 	rootCmd.AddCommand(newStopCmd())
 	rootCmd.AddCommand(NewStopAsyncCmd())
+	rootCmd.AddCommand(newSessionStartCmd())
+	rootCmd.AddCommand(newSubagentStartCmd())
 	rootCmd.AddCommand(newSubagentStopCmd())
 	rootCmd.AddCommand(NewSessionsCmd())
 	rootCmd.AddCommand(NewInstallCmd())
@@ -74,6 +76,26 @@ func newStopCmd() *cobra.Command {
 		Short: "Run the stop hook",
 		Run: func(cmd *cobra.Command, args []string) {
 			hooks.RunStopHook()
+		},
+	}
+}
+
+func newSessionStartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "session-start",
+		Short: "Run the session start hook",
+		Run: func(cmd *cobra.Command, args []string) {
+			hooks.RunSessionStartHook()
+		},
+	}
+}
+
+func newSubagentStartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "subagent-start",
+		Short: "Run the subagent start hook",
+		Run: func(cmd *cobra.Command, args []string) {
+			hooks.RunSubagentStartHook()
 		},
 	}
 }

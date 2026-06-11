@@ -59,6 +59,31 @@ type StopInput struct {
 	Cwd            string `json:"cwd,omitempty"`
 }
 
+// SessionStartInput is the payload delivered to the SessionStart hook.
+// Observed field set (CC v2.1.172 probe): session_id, transcript_path, cwd,
+// hook_event_name.
+type SessionStartInput struct {
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path,omitempty"`
+	Cwd            string `json:"cwd,omitempty"`
+	HookEventName  string `json:"hook_event_name"`
+}
+
+// SubagentStartInput is the payload delivered to the SubagentStart hook.
+// Observed field set (CC v2.1.172 probe): session_id, transcript_path, cwd,
+// hook_event_name, agent_id, agent_type. The payload is minimal by design —
+// no prompt, no per-agent transcript path, no run id. AgentType
+// discriminates spawn sources: "workflow-subagent" for workflow-spawned
+// agents vs the subagent type name (e.g. "Explore") for Agent-tool spawns.
+type SubagentStartInput struct {
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path,omitempty"`
+	Cwd            string `json:"cwd,omitempty"`
+	HookEventName  string `json:"hook_event_name"`
+	AgentID        string `json:"agent_id,omitempty"`
+	AgentType      string `json:"agent_type,omitempty"`
+}
+
 type SubagentStopInput struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`

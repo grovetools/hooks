@@ -25,6 +25,12 @@ func Execute() {
 	case "stop", "complete":
 		hooks.RunStopHook()
 		return
+	case "session-start":
+		hooks.RunSessionStartHook()
+		return
+	case "subagent-start":
+		hooks.RunSubagentStartHook()
+		return
 	case "subagent-stop":
 		hooks.RunSubagentStopHook()
 		return

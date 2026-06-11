@@ -119,8 +119,39 @@ func runInstall(targetDir string, global bool) error {
 		fmt.Printf("Creating new settings at %s\n", settingsPath)
 	}
 
-	// Define hooks configuration using delegated command format
-	newHooks := map[string][]HookEntry{
+	// Merge hooks into settings (preserves user's custom hooks)
+	mergeHooks(settings, groveHooksConfig())
+
+	// Marshal settings with indentation
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	// Write settings file
+	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write settings: %w", err)
+	}
+
+	fmt.Println("Grove hooks configuration installed successfully")
+	fmt.Printf("Settings file: %s\n", settingsPath)
+	fmt.Println()
+	fmt.Println("The following hooks have been configured:")
+	fmt.Println("  - PreToolUse: Runs before any tool use")
+	fmt.Println("  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, Read, ExitPlanMode, or Agent tools")
+	fmt.Println("  - SessionStart: Runs when a session starts")
+	fmt.Println("  - Notification: Runs on notifications")
+	fmt.Println("  - Stop: Runs when conversation stops")
+	fmt.Println("  - SubagentStart: Runs when subagent starts")
+	fmt.Println("  - SubagentStop: Runs when subagent stops")
+
+	return nil
+}
+
+// groveHooksConfig defines the hook registrations grove installs, using the
+// delegated command format.
+func groveHooksConfig() map[string][]HookEntry {
+	return map[string][]HookEntry{
 		"PreToolUse": {
 			{
 				Matcher: ".*",
@@ -131,9 +162,20 @@ func runInstall(targetDir string, global bool) error {
 		},
 		"PostToolUse": {
 			{
-				Matcher: "(Edit|Write|MultiEdit|Bash|Read)",
+				// ExitPlanMode is required for the in-repo plan-preservation
+				// handler (HandleExitPlanMode) to be reachable; Agent enables
+				// spawn-prompt/cost capture for Agent-tool subagent spawns.
+				Matcher: "(Edit|Write|MultiEdit|Bash|Read|ExitPlanMode|Agent)",
 				Hooks: []Hook{
 					{Type: "command", Command: "grove hooks posttooluse"},
+				},
+			},
+		},
+		"SessionStart": {
+			{
+				Matcher: ".*",
+				Hooks: []Hook{
+					{Type: "command", Command: "grove hooks session-start"},
 				},
 			},
 		},
@@ -161,6 +203,15 @@ func runInstall(targetDir string, global bool) error {
 				},
 			},
 		},
+		// SubagentStart accepts command-type hooks only.
+		"SubagentStart": {
+			{
+				Matcher: ".*",
+				Hooks: []Hook{
+					{Type: "command", Command: "grove hooks subagent-start"},
+				},
+			},
+		},
 		"SubagentStop": {
 			{
 				Matcher: ".*",
@@ -170,32 +221,6 @@ func runInstall(targetDir string, global bool) error {
 			},
 		},
 	}
-
-	// Merge hooks into settings (preserves user's custom hooks)
-	mergeHooks(settings, newHooks)
-
-	// Marshal settings with indentation
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal settings: %w", err)
-	}
-
-	// Write settings file
-	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
-		return fmt.Errorf("failed to write settings: %w", err)
-	}
-
-	fmt.Println("Grove hooks configuration installed successfully")
-	fmt.Printf("Settings file: %s\n", settingsPath)
-	fmt.Println()
-	fmt.Println("The following hooks have been configured:")
-	fmt.Println("  - PreToolUse: Runs before any tool use")
-	fmt.Println("  - PostToolUse: Runs after Edit, Write, MultiEdit, Bash, or Read tools")
-	fmt.Println("  - Notification: Runs on notifications")
-	fmt.Println("  - Stop: Runs when conversation stops")
-	fmt.Println("  - SubagentStop: Runs when subagent stops")
-
-	return nil
 }
 
 // mergeHooks intelligently merges new hooks into existing settings,
