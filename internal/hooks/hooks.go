@@ -690,29 +690,47 @@ func RunSubagentStopHook() {
 		os.Exit(1)
 	}
 
-	// Determine task type
-	taskType := determineTaskType(data.SubagentTask)
+	// Prefer the real agent_id over the legacy subagent_id (which real
+	// payloads have never been observed to carry).
+	agentID := data.AgentID
+	if agentID == "" {
+		agentID = data.SubagentID
+	}
 
-	// Build result object
-	result := map[string]any{
-		"status":    data.Status,
-		"task_type": taskType,
+	eventData := map[string]any{
+		"agent_id":         agentID,
+		"agent_type":       data.AgentType,
+		"stop_hook_active": data.StopHookActive,
+	}
+	if data.AgentTranscriptPath != nil {
+		eventData["agent_transcript_path"] = *data.AgentTranscriptPath
+	}
+	if data.LastAssistantMessage != nil {
+		eventData["last_assistant_message"] = *data.LastAssistantMessage
+	}
+	if len(data.BackgroundTasks) > 0 {
+		eventData["background_tasks"] = data.BackgroundTasks
+	}
+	if len(data.SessionCrons) > 0 {
+		eventData["session_crons"] = data.SessionCrons
+	}
+
+	// Legacy fields: only recorded when an old-format payload supplies them.
+	if data.SubagentTask != "" {
+		eventData["subagent_task"] = data.SubagentTask
+		eventData["task_type"] = determineTaskType(data.SubagentTask)
+	}
+	if data.DurationMs != 0 {
+		eventData["duration_ms"] = data.DurationMs
+	}
+	if data.Status != "" {
+		eventData["status"] = data.Status
 	}
 	if data.Result != nil {
-		result["result"] = data.Result
+		eventData["result"] = data.Result
 	}
 	if data.Error != nil {
-		result["error"] = *data.Error
-	}
-
-	// Log the event
-	eventData := map[string]any{
-		"subagent_id":   data.SubagentID,
-		"subagent_task": data.SubagentTask,
-		"duration_ms":   data.DurationMs,
-		"status":        data.Status,
-		"task_type":     taskType,
-		"result":        result,
+		eventData["error"] = *data.Error
 	}
 
 	if err := ctx.LogEvent(models.EventSubagentStop, eventData); err != nil {
