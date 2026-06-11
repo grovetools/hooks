@@ -153,17 +153,36 @@ func defaultGetAllSessions(client daemon.Client, hideCompleted bool) ([]*models.
 	}
 
 	// Merge in jobs from the JobRunner so idle/pending chat jobs show up.
+	// Also create a daemon session lookup for enrichment.
 	seenIDs := make(map[string]struct{}, len(all))
 	seenPaths := make(map[string]struct{}, len(all))
+	daemonMap := make(map[string]*models.Session, len(all))
 	for _, s := range all {
 		seenIDs[s.ID] = struct{}{}
+		daemonMap[s.ID] = s
 		if s.JobFilePath != "" {
 			seenPaths[s.JobFilePath] = struct{}{}
 		}
 	}
 	jobs, _ := client.ListJobs(ctx, models.JobFilter{})
 	for _, j := range jobs {
-		if _, ok := seenIDs[j.ID]; ok {
+		if existing, ok := daemonMap[j.ID]; ok {
+			// Enrich the existing daemon session with reliable data from the job file
+			if existing.JobFilePath == "" {
+				jobPath := filepath.Join(j.PlanDir, j.JobFile)
+				existing.JobFilePath = jobPath
+				seenPaths[jobPath] = struct{}{}
+			}
+			if existing.PlanName == "" && j.PlanName != "" {
+				existing.PlanName = j.PlanName
+			}
+			if existing.JobTitle == "" && j.Title != "" {
+				existing.JobTitle = j.Title
+			}
+			// If daemon hardcoded interactive_agent, trust the filesystem type
+			if j.Type != "" && (existing.Type == "" || existing.Type == "interactive_agent") {
+				existing.Type = string(j.Type)
+			}
 			continue
 		}
 		jobPath := filepath.Join(j.PlanDir, j.JobFile)

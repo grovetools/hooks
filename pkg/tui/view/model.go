@@ -586,6 +586,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// fallthrough paths spawn tmux windows + return
 			// tea.Quit which would kill the host program.
 			if m.hosted && !node.isSession {
+				if node.workspace != nil {
+					focusPanel := "shell" // default
+					if node.isPlan {
+						focusPanel = "plan"
+					}
+					return m, func() tea.Msg {
+						return embed.SwitchWorkspaceRequestMsg{
+							Path:       node.workspace.Path,
+							FocusPanel: focusPanel,
+						}
+					}
+				}
 				return m, nil
 			}
 
@@ -988,30 +1000,22 @@ func (m *Model) buildDisplayTree() {
 		}
 
 		// For flow plan sessions that didn't match by working directory,
-		// try to match based on repo metadata
+		// try to match based on job file path prefix against workspace paths
 		if bestMatch == nil && session.JobFilePath != "" {
-			parts := strings.Split(session.JobFilePath, "/")
-			for i, part := range parts {
-				if part == "repos" && i+1 < len(parts) {
-					repoName := parts[i+1]
-					for _, ws := range m.workspaces {
-						if ws.Name == repoName {
-							if session.Repo != "" {
-								if strings.Contains(ws.Path, session.Repo) {
-									if ws.Depth > bestMatchDepth {
-										bestMatch = ws
-										bestMatchDepth = ws.Depth
-									}
-								}
-							} else {
-								if ws.Depth > bestMatchDepth {
-									bestMatch = ws
-									bestMatchDepth = ws.Depth
-								}
-							}
+			jobFileNorm, err := pathutil.NormalizeForLookup(session.JobFilePath)
+			if err == nil {
+				for _, ws := range m.workspaces {
+					wsPath, ok := wsNormalized[ws.Path]
+					if !ok {
+						continue // Normalization failed; skip
+					}
+					// Check if the job file path has the workspace path as a prefix
+					if strings.HasPrefix(jobFileNorm+"/", wsPath+"/") || jobFileNorm == wsPath {
+						if ws.Depth > bestMatchDepth {
+							bestMatch = ws
+							bestMatchDepth = ws.Depth
 						}
 					}
-					break
 				}
 			}
 		}

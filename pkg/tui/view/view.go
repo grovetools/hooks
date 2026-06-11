@@ -154,7 +154,11 @@ func (m Model) viewTable() string {
 			if node.isSession {
 				s := node.session
 				statusStyle := getStatusStyle(s.Status)
-				typeCol = statusStyle.Render(fmt.Sprintf("[%s]", s.Type))
+				displayType := s.Type
+				if displayType == "" || displayType == "claude_session" {
+					displayType = "claude_code"
+				}
+				typeCol = statusStyle.Render(fmt.Sprintf("[%s]", displayType))
 			}
 			// Plans don't have a TYPE column entry anymore (job count moved to WORKSPACE col)
 			row = append(row, typeCol)
@@ -330,9 +334,13 @@ func (m Model) viewTree() string {
 				}
 
 				// Format: jobTypeIcon [jobType] title status (provider)
+				displayType := s.Type
+				if displayType == "" || displayType == "claude_session" {
+					displayType = "claude_code"
+				}
 				baseInfo := fmt.Sprintf("%s %s %s %s%s",
 					jobTypeIcon,
-					statusStyle.Render(fmt.Sprintf("[%s]", s.Type)),
+					statusStyle.Render(fmt.Sprintf("[%s]", displayType)),
 					utils.TruncateStr(sessionID, 40),
 					statusStyle.Render(s.Status),
 					providerDisplay,
@@ -344,7 +352,7 @@ func (m Model) viewTree() string {
 					linkedStatusStyle := getStatusStyle(s.Status)
 					baseInfo = fmt.Sprintf("%s %s %s → %s %s%s",
 						jobTypeIcon,
-						linkedStatusStyle.Render(fmt.Sprintf("[%s]", s.Type)),
+						linkedStatusStyle.Render(fmt.Sprintf("[%s]", displayType)),
 						utils.TruncateStr(sessionID, 40),
 						utils.TruncateStr(s.ClaudeSessionID, 8),
 						linkedStatusStyle.Render(s.Status),
