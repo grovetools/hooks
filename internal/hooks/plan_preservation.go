@@ -653,13 +653,17 @@ func resolvePlanDirUsingNotebookLocator(workingDir, planName string) (string, er
 func resolvePlanNameToPathLegacy(workingDir, planName string) (string, error) {
 	// Determine the repo name - handle worktrees specially
 	repoName := filepath.Base(workingDir)
+	mainRepoPath := workingDir
 
-	// Check if this is a worktree path (contains .grove-worktrees)
-	if strings.Contains(workingDir, ".grove-worktrees") {
-		// Extract repo name from path like /path/to/repo/.grove-worktrees/branch-name
-		parts := strings.Split(workingDir, ".grove-worktrees")
-		if len(parts) > 0 {
-			repoName = filepath.Base(strings.TrimSuffix(parts[0], "/"))
+	// Worktree case: resolve the owning repository via the core layout
+	// helpers — string-splitting on ".grove-worktrees" cannot recover the
+	// owner once worktrees can live outside the repository.
+	if workspace.IsWorktreePath(workingDir) {
+		if wtRoot, ok := worktreeRootForPath(workingDir); ok {
+			if owner, ok := workspace.WorktreeOwner(wtRoot); ok {
+				repoName = filepath.Base(owner)
+				mainRepoPath = owner
+			}
 		}
 	}
 
@@ -674,7 +678,7 @@ func resolvePlanNameToPathLegacy(workingDir, planName string) (string, error) {
 		// Parent directory plans
 		filepath.Join(filepath.Dir(workingDir), "plans", planName),
 		// For worktrees, check the main repo's plans directory
-		filepath.Join(strings.Split(workingDir, ".grove-worktrees")[0], "plans", planName),
+		filepath.Join(mainRepoPath, "plans", planName),
 	}
 
 	for _, path := range possiblePaths {
@@ -684,6 +688,30 @@ func resolvePlanNameToPathLegacy(workingDir, planName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("could not find plan directory for: %s", planName)
+}
+
+// worktreeRootForPath walks up from path and returns the ancestor that sits
+// directly under one of its owner's worktree bases (the worktree root), or
+// ok=false if path is not inside a grove worktree.
+func worktreeRootForPath(path string) (string, bool) {
+	cur, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	for {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", false
+		}
+		if owner, ok := workspace.WorktreeOwner(cur); ok {
+			for _, base := range workspace.WorktreeBases(owner) {
+				if parent == base {
+					return cur, true
+				}
+			}
+		}
+		cur = parent
+	}
 }
 
 // extractRawPlanTitle extracts just the raw title from plan content without any formatting
