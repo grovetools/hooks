@@ -726,6 +726,15 @@ func RunSubagentStartHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
+	// Suppress phantom type-registration events at the source. The harness
+	// fires SubagentStart once per registered agent definition (Explore, Plan)
+	// at session init with a short, non-spawn agent_id and no transcript;
+	// forwarding those would create phantom idle ad-hoc subagents in the
+	// daemon. Only forward genuine Task/Agent spawns.
+	if !shouldForwardSubagentStart(data) {
+		return
+	}
+
 	ev := workflowEventFromSubagentStart(data, time.Now())
 	forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), ev)
 }

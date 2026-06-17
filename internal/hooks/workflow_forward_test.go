@@ -9,6 +9,44 @@ import (
 	"github.com/grovetools/core/pkg/models"
 )
 
+func TestShouldForwardSubagentStart(t *testing.T) {
+	tests := []struct {
+		name string
+		data SubagentStartInput
+		want bool
+	}{
+		{
+			// Real Agent/Task spawn: a + 16 hex (writes a transcript).
+			name: "real spawn full id kept",
+			data: SubagentStartInput{AgentID: "a62124203bfeb94f0", AgentType: "general-purpose"},
+			want: true,
+		},
+		{
+			// Phantom Explore type-registration: short a + 6 hex, no transcript.
+			name: "phantom explore short id dropped",
+			data: SubagentStartInput{AgentID: "a03e225", AgentType: "Explore"},
+			want: false,
+		},
+		{
+			name: "phantom plan short id dropped",
+			data: SubagentStartInput{AgentID: "ac81b9b", AgentType: "Plan"},
+			want: false,
+		},
+		{
+			name: "empty agent id dropped",
+			data: SubagentStartInput{AgentType: "Explore"},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldForwardSubagentStart(tt.data); got != tt.want {
+				t.Errorf("shouldForwardSubagentStart(%+v) = %v, want %v", tt.data, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractWorkflowRunID(t *testing.T) {
 	tests := []struct {
 		name string

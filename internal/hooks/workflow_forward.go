@@ -34,6 +34,35 @@ const workflowForwardTimeout = 1 * time.Second
 // workflows component) and yield no run id.
 var workflowRunIDRe = regexp.MustCompile(`/subagents/workflows/(wf_[^/]+)/`)
 
+// spawnAgentIDRe matches a genuine subagent spawn id: the literal 'a'
+// followed by exactly 16 hex digits (17 chars total), e.g.
+// "a62124203bfeb94f0". Claude Code mints this id for every real Task/Agent
+// spawn and writes its transcript at <session>/subagents/agent-<id>.jsonl.
+//
+// At session init the harness ALSO fires SubagentStart once per registered
+// agent *definition* (e.g. Explore, Plan, which have .claude/agents/*.md
+// definition files; built-ins like general-purpose do not) — a type
+// registration, not a spawn. Those carry a SHORT id (the literal 'a' + ~6
+// hex, e.g. "a03e225") and never write a per-agent transcript. The id form
+// is the reliable discriminator: an empty session_id is NOT one (real spawns
+// also log it empty at this layer), and the transcript file does not yet
+// exist when SubagentStart fires for a real spawn either.
+var spawnAgentIDRe = regexp.MustCompile(`^a[0-9a-f]{16}$`)
+
+// isSpawnAgentID reports whether agentID is a genuine spawn id (see
+// spawnAgentIDRe) rather than a phantom type-registration id.
+func isSpawnAgentID(agentID string) bool {
+	return spawnAgentIDRe.MatchString(agentID)
+}
+
+// shouldForwardSubagentStart reports whether a SubagentStart payload is a
+// genuine Task/Agent spawn worth forwarding to the daemon. Phantom
+// type-registration events (short, non-spawn agent_id) are dropped so they
+// never pollute the subagent/workflow tree with idle, transcript-less agents.
+func shouldForwardSubagentStart(data SubagentStartInput) bool {
+	return isSpawnAgentID(data.AgentID)
+}
+
 // extractWorkflowRunID returns the workflow run id embedded in an agent
 // transcript path, or "" when the path has no workflow run component
 // (ad-hoc Agent-tool spawn, or an unrecognized layout).
