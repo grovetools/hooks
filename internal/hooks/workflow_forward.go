@@ -2,13 +2,16 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"time"
 
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/sessions"
 )
 
 // WorkflowForwardingHookName is the marker-file slug that disables
@@ -60,12 +63,87 @@ func extractWorkflowName(backgroundTasks []map[string]any) string {
 	return ""
 }
 
+// agentMeta is the JSON shape of agent-<id>.meta.json files persisted by
+// Claude Code alongside agent transcripts. Simple/ad-hoc subagents (Agent
+// tool) carry a rich description; workflow subagents carry only agentType.
+type agentMeta struct {
+	AgentType   string `json:"agentType"`
+	Description string `json:"description"`
+	ToolUseID   string `json:"toolUseId"`
+}
+
+// readAgentMetaDescription reads the agent-<id>.meta.json file at the given
+// path and returns its "description" field. Returns "" on any error (missing
+// file, unreadable, malformed JSON) — enrichment is best-effort and must
+// never fail the hook.
+func readAgentMetaDescription(metaPath string) string {
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return ""
+	}
+	var meta agentMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ""
+	}
+	return meta.Description
+}
+
+// resolveAgentMetaPathFromTranscript derives the meta.json path from an
+// agent transcript path. Transcript paths have the shape:
+//
+//	.../subagents/agent-<id>.jsonl              (simple/ad-hoc)
+//	.../subagents/workflows/wf_<runId>/agent-<id>.jsonl (workflow)
+//
+// The corresponding meta.json is always a sibling: agent-<id>.meta.json.
+func resolveAgentMetaPathFromTranscript(transcriptPath string) string {
+	if transcriptPath == "" {
+		return ""
+	}
+	dir := filepath.Dir(transcriptPath)
+	base := filepath.Base(transcriptPath)
+	// agent-<id>.jsonl → agent-<id>.meta.json
+	if len(base) > 6 && base[len(base)-6:] == ".jsonl" {
+		return filepath.Join(dir, base[:len(base)-6]+".meta.json")
+	}
+	return ""
+}
+
+// findAgentMetaPathForStart locates the agent-<id>.meta.json file for a
+// SubagentStart event where no transcript path is available. It uses
+// sessions.ResolveClaudeSessionDirs to find all candidate session directories
+// and globs each for subagents/agent-<id>.meta.json, returning the first hit.
+// Returns "" if no meta file can be found — enrichment is best-effort.
+func findAgentMetaPathForStart(sessionID, agentID string) string {
+	if sessionID == "" || agentID == "" {
+		return ""
+	}
+	dirs, err := sessions.ResolveClaudeSessionDirs(sessionID)
+	if err != nil || len(dirs) == 0 {
+		return ""
+	}
+	metaFile := "agent-" + agentID + ".meta.json"
+	for _, dir := range dirs {
+		// Check direct subagents/ path (simple/ad-hoc agents)
+		candidate := filepath.Join(dir, "subagents", metaFile)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		// Check workflows subdirs (workflow subagents)
+		matches, _ := filepath.Glob(filepath.Join(dir, "subagents", "workflows", "*", metaFile))
+		if len(matches) > 0 {
+			return matches[0]
+		}
+	}
+	return ""
+}
+
 // workflowEventFromSubagentStart builds the agent_started wire event for a
 // SubagentStart payload. Start payloads are minimal: no per-agent transcript
 // path and no run attribution (RunID stays empty; the daemon enriches from
-// the journal).
+// the journal). Name is enriched from the sibling agent-<id>.meta.json when
+// available (best-effort; missing/unreadable meta files leave Name empty).
 func workflowEventFromSubagentStart(data SubagentStartInput, now time.Time) models.WorkflowEvent {
-	return models.WorkflowEvent{
+	ev := models.WorkflowEvent{
 		Kind:            models.WorkflowAgentStarted,
 		JobID:           os.Getenv("GROVE_FLOW_JOB_ID"),
 		ClaudeSessionID: data.SessionID,
@@ -74,13 +152,19 @@ func workflowEventFromSubagentStart(data SubagentStartInput, now time.Time) mode
 		Timestamp:       now,
 		Source:          models.WorkflowSourceHooks,
 	}
+	// Enrich Name from meta.json if available
+	if metaPath := findAgentMetaPathForStart(data.SessionID, data.AgentID); metaPath != "" {
+		ev.Name = readAgentMetaDescription(metaPath)
+	}
+	return ev
 }
 
 // workflowEventFromSubagentStop builds the agent_completed wire event for a
 // SubagentStop payload. RunID is extracted from agent_transcript_path when
 // it matches the .../subagents/workflows/wf_*/... shape; an empty RunID
 // means an ad-hoc Agent-tool spawn. All enrichment fields are best-effort —
-// minimal payload variants carry none of them.
+// minimal payload variants carry none of them. Name is enriched from the
+// sibling agent-<id>.meta.json when AgentTranscriptPath is available.
 func workflowEventFromSubagentStop(data SubagentStopInput, now time.Time) models.WorkflowEvent {
 	// Prefer the real agent_id over the legacy subagent_id, mirroring the
 	// events.jsonl record.
@@ -101,6 +185,10 @@ func workflowEventFromSubagentStop(data SubagentStopInput, now time.Time) models
 	if data.AgentTranscriptPath != nil {
 		ev.TranscriptPath = *data.AgentTranscriptPath
 		ev.RunID = extractWorkflowRunID(*data.AgentTranscriptPath)
+		// Enrich Name from sibling meta.json
+		if metaPath := resolveAgentMetaPathFromTranscript(*data.AgentTranscriptPath); metaPath != "" {
+			ev.Name = readAgentMetaDescription(metaPath)
+		}
 	}
 	if data.LastAssistantMessage != nil {
 		ev.LastMessage = *data.LastAssistantMessage

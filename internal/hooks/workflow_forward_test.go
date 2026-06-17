@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -220,6 +222,156 @@ func TestWorkflowEventFromSubagentStop(t *testing.T) {
 		}, now)
 		if ev.AgentID != "legacy-7" {
 			t.Errorf("AgentID = %q, want legacy-7", ev.AgentID)
+		}
+	})
+}
+
+func TestResolveAgentMetaPathFromTranscript(t *testing.T) {
+	tests := []struct {
+		name           string
+		transcriptPath string
+		wantSuffix     string
+	}{
+		{
+			name:           "simple agent transcript",
+			transcriptPath: "/home/u/.claude/projects/slug/6c1e876f/subagents/agent-ab12cd3.jsonl",
+			wantSuffix:     "/subagents/agent-ab12cd3.meta.json",
+		},
+		{
+			name:           "workflow agent transcript",
+			transcriptPath: "/home/u/.claude/projects/slug/6c1e876f/subagents/workflows/wf_d2a7bbf5-710/agent-ab12cd3.jsonl",
+			wantSuffix:     "/workflows/wf_d2a7bbf5-710/agent-ab12cd3.meta.json",
+		},
+		{
+			name:           "empty path",
+			transcriptPath: "",
+			wantSuffix:     "",
+		},
+		{
+			name:           "non-jsonl path",
+			transcriptPath: "/home/u/.claude/projects/slug/agent-ab12cd3.txt",
+			wantSuffix:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveAgentMetaPathFromTranscript(tt.transcriptPath)
+			if tt.wantSuffix == "" {
+				if got != "" {
+					t.Errorf("resolveAgentMetaPathFromTranscript(%q) = %q, want empty", tt.transcriptPath, got)
+				}
+				return
+			}
+			if !filepath.IsAbs(got) {
+				t.Errorf("resolveAgentMetaPathFromTranscript(%q) = %q, want absolute path", tt.transcriptPath, got)
+			}
+			if got[len(got)-len(tt.wantSuffix):] != tt.wantSuffix {
+				t.Errorf("resolveAgentMetaPathFromTranscript(%q) = %q, want suffix %q", tt.transcriptPath, got, tt.wantSuffix)
+			}
+		})
+	}
+}
+
+func TestReadAgentMetaDescription(t *testing.T) {
+	t.Run("valid meta.json with description", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		metaPath := filepath.Join(tmpDir, "agent-abc123.meta.json")
+		content := `{"agentType":"Explore","description":"Search for config files","toolUseId":"toolu_123"}`
+		if err := os.WriteFile(metaPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := readAgentMetaDescription(metaPath)
+		want := "Search for config files"
+		if got != want {
+			t.Errorf("readAgentMetaDescription() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("meta.json without description (workflow subagent)", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		metaPath := filepath.Join(tmpDir, "agent-def456.meta.json")
+		content := `{"agentType":"workflow-subagent"}`
+		if err := os.WriteFile(metaPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := readAgentMetaDescription(metaPath)
+		if got != "" {
+			t.Errorf("readAgentMetaDescription() = %q, want empty", got)
+		}
+	})
+
+	t.Run("missing file returns empty", func(t *testing.T) {
+		got := readAgentMetaDescription("/nonexistent/agent-xxx.meta.json")
+		if got != "" {
+			t.Errorf("readAgentMetaDescription() = %q, want empty", got)
+		}
+	})
+
+	t.Run("malformed JSON returns empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		metaPath := filepath.Join(tmpDir, "agent-bad.meta.json")
+		if err := os.WriteFile(metaPath, []byte("not valid json"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := readAgentMetaDescription(metaPath)
+		if got != "" {
+			t.Errorf("readAgentMetaDescription() = %q, want empty", got)
+		}
+	})
+}
+
+func TestWorkflowEventFromSubagentStopWithNameEnrichment(t *testing.T) {
+	now := time.Date(2026, 6, 10, 17, 7, 14, 0, time.UTC)
+
+	t.Run("enriches Name from meta.json", func(t *testing.T) {
+		t.Setenv("GROVE_FLOW_JOB_ID", "job-99")
+
+		// Create a temp directory with meta.json
+		tmpDir := t.TempDir()
+		subagentsDir := filepath.Join(tmpDir, "subagents")
+		if err := os.MkdirAll(subagentsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		metaContent := `{"agentType":"Explore","description":"Find auth handlers","toolUseId":"toolu_456"}`
+		metaPath := filepath.Join(subagentsDir, "agent-a1.meta.json")
+		if err := os.WriteFile(metaPath, []byte(metaContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		transcriptPath := filepath.Join(subagentsDir, "agent-a1.jsonl")
+		ev := workflowEventFromSubagentStop(SubagentStopInput{
+			SessionID:           "sess-1",
+			AgentID:             "a1",
+			AgentType:           "Explore",
+			AgentTranscriptPath: &transcriptPath,
+		}, now)
+
+		if ev.Name != "Find auth handlers" {
+			t.Errorf("Name = %q, want %q", ev.Name, "Find auth handlers")
+		}
+		if ev.Kind != models.WorkflowAgentCompleted {
+			t.Errorf("Kind = %v, want WorkflowAgentCompleted", ev.Kind)
+		}
+	})
+
+	t.Run("missing meta.json leaves Name empty", func(t *testing.T) {
+		t.Setenv("GROVE_FLOW_JOB_ID", "")
+
+		tmpDir := t.TempDir()
+		transcriptPath := filepath.Join(tmpDir, "agent-noMeta.jsonl")
+		ev := workflowEventFromSubagentStop(SubagentStopInput{
+			SessionID:           "sess-2",
+			AgentID:             "noMeta",
+			AgentTranscriptPath: &transcriptPath,
+		}, now)
+
+		if ev.Name != "" {
+			t.Errorf("Name = %q, want empty (no meta.json)", ev.Name)
 		}
 	})
 }
