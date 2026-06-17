@@ -111,7 +111,7 @@ func normalizeFilePath(filePath string) string {
 	if !filepath.IsAbs(filePath) {
 		return filePath
 	}
-	workingDir := getWorkingDirFromEnv()
+	workingDir := resolveWorkingDir("")
 	if workingDir == "" {
 		return filePath
 	}

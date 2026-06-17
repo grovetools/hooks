@@ -265,5 +265,5 @@ func forwardingWorkingDir(cwd string) string {
 	if cwd != "" {
 		return cwd
 	}
-	return getWorkingDirFromEnv()
+	return resolveWorkingDir("")
 }

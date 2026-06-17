@@ -401,7 +401,7 @@ func resolveFileAccessTarget(sessionID string) (planDir, jobName string) {
 	}
 
 	// Slow path: resolve via plan preservation config + flow plan current
-	workingDir := getWorkingDirFromEnv()
+	workingDir := resolveWorkingDir("")
 	if workingDir == "" {
 		return "", ""
 	}

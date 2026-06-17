@@ -50,8 +50,9 @@ func HandleExitPlanMode(ctx *HookContext, data PostToolUseInput) error {
 		return nil
 	}
 
-	// Get working directory from environment or session
-	workingDir := getWorkingDirFromEnv()
+	// Get working directory from the authoritative session cwd (falling back
+	// to os.Getwd()), never trusting $PWD over the session cwd.
+	workingDir := resolveWorkingDir(data.Cwd)
 	if workingDir == "" {
 		planLog.Debug("No working directory available, skipping plan preservation")
 		return nil
@@ -164,8 +165,9 @@ func HandlePlanEdit(ctx *HookContext, data PostToolUseInput) error {
 		return nil
 	}
 
-	// Get working directory from environment or session
-	workingDir := getWorkingDirFromEnv()
+	// Get working directory from the authoritative session cwd (falling back
+	// to os.Getwd()), never trusting $PWD over the session cwd.
+	workingDir := resolveWorkingDir(data.Cwd)
 	if workingDir == "" {
 		planLog.Debug("No working directory available, skipping plan sync")
 		return nil
@@ -512,15 +514,26 @@ func extractPlanContent(toolInput any) (string, bool) {
 	return "", false
 }
 
-// getWorkingDirFromEnv gets the working directory from environment
-func getWorkingDirFromEnv() string {
-	// Try PWD first
-	if pwd := os.Getenv("PWD"); pwd != "" {
-		return pwd
+// resolveWorkingDir resolves the working directory for plan preservation,
+// mirroring the Stop hook's cwd precedence (see resolveAsyncWorkingDir):
+// the authoritative session cwd reported by the hook payload wins, then
+// os.Getwd(), and only then the $PWD env var as a last resort.
+//
+// $PWD must never outrank the session cwd: it reflects whatever shell
+// launched the daemon, not the actual session working directory, which
+// causes daemon-vs-interactive cwd divergence.
+func resolveWorkingDir(sessionCwd string) string {
+	// Authoritative session cwd from the hook payload takes precedence.
+	if sessionCwd != "" {
+		return sessionCwd
 	}
-	// Fall back to os.Getwd()
+	// Fall back to the process working directory.
 	if wd, err := os.Getwd(); err == nil {
 		return wd
+	}
+	// Last resort: trust $PWD only when nothing better is available.
+	if pwd := os.Getenv("PWD"); pwd != "" {
+		return pwd
 	}
 	return ""
 }
