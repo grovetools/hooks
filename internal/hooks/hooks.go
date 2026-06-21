@@ -806,9 +806,14 @@ func RunSubagentStopHook() {
 
 	// Forward an agent_completed workflow event to the daemon, best-effort.
 	// RunID comes from the wf_<runId> dir embedded in agent_transcript_path
-	// (empty RunID = ad-hoc Agent-tool spawn).
-	ev := workflowEventFromSubagentStop(data, time.Now())
-	forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), ev)
+	// (empty RunID = ad-hoc Agent-tool spawn). Phantom workflow-wait stops
+	// (the main session's turn boundaries while a background Workflow runs) are
+	// filtered out so they never mint ad-hoc agent rows. The raw event was
+	// already recorded above for audit; only the daemon forward is gated.
+	if shouldForwardSubagentStop(data) {
+		ev := workflowEventFromSubagentStop(data, time.Now())
+		forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), ev)
+	}
 }
 
 // ExecuteRepoHookCommands executes on_stop commands from grove.yml

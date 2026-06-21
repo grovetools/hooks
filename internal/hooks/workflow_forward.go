@@ -63,6 +63,32 @@ func shouldForwardSubagentStart(data SubagentStartInput) bool {
 	return isSpawnAgentID(data.AgentID)
 }
 
+// shouldForwardSubagentStop reports whether a SubagentStop payload is a
+// genuine subagent completion worth forwarding to the daemon. It mirrors the
+// Start-side guard (shouldForwardSubagentStart): without it, phantom stops
+// leak into the workflow tree as ad-hoc agent rows (a completion with no
+// matching start).
+//
+// While a backgrounded Workflow() runs, the MAIN session fires a SubagentStop
+// at each turn boundary. Those carry the session's background_tasks[] (an entry
+// with type == "workflow") and an empty agent_type, and an agent_transcript_path
+// pointing at a per-agent transcript Claude Code never actually wrote. They are
+// not subagent completions, so they are dropped.
+//
+// Genuine completions are kept: a real workflow subagent's
+// agent_transcript_path embeds the wf_<runId> dir (so it attributes to its run,
+// not the ad-hoc bucket), and a real Agent/Task spawn carries a non-empty
+// agent_type (the subagent type name).
+func shouldForwardSubagentStop(data SubagentStopInput) bool {
+	if data.AgentTranscriptPath != nil && extractWorkflowRunID(*data.AgentTranscriptPath) != "" {
+		return true
+	}
+	if data.AgentType == "" && extractWorkflowName(data.BackgroundTasks) != "" {
+		return false
+	}
+	return true
+}
+
 // extractWorkflowRunID returns the workflow run id embedded in an agent
 // transcript path, or "" when the path has no workflow run component
 // (ad-hoc Agent-tool spawn, or an unrecognized layout).

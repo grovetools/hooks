@@ -47,6 +47,63 @@ func TestShouldForwardSubagentStart(t *testing.T) {
 	}
 }
 
+func TestShouldForwardSubagentStop(t *testing.T) {
+	wfRunPath := "/home/u/.claude/projects/-x/sess/subagents/workflows/wf_008adc8e-9d1/agent-a861a01693271e1b7.jsonl"
+	adhocPath := "/home/u/.claude/projects/-x/sess/subagents/agent-a912bb8b2d1810bac.jsonl"
+	wfBackgroundTasks := []map[string]any{
+		{"id": "wy8f2duwh", "name": "test-workflow", "type": "workflow", "status": "running"},
+	}
+	tests := []struct {
+		name string
+		data SubagentStopInput
+		want bool
+	}{
+		{
+			// The bug: main session's workflow-wait turn boundary — empty
+			// agent_type + a background workflow task + a transcript that was
+			// never written. Must be dropped (no phantom ad-hoc row).
+			name: "phantom workflow-wait stop dropped",
+			data: SubagentStopInput{AgentID: "a912bb8b2d1810bac", AgentType: "", AgentTranscriptPath: &adhocPath, BackgroundTasks: wfBackgroundTasks},
+			want: false,
+		},
+		{
+			// Real workflow subagent: transcript path embeds wf_<runId>, so it
+			// attributes to its run. Kept even though a workflow runs.
+			name: "real workflow subagent kept",
+			data: SubagentStopInput{AgentID: "a861a01693271e1b7", AgentType: "workflow-subagent", AgentTranscriptPath: &wfRunPath, BackgroundTasks: wfBackgroundTasks},
+			want: true,
+		},
+		{
+			// Real ad-hoc Agent/Task spawn: non-empty agent_type, no background
+			// workflow task. Kept.
+			name: "real adhoc agent spawn kept",
+			data: SubagentStopInput{AgentID: "a62124203bfeb94f0", AgentType: "Explore", AgentTranscriptPath: &adhocPath},
+			want: true,
+		},
+		{
+			// Plain stop with no enrichment fields at all: kept (no signal it
+			// is a phantom).
+			name: "minimal payload kept",
+			data: SubagentStopInput{AgentID: "a62124203bfeb94f0"},
+			want: true,
+		},
+		{
+			// Empty agent_type but NO background workflow task: not the
+			// workflow-wait shape, so kept.
+			name: "empty type without workflow task kept",
+			data: SubagentStopInput{AgentID: "a62124203bfeb94f0", AgentType: "", AgentTranscriptPath: &adhocPath},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldForwardSubagentStop(tt.data); got != tt.want {
+				t.Errorf("shouldForwardSubagentStop(%+v) = %v, want %v", tt.data, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractWorkflowRunID(t *testing.T) {
 	tests := []struct {
 		name string
@@ -316,7 +373,7 @@ func TestReadAgentMetaDescription(t *testing.T) {
 		tmpDir := t.TempDir()
 		metaPath := filepath.Join(tmpDir, "agent-abc123.meta.json")
 		content := `{"agentType":"Explore","description":"Search for config files","toolUseId":"toolu_123"}`
-		if err := os.WriteFile(metaPath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(metaPath, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -331,7 +388,7 @@ func TestReadAgentMetaDescription(t *testing.T) {
 		tmpDir := t.TempDir()
 		metaPath := filepath.Join(tmpDir, "agent-def456.meta.json")
 		content := `{"agentType":"workflow-subagent"}`
-		if err := os.WriteFile(metaPath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(metaPath, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -351,7 +408,7 @@ func TestReadAgentMetaDescription(t *testing.T) {
 	t.Run("malformed JSON returns empty", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		metaPath := filepath.Join(tmpDir, "agent-bad.meta.json")
-		if err := os.WriteFile(metaPath, []byte("not valid json"), 0644); err != nil {
+		if err := os.WriteFile(metaPath, []byte("not valid json"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -371,13 +428,13 @@ func TestWorkflowEventFromSubagentStopWithNameEnrichment(t *testing.T) {
 		// Create a temp directory with meta.json
 		tmpDir := t.TempDir()
 		subagentsDir := filepath.Join(tmpDir, "subagents")
-		if err := os.MkdirAll(subagentsDir, 0755); err != nil {
+		if err := os.MkdirAll(subagentsDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 
 		metaContent := `{"agentType":"Explore","description":"Find auth handlers","toolUseId":"toolu_456"}`
 		metaPath := filepath.Join(subagentsDir, "agent-a1.meta.json")
-		if err := os.WriteFile(metaPath, []byte(metaContent), 0644); err != nil {
+		if err := os.WriteFile(metaPath, []byte(metaContent), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
