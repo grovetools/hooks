@@ -106,6 +106,23 @@ func RunPreToolUseHook() {
 		log.Printf("Failed to log event: %v", err)
 	}
 
+	// Record the Bash command attempt to commands.jsonl. Pre rows are written
+	// as "pending"; the viewer marks them "blocked" when no matching post row
+	// arrives (e.g. the command was denied or blocked before execution). The
+	// link id bridges this pre row to its post row — Claude does not send a
+	// tool_use_id at PreToolUse, so the recorder generates and stashes its own.
+	if data.ToolName == "Bash" {
+		preCwd := data.Cwd
+		if preCwd == "" {
+			preCwd = workingDir
+		}
+		linkID := newCommandLinkID(data.SessionID)
+		storeCommandLinkID(data.SessionID, linkID)
+		if entry, ok := buildPreCommandEntry(data.ToolName, data.ToolInput, linkID, preCwd, time.Now()); ok {
+			appendCommandEntries(data.SessionID, []commandEntry{entry})
+		}
+	}
+
 	// Create tool execution record if approved
 	var toolID string
 	if response.Approved {
@@ -166,6 +183,16 @@ func RunPostToolUseHook() {
 
 	if err := ctx.LogEvent(models.EventPostToolUse, eventData); err != nil {
 		log.Printf("Failed to log event: %v", err)
+	}
+
+	// Record the Bash command outcome to commands.jsonl. The link id (stashed at
+	// PreToolUse) bridges this post row to its pre row; clear the slot afterward.
+	if data.ToolName == "Bash" {
+		linkID := getCommandLinkID(data.SessionID)
+		if entry, ok := buildPostCommandEntry(data, linkID, time.Now()); ok {
+			appendCommandEntries(data.SessionID, []commandEntry{entry})
+		}
+		clearCommandLinkID(data.SessionID)
 	}
 
 	// Handle ExitPlanMode - save Claude plans to grove-flow

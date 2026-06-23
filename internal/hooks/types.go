@@ -22,10 +22,13 @@ type PreToolUseInput struct {
 	HookEventName  string         `json:"hook_event_name"`
 	ToolName       string         `json:"tool_name"`
 	ToolInput      map[string]any `json:"tool_input"`
-	AgentID        string         `json:"agent_id,omitempty"`
-	AgentType      string         `json:"agent_type,omitempty"`
-	CurrentUUID    string         `json:"current_uuid,omitempty"`
-	ParentUUID     string         `json:"parent_uuid,omitempty"`
+	// NOTE: Claude Code does NOT send tool_use_id on the PreToolUse payload
+	// (only PostToolUse carries it), so it is intentionally absent here.
+	AgentID     string `json:"agent_id,omitempty"`
+	AgentType   string `json:"agent_type,omitempty"`
+	CurrentUUID string `json:"current_uuid,omitempty"`
+	ParentUUID  string `json:"parent_uuid,omitempty"`
+	Cwd         string `json:"cwd,omitempty"`
 }
 
 type PostToolUseInput struct {
