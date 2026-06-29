@@ -183,6 +183,20 @@ func defaultGetAllSessions(client daemon.Client, hideCompleted bool) ([]*models.
 			if j.Type != "" && (existing.Type == "" || existing.Type == "interactive_agent") {
 				existing.Type = string(j.Type)
 			}
+			// Reconcile a stale daemon session status against the job file.
+			// The daemon's in-memory Session.Status is lifecycle-managed and
+			// is NOT updated when a chat/plan job reaches a terminal state via
+			// the job file (e.g. `flow complete` clears pending_user and marks
+			// the file completed, but nothing syncs that back into the live
+			// Session). The JobCollector reads the file status fresh into
+			// j.Status, so when the file says the job is done but the daemon
+			// session still says pending_user/idle/etc., trust the file. Guard
+			// against the inverse staleness (daemon actively running while a
+			// stale file scan says "completed") by never overriding a live
+			// "running" session.
+			if isTerminalJobStatus(j.Status) && existing.Status != "running" && existing.Status != j.Status {
+				existing.Status = j.Status
+			}
 			continue
 		}
 		jobPath := filepath.Join(j.PlanDir, j.JobFile)
@@ -235,20 +249,42 @@ func defaultGetAllSessions(client daemon.Client, hideCompleted bool) ([]*models.
 	return all, nil
 }
 
+// isTerminalJobStatus reports whether a job-file status represents a settled,
+// non-resumable end state. These are the states the daemon's in-memory
+// session lifecycle does not reliably reflect (a job file can be marked
+// completed/failed/abandoned out-of-band via `flow complete`, a manual edit,
+// or the collector reconciling a dead PID), so they are authoritative over a
+// stale live session status during the session/job merge. pending_user, idle,
+// hold, and todo are deliberately excluded — they are parked-but-live states
+// the daemon owns.
+func isTerminalJobStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "abandoned":
+		return true
+	default:
+		return false
+	}
+}
+
 // DefaultFilterPreferences returns the canonical default filter set used by
 // both the standalone CLI and the embedded panel.
 func DefaultFilterPreferences() FilterPreferences {
 	return FilterPreferences{
+		// Default to active-only: the browser is primarily a live monitor,
+		// so terminal/parked states (completed, failed, error, hold, todo,
+		// abandoned) start hidden and the user opts into them via the filter
+		// overlay. interrupted stays on because an interrupted agent is often
+		// something the user wants to notice and resume.
 		StatusFilters: map[string]bool{
 			"running":      true,
 			"idle":         true,
 			"pending_user": true,
-			"completed":    true,
 			"interrupted":  true,
-			"failed":       true,
-			"error":        true,
-			"hold":         true,
-			"todo":         true,
+			"completed":    false,
+			"failed":       false,
+			"error":        false,
+			"hold":         false,
+			"todo":         false,
 			"abandoned":    false,
 		},
 		TypeFilters: map[string]bool{

@@ -17,8 +17,8 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
-	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
@@ -980,21 +980,32 @@ func (m *Model) buildDisplayTree() {
 		var bestMatch *workspace.WorkspaceNode
 		bestMatchDepth := -1
 
-		// Normalize paths for case-insensitive comparison on macOS/Windows
-		sessionWorkDir, err := pathutil.NormalizeForLookup(session.WorkingDirectory)
-		if err != nil {
-			continue // Skip if path normalization fails
+		// Normalize the session's working dir for case-insensitive prefix
+		// matching on macOS/Windows. Skip working-dir matching entirely when
+		// it is empty: pathutil.NormalizeForLookup("") resolves to the
+		// process cwd (filepath.Abs("") == cwd, no error), which would
+		// spuriously nest the session under whatever workspace the daemon
+		// happens to be running in — the "random" nesting bug. An empty
+		// working dir falls through to the JobFilePath match below, which is
+		// the reliable signal for daemon-spawned plan/chat jobs.
+		sessionWorkDir := ""
+		if session.WorkingDirectory != "" {
+			if norm, err := pathutil.NormalizeForLookup(session.WorkingDirectory); err == nil {
+				sessionWorkDir = norm
+			}
 		}
 
-		for _, ws := range m.workspaces {
-			wsPath, ok := wsNormalized[ws.Path]
-			if !ok {
-				continue // Normalization failed above; skip.
-			}
-			if strings.HasPrefix(sessionWorkDir+"/", wsPath+"/") || sessionWorkDir == wsPath {
-				if ws.Depth > bestMatchDepth {
-					bestMatch = ws
-					bestMatchDepth = ws.Depth
+		if sessionWorkDir != "" {
+			for _, ws := range m.workspaces {
+				wsPath, ok := wsNormalized[ws.Path]
+				if !ok {
+					continue // Normalization failed above; skip.
+				}
+				if strings.HasPrefix(sessionWorkDir+"/", wsPath+"/") || sessionWorkDir == wsPath {
+					if ws.Depth > bestMatchDepth {
+						bestMatch = ws
+						bestMatchDepth = ws.Depth
+					}
 				}
 			}
 		}
