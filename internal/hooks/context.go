@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/nav/pkg/tmux"
+	notificationsconfig "github.com/grovetools/notify/pkg/config"
 
 	"github.com/grovetools/hooks/internal/storage"
 	"github.com/grovetools/hooks/internal/utils"
@@ -77,8 +78,18 @@ func NewHookContext() (*HookContext, error) {
 	// Create daemon-backed storage. Client inherits GROVE_SCOPE from env.
 	backend := storage.NewDaemonBackend()
 
-	// Load configuration (placeholder for now)
+	// Bridge the real notification config (ntfy + system) from grove config
+	// into the hook context. Previously this was an empty placeholder, which
+	// silently disabled every channel: the Stop hook's ntfy push gates on
+	// Ntfy.Enabled+Topic and the Notification hook's system popup gates on
+	// System.Levels, both of which were always zero-valued.
 	loadedCfg := &NotificationsConfig{}
+	if loaded := notificationsconfig.Load(); loaded != nil {
+		loadedCfg.Ntfy.Enabled = loaded.Ntfy.Enabled
+		loadedCfg.Ntfy.URL = loaded.Ntfy.URL
+		loadedCfg.Ntfy.Topic = loaded.Ntfy.Topic
+		loadedCfg.System.Levels = loaded.System.Levels
+	}
 
 	return &HookContext{
 		Input:        baseInput,

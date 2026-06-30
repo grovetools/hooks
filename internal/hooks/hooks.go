@@ -99,6 +99,10 @@ func RunNotificationHook() {
 				"message":    data.Message,
 			}).Debug("Set session status to pending_user (agent waiting on user)")
 		}
+
+		// Push an ntfy notification so the user knows an agent is blocked
+		// waiting on them (the "waiting-on-you" half of the notify scope).
+		sendWaitingNtfyNotification(ctx, actualSessionID, data.Message)
 	}
 }
 
@@ -734,9 +738,11 @@ func RunStopHook() {
 			}
 		}
 
-		// Session is idle - keep directory for later resumption
-		// Just send notification
-		sendNtfyNotification(ctx, data, "stopped")
+		// Session is idle - keep directory for later resumption.
+		// Deliberately NO ntfy push here: the Stop hook fires at the end of
+		// every turn, so pushing on idle would notify on every turn-end. ntfy
+		// is scoped to (a) genuine completion (above) and (b) waiting-on-you,
+		// which the Notification hook handles.
 	}
 }
 

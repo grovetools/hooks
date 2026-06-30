@@ -69,7 +69,19 @@ func isWaitingNotification(msg string) bool {
 }
 
 func shouldSendSystemNotification(ctx *HookContext, data NotificationInput) bool {
-	// Check if the notification level is in the configured levels
+	// Never pop a blank banner.
+	if strings.TrimSpace(data.Message) == "" {
+		return false
+	}
+	// Claude Code emits an empty level for its attention-worthy notifications
+	// (permission prompts, "waiting for your input", "needs your attention").
+	// An exact level match would silently drop all of those, so treat an
+	// unspecified level as always-notify — the Notification hook only fires
+	// when Claude actually wants the user.
+	if data.Level == "" {
+		return true
+	}
+	// Otherwise honor the configured level allowlist.
 	for _, enabledLevel := range ctx.Config.System.Levels {
 		if data.Level == enabledLevel {
 			return true
@@ -163,83 +175,100 @@ func normalizeFilePath(filePath string) string {
 	return rel
 }
 
+// ntfySessionContext resolves the human-facing context for an ntfy message:
+// the agent label (job title, falling back to the session id) and a set of
+// context lines (plan, worktree, repo) so the user can tell at a glance WHICH
+// agent in WHICH worktree/plan the notification is about.
+func ntfySessionContext(ctx *HookContext, sessionID string) (label string, contextLines []string) {
+	label = sessionID
+	sessionData, err := ctx.Storage.GetSession(sessionID)
+	if err != nil || sessionData == nil {
+		return label, contextLines
+	}
+	session, ok := sessionData.(*models.Session)
+	if !ok || session == nil {
+		return label, contextLines
+	}
+	if session.JobTitle != "" {
+		label = session.JobTitle
+	}
+	if session.PlanName != "" {
+		contextLines = append(contextLines, fmt.Sprintf("📂 plan: %s", session.PlanName))
+	}
+	// Branch is the grove worktree name; only show it when it adds information
+	// beyond the plan name (they're often identical for flow plans).
+	if session.Branch != "" && session.Branch != session.PlanName {
+		contextLines = append(contextLines, fmt.Sprintf("🌿 worktree: %s", session.Branch))
+	}
+	if session.Repo != "" {
+		contextLines = append(contextLines, fmt.Sprintf("📦 repo: %s", session.Repo))
+	}
+	return label, contextLines
+}
+
+// sendNtfyNotification pushes an ntfy notification when an agent finishes
+// (the "completion" half of the notify scope). Title carries the agent name and
+// outcome; body carries plan/worktree/repo + duration.
 func sendNtfyNotification(ctx *HookContext, data StopInput, status string) {
 	cfg := ctx.Config.Ntfy
 	if !cfg.Enabled || cfg.Topic == "" {
 		return
 	}
 
-	// Get session details for context
-	sessionData, err := ctx.Storage.GetSession(data.SessionID)
-	var repo, branch, sessionType, jobTitle, planName string
+	label, lines := ntfySessionContext(ctx, data.SessionID)
+	title := fmt.Sprintf("✅ %s — %s", label, status)
 
-	if err == nil && sessionData != nil {
-		if session, ok := sessionData.(*models.Session); ok {
-			repo = session.Repo
-			branch = session.Branch
-			sessionType = session.Type
-			jobTitle = session.JobTitle
-			planName = session.PlanName
-		}
-	}
-
-	// Construct title based on session type
-	var title string
-	isJob := sessionType == "oneshot_job" || sessionType == "agent_job" || sessionType == "interactive_agent" || sessionType == "isolated_agent" || sessionType == "chat"
-
-	if isJob && data.SessionID != "" {
-		// For jobs, use the job name (session ID) as the title
-		title = fmt.Sprintf("%s %s", data.SessionID, status)
-	} else if isJob {
-		title = fmt.Sprintf("Job %s", status)
-	} else {
-		title = fmt.Sprintf("Session %s", status)
-	}
-
-	// Build message with repo/worktree context
-	var messageParts []string
-
-	// Add job type for jobs
-	if isJob && sessionType != "" {
-		messageParts = append(messageParts, fmt.Sprintf("🔷 %s", sessionType))
-	}
-
-	// Add job title if different from session ID
-	if jobTitle != "" && jobTitle != data.SessionID {
-		messageParts = append(messageParts, fmt.Sprintf(" %s", jobTitle))
-	}
-
-	// Add plan name for jobs
-	if planName != "" {
-		messageParts = append(messageParts, fmt.Sprintf("📂 Plan: %s", planName))
-	}
-
-	// Add repo info
-	if repo != "" {
-		messageParts = append(messageParts, fmt.Sprintf(" %s", repo))
-	}
-
-	// Add branch info
-	if branch != "" {
-		messageParts = append(messageParts, fmt.Sprintf("🌿 %s", branch))
-	}
-
-	// Add duration
 	if data.DurationMs > 0 {
-		durationSec := data.DurationMs / 1000
-		messageParts = append(messageParts, fmt.Sprintf("⏱️  %ds", durationSec))
+		lines = append(lines, fmt.Sprintf("⏱️ %ds", data.DurationMs/1000))
 	}
-
-	// Add exit reason if present
 	if data.ExitReason != "" {
-		messageParts = append(messageParts, fmt.Sprintf("Status: %s", data.ExitReason))
+		lines = append(lines, fmt.Sprintf("status: %s", data.ExitReason))
+	}
+	message := strings.Join(lines, "\n")
+	if message == "" {
+		message = "Agent finished."
 	}
 
-	message := strings.Join(messageParts, "\n")
-
-	// Send ntfy notification
-	if err := notifications.SendNtfy(cfg.URL, cfg.Topic, title, message, "default", nil); err != nil {
+	if err := notifications.SendNtfy(cfg.URL, cfg.Topic, title, message, "default", []string{"white_check_mark"}); err != nil {
 		log.Printf("Failed to send ntfy notification: %v", err)
+	}
+}
+
+// sendWaitingNtfyNotification pushes an ntfy notification when an agent blocks
+// waiting on the user (permission prompt / plan approval / AskUserQuestion).
+// This is the "waiting-on-you" half of the notify scope, driven by the
+// Notification hook. Title carries the agent name and what it wants; body
+// carries the raw prompt text + plan/worktree/repo context.
+func sendWaitingNtfyNotification(ctx *HookContext, sessionID, rawMessage string) {
+	cfg := ctx.Config.Ntfy
+	if !cfg.Enabled || cfg.Topic == "" {
+		return
+	}
+
+	label, lines := ntfySessionContext(ctx, sessionID)
+
+	// Summarize what the agent is blocked on, from the notification wording.
+	action := "waiting for your answer"
+	lower := strings.ToLower(rawMessage)
+	switch {
+	case strings.Contains(lower, "permission"):
+		action = "needs permission"
+	case strings.Contains(lower, "approval"), strings.Contains(lower, "approve"):
+		action = "needs plan approval"
+	}
+	title := fmt.Sprintf("⏳ %s — %s", label, action)
+
+	body := lines
+	if rawMessage != "" {
+		body = append([]string{rawMessage}, body...)
+	}
+	message := strings.Join(body, "\n")
+	if message == "" {
+		message = "Agent is waiting on you."
+	}
+
+	if err := notifications.SendNtfy(cfg.URL, cfg.Topic, title, message, "high", []string{"hourglass"}); err != nil {
+		log.Printf("Failed to send waiting ntfy notification: %v", err)
 	}
 }
 
