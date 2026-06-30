@@ -27,6 +27,47 @@ func (e *HookBlockingError) Error() string {
 
 // Helper functions
 
+// waitingNotificationPatterns are case-insensitive substrings of Claude Code's
+// Notification `message` that indicate the agent is blocked waiting on the user
+// (a tool-permission prompt, a plan-approval prompt, or an AskUserQuestion
+// survey). Pinned to the strings actually observed in the hook event log
+// (~/.local/state/grove/hooks/events.jsonl); wording drift is a one-line edit.
+//
+// Observed messages this covers (blocked-on-user):
+//   - "Claude needs your permission"                  -> "permission"
+//   - "Claude Code needs your approval for the plan"  -> "needs your"
+//   - "Claude Code needs your attention"              -> "needs your"
+//
+// AskUserQuestion is covered here too: a live probe of the event log
+// (113 invocations) showed it emits "Claude needs your permission" in 103 cases
+// and "Claude Code needs your attention" in 1 — both matched above; the
+// remaining 9 emitted no notification (auto-approved, not blocked on a human).
+//
+// Deliberately NOT matched: "Claude is waiting for your input". The probe showed
+// that string is a generic idle nudge fired ~60s after EVERY Stop (turn-end),
+// not a blocked-on-survey signal. Matching it would wrongly flip every ordinary
+// idle agent to pending_user, which the ticket forbids. The Stop hook already
+// marks genuine turn-end as idle/completed, so ordinary idle needs no handling
+// here.
+var waitingNotificationPatterns = []string{
+	"permission",
+	"needs your",
+}
+
+// isWaitingNotification reports whether a Notification message indicates the
+// agent is blocked waiting on the user, so its session should be marked
+// pending_user. The match is case-insensitive substring against
+// waitingNotificationPatterns.
+func isWaitingNotification(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, pattern := range waitingNotificationPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func shouldSendSystemNotification(ctx *HookContext, data NotificationInput) bool {
 	// Check if the notification level is in the configured levels
 	for _, enabledLevel := range ctx.Config.System.Levels {

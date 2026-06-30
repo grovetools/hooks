@@ -64,6 +64,42 @@ func RunNotificationHook() {
 	if err := ctx.Storage.LogNotification(data.SessionID, notification); err != nil {
 		log.Printf("Failed to log notification: %v", err)
 	}
+
+	// If this notification indicates the agent is blocked waiting on the user
+	// (permission prompt, plan approval, or AskUserQuestion survey), mark the
+	// session pending_user so flow surfaces it instead of "running". This is an
+	// independent concern from OS notifications, so it is NOT gated behind
+	// shouldSendSystemNotification. The next PreToolUse flips it back to running
+	// (see EnsureSessionExists), and the Stop hook handles genuine turn-end.
+	if isWaitingNotification(data.Message) {
+		// For interactive_agent sessions the directory is named with the Claude
+		// UUID, but the real session_id is the flow job ID. Mirror the Stop
+		// hook: read metadata.json to resolve the actual session id.
+		actualSessionID := data.SessionID
+		metadataFile := filepath.Join(paths.StateDir(), "hooks", "sessions", data.SessionID, "metadata.json")
+		if metadataContent, err := os.ReadFile(metadataFile); err == nil {
+			var metadata struct {
+				SessionID string `json:"session_id"`
+			}
+			if err := json.Unmarshal(metadataContent, &metadata); err == nil && metadata.SessionID != "" {
+				actualSessionID = metadata.SessionID
+			}
+		}
+
+		slog := logging.NewLogger("hooks.notification")
+		if err := ctx.Storage.UpdateSessionStatus(actualSessionID, "pending_user"); err != nil {
+			slog.WithFields(logrus.Fields{
+				"session_id": actualSessionID,
+				"message":    data.Message,
+				"error":      err.Error(),
+			}).Warn("Failed to set session status to pending_user")
+		} else {
+			slog.WithFields(logrus.Fields{
+				"session_id": actualSessionID,
+				"message":    data.Message,
+			}).Debug("Set session status to pending_user (agent waiting on user)")
+		}
+	}
 }
 
 func RunPreToolUseHook() {

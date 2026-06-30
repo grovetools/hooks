@@ -159,7 +159,11 @@ func (hc *HookContext) EnsureSessionExists(sessionID, transcriptPath string) err
 		// transition to running — the agent is resuming after an idle period.
 		if existingSessionData, err := hc.Storage.GetSession(actualSessionID); err == nil && existingSessionData != nil {
 			if session, ok := existingSessionData.(*models.Session); ok && session != nil {
-				if session.Status == "idle" {
+				// idle resumes on the next tool call; pending_user means the
+				// agent was blocked on a permission/question prompt and the user
+				// has now answered — the arriving PreToolUse is the resume, so
+				// flip it back to running.
+				if session.Status == "idle" || session.Status == "pending_user" {
 					_ = hc.Storage.UpdateSessionStatus(actualSessionID, "running")
 				}
 				if session.Status == "idle" || session.Status == "running" || session.Status == "pending_user" {
