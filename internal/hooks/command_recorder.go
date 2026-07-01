@@ -32,11 +32,21 @@ const (
 	cmdPhasePre  = "pre"
 	cmdPhasePost = "post"
 
-	cmdOutcomePending  = "pending"   // pre row: outcome not yet known
-	cmdOutcomeRanOK    = "ran_ok"    // post row: tool_error == nil
-	cmdOutcomeRanError = "ran_error" // post row: tool_error != nil
-	cmdOutcomeBlocked  = "blocked"   // viewer-derived: pre seen, no post
+	cmdOutcomePending       = "pending"        // pre row: outcome not yet known
+	cmdOutcomeRanOK         = "ran_ok"         // post row: tool_error == nil
+	cmdOutcomeRanError      = "ran_error"      // post row: tool_error != nil
+	cmdOutcomeSandboxDenied = "sandbox_denied" // post row: sandbox blocked a filesystem write (EPERM)
+	cmdOutcomeBlocked       = "blocked"        // viewer-derived: pre seen, no post
 )
+
+// sandboxWriteDenialMarker is the errno text a sandboxed filesystem write-denial
+// leaves in the Bash tool_response. Verified against real PostToolUse payloads:
+// Claude Code surfaces NO structured sandbox-violation field — tool_response is
+// the standard Bash result object ({stdout,stderr,interrupted,isImage,...}) and
+// the denial's only trace is this "operation not permitted" (EPERM) string in
+// stdout/stderr, often with tool_error still nil (the command may exit 0). Text
+// scanning is therefore the only available signal.
+const sandboxWriteDenialMarker = "operation not permitted"
 
 // commandEntry is one JSONL row recording a Bash command attempt or outcome.
 type commandEntry struct {
@@ -108,7 +118,10 @@ func buildPreCommandEntry(toolName string, toolInput any, linkID, cwd string, no
 
 // buildPostCommandEntry constructs the "post" row for a Bash PostToolUse event.
 // It returns ok=false for non-Bash tools or inputs with no command string. The
-// outcome is derived from tool_error: ran_error when present, ran_ok otherwise.
+// outcome is: sandbox_denied when a filesystem write-denial marker is found in
+// tool_response, else ran_error when tool_error is set, else ran_ok. The sandbox
+// check runs first because a denial can leave tool_error either set (non-zero
+// exit) or nil (exit 0), and it must win in both cases.
 func buildPostCommandEntry(data PostToolUseInput, linkID string, now time.Time) (commandEntry, bool) {
 	if data.ToolName != "Bash" {
 		return commandEntry{}, false
@@ -118,7 +131,10 @@ func buildPostCommandEntry(data PostToolUseInput, linkID string, now time.Time) 
 		return commandEntry{}, false
 	}
 	outcome := cmdOutcomeRanOK
-	if data.ToolError != nil {
+	switch {
+	case responseIndicatesSandboxDenial(data.ToolResponse):
+		outcome = cmdOutcomeSandboxDenied
+	case data.ToolError != nil:
 		outcome = cmdOutcomeRanError
 	}
 	return commandEntry{
@@ -132,6 +148,43 @@ func buildPostCommandEntry(data PostToolUseInput, linkID string, now time.Time) 
 		Outcome:     outcome,
 		DurationMs:  data.ToolDurationMs,
 	}, true
+}
+
+// responseIndicatesSandboxDenial reports whether a PostToolUse tool_response
+// carries the sandbox filesystem write-denial marker. tool_response decodes from
+// JSON as either the Bash result object (a map with stdout/stderr string fields)
+// or, in some error shapes, a bare string; both are scanned case-insensitively.
+//
+// Scope: filesystem write-denials only (the clear EPERM signal). Network denials
+// surface as connection timeouts that are indistinguishable from real network
+// failures, so they are deliberately NOT classified as sandbox denials here.
+func responseIndicatesSandboxDenial(resp any) bool {
+	text := responseText(resp)
+	if text == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(text), sandboxWriteDenialMarker)
+}
+
+// responseText flattens a PostToolUse tool_response into scannable text: the
+// stdout+stderr fields of the Bash result object, or the value itself when it is
+// a bare string. Anything else yields "".
+func responseText(resp any) string {
+	switch v := resp.(type) {
+	case string:
+		return v
+	case map[string]any:
+		var b strings.Builder
+		for _, key := range []string{"stdout", "stderr"} {
+			if s, ok := v[key].(string); ok {
+				b.WriteString(s)
+				b.WriteByte('\n')
+			}
+		}
+		return b.String()
+	default:
+		return ""
+	}
 }
 
 // Command link-id bridge: PreToolUse generates a link id and stashes it in a

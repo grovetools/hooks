@@ -114,6 +114,58 @@ func TestBuildPostCommandEntry(t *testing.T) {
 		}
 	})
 
+	t.Run("sandbox write-denial in tool_response becomes sandbox_denied", func(t *testing.T) {
+		// A denial can leave the command exit 0 (tool_error nil): the EPERM text
+		// lives only in tool_response stdout/stderr. It must still be classified.
+		entry, ok := buildPostCommandEntry(PostToolUseInput{
+			ToolName:  "Bash",
+			ToolInput: map[string]any{"command": "touch out/file"},
+			ToolResponse: map[string]any{
+				"stdout":      "touch: out/file: operation not permitted\n",
+				"stderr":      "",
+				"interrupted": false,
+			},
+		}, "link-sbx", now)
+		if !ok {
+			t.Fatal("expected ok")
+		}
+		if entry.Outcome != cmdOutcomeSandboxDenied {
+			t.Errorf("outcome = %q, want %q", entry.Outcome, cmdOutcomeSandboxDenied)
+		}
+	})
+
+	t.Run("sandbox denial wins over a non-zero tool_error", func(t *testing.T) {
+		// When the denial also flips the command to a non-zero exit, sandbox_denied
+		// must still win the classification over the generic ran_error.
+		entry, ok := buildPostCommandEntry(PostToolUseInput{
+			ToolName:     "Bash",
+			ToolInput:    map[string]any{"command": "cp a.out bin/hooks"},
+			ToolResponse: map[string]any{"stderr": "cp: bin/hooks: Operation not permitted"},
+			ToolError:    strptr("exit status 1"),
+		}, "link-sbx-err", now)
+		if !ok {
+			t.Fatal("expected ok")
+		}
+		if entry.Outcome != cmdOutcomeSandboxDenied {
+			t.Errorf("outcome = %q, want %q (sandbox beats ran_error)", entry.Outcome, cmdOutcomeSandboxDenied)
+		}
+	})
+
+	t.Run("ordinary error text does not trip the sandbox detector", func(t *testing.T) {
+		entry, ok := buildPostCommandEntry(PostToolUseInput{
+			ToolName:     "Bash",
+			ToolInput:    map[string]any{"command": "go build ./..."},
+			ToolResponse: map[string]any{"stderr": "some_pkg.go:10: undefined: Foo"},
+			ToolError:    strptr("exit status 2"),
+		}, "link-plain-err", now)
+		if !ok {
+			t.Fatal("expected ok")
+		}
+		if entry.Outcome != cmdOutcomeRanError {
+			t.Errorf("outcome = %q, want %q", entry.Outcome, cmdOutcomeRanError)
+		}
+	})
+
 	t.Run("non-bash and empty command skipped", func(t *testing.T) {
 		if _, ok := buildPostCommandEntry(PostToolUseInput{ToolName: "Read", ToolInput: map[string]any{"file_path": "/a"}}, "", now); ok {
 			t.Error("expected non-Bash skipped")
