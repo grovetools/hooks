@@ -484,7 +484,7 @@ func resolveFileAccessTarget(sessionID string) (planDir, jobName string) {
 
 func RunStopHook() {
 	slog := logging.NewLogger("hooks.stop")
-	slog.Info("RunStopHook() called")
+	slog.Debug("RunStopHook() called")
 
 	// Write to a known debug file for troubleshooting
 	debugFile, _ := os.OpenFile(os.ExpandEnv("$HOME/.grove/hooks-debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -503,8 +503,7 @@ func RunStopHook() {
 	// Log the raw input to help debug exit_reason issues
 	slog.WithFields(logrus.Fields{
 		"raw_input_length": len(ctx.RawInput),
-		"raw_input":        string(ctx.RawInput),
-	}).Info("HookContext initialized with raw input")
+	}).Debug("HookContext initialized with raw input")
 
 	var data StopInput
 	if err := json.Unmarshal(ctx.RawInput, &data); err != nil {
@@ -518,7 +517,7 @@ func RunStopHook() {
 		"session_id":  data.SessionID,
 		"exit_reason": data.ExitReason,
 		"duration_ms": data.DurationMs,
-	}).Info("StopHook invoked")
+	}).Debug("StopHook invoked")
 
 	// For interactive_agent sessions, the session directory is named with the Claude UUID,
 	// but the actual session_id is the flow job ID. Read metadata to get the correct ID.
@@ -563,7 +562,7 @@ func RunStopHook() {
 				"directory":         data.SessionID,
 				"provider":          provider,
 				"session_type":      sessionType,
-			}).Info("Read session details from filesystem metadata")
+			}).Debug("Read session details from filesystem metadata")
 		}
 	}
 
@@ -599,7 +598,7 @@ func RunStopHook() {
 				"provider":      provider,
 				"job_file_path": jobFilePath,
 				"working_dir":   workingDir,
-			}).Info("Session details after daemon lookup")
+			}).Debug("Session details after daemon lookup")
 		}
 	}
 
@@ -641,6 +640,7 @@ func RunStopHook() {
 	isComplete := outcome.IsComplete
 
 	slog.WithFields(logrus.Fields{
+		"event":             "session.stopped",
 		"session_type":      sessionType,
 		"provider":          provider,
 		"exit_reason":       data.ExitReason,
@@ -663,14 +663,14 @@ func RunStopHook() {
 			"session_id":    actualSessionID,
 			"final_status":  finalStatus,
 			"job_file_path": jobFilePath,
-		}).Info("Session marked as complete, processing completion actions")
+		}).Debug("Session marked as complete, processing completion actions")
 
 		// If this session is linked to a grove-flow job, automatically complete it
 		// Only do this when the session is actually complete, not when it's just going idle
 		if jobFilePath != "" {
 			slog.WithFields(logrus.Fields{
 				"job_file_path": jobFilePath,
-			}).Info("Auto-completing linked flow job")
+			}).Debug("Auto-completing linked flow job")
 			cmd := delegation.Command("flow", "plan", "complete", jobFilePath)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				// This isn't a fatal error for the hook itself, so just log it.
@@ -683,7 +683,7 @@ func RunStopHook() {
 			} else {
 				slog.WithFields(logrus.Fields{
 					"job_file_path": jobFilePath,
-				}).Info("Successfully auto-completed flow job")
+				}).Debug("Successfully auto-completed flow job")
 			}
 		}
 
@@ -722,7 +722,7 @@ func RunStopHook() {
 		slog.WithFields(logrus.Fields{
 			"session_id":   actualSessionID,
 			"final_status": finalStatus,
-		}).Info("Session set to idle, preserving directory for resumption")
+		}).Debug("Session set to idle, preserving directory for resumption")
 
 		// Update the job file status to idle if this is a grove-flow managed session
 		if jobFilePath != "" && finalStatus == "idle" {
@@ -734,7 +734,7 @@ func RunStopHook() {
 			} else {
 				slog.WithFields(logrus.Fields{
 					"job_file_path": jobFilePath,
-				}).Info("Updated job file status to idle")
+				}).Debug("Updated job file status to idle")
 			}
 		}
 
