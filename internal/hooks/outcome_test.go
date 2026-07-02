@@ -55,6 +55,39 @@ func TestDetermineOutcome(t *testing.T) {
 			wantDone:   false,
 		},
 
+		// pi sessions (per-turn like opencode; extension sends "" for
+		// agent_end and "exited" for session_shutdown reason "quit")
+		{
+			name:       "pi empty exit reason (agent_end) means idle",
+			ctx:        StopContext{SessionType: "interactive_agent", Provider: "pi", ExitReason: ""},
+			wantStatus: "idle",
+			wantDone:   false,
+		},
+		{
+			name:       "pi exited (session_shutdown quit) marks terminal",
+			ctx:        StopContext{SessionType: "interactive_agent", Provider: "pi", ExitReason: "exited"},
+			wantStatus: "completed",
+			wantDone:   true,
+		},
+		{
+			name:       "pi error marks failed",
+			ctx:        StopContext{SessionType: "interactive_agent", Provider: "pi", ExitReason: "error"},
+			wantStatus: "failed",
+			wantDone:   true,
+		},
+		{
+			name:       "pi killed marks failed",
+			ctx:        StopContext{SessionType: "interactive_agent", Provider: "pi", ExitReason: "killed"},
+			wantStatus: "failed",
+			wantDone:   true,
+		},
+		{
+			name:       "pi oneshot job still always completes",
+			ctx:        StopContext{SessionType: "oneshot_job", Provider: "pi", ExitReason: ""},
+			wantStatus: "completed",
+			wantDone:   true,
+		},
+
 		// Regular claude/codex sessions
 		{
 			name:       "claude completed marks complete",

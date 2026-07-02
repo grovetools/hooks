@@ -34,6 +34,27 @@ func DetermineOutcome(ctx StopContext) SessionOutcome {
 		return SessionOutcome{Status: "idle", IsComplete: false}
 	}
 
+	if ctx.Provider == "pi" {
+		// pi is per-turn like opencode in interactive mode: the grove
+		// extension forwards agent_end (end of each agent loop, process still
+		// alive awaiting input) with an empty exit_reason -> idle, never
+		// complete. Job completion stays explicit (`flow plan complete` /
+		// TUI 'c') — pi has no dedicated task-completion signal.
+		switch ctx.ExitReason {
+		case "error", "killed", "interrupted":
+			return SessionOutcome{Status: "failed", IsComplete: true}
+		case "exited":
+			// session_shutdown(reason="quit"): the pi process is gone for
+			// good. Mark the session terminal so it doesn't linger as a
+			// ghost idle row (new/resume/fork/reload shutdowns are session
+			// replacement and are filtered in the extension, never sent).
+			return SessionOutcome{Status: "completed", IsComplete: true}
+		default:
+			// End of turn (agent_end) — idle, awaiting the user.
+			return SessionOutcome{Status: "idle", IsComplete: false}
+		}
+	}
+
 	// Regular claude/codex sessions: use exit reason to determine status
 	if ctx.ExitReason == "completed" || ctx.ExitReason == "error" || ctx.ExitReason == "interrupted" || ctx.ExitReason == "killed" {
 		return SessionOutcome{Status: "completed", IsComplete: true}
