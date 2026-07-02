@@ -1,19 +1,49 @@
+// Grove integration plugin for opencode — version 2.0.0 (see GROVE_PLUGIN_VERSION).
+//
+// Embedded into the grove-hooks binary and installed to
+// ~/.config/opencode/plugin/grove-integration.ts by `hooks opencode install`.
+// Compare installed vs embedded versions with `hooks opencode status`.
+//
+// Design constraint (v2): ALL session bookkeeping is routed through
+// `grove hooks <event>` shell-outs (the Go session pipeline). This plugin
+// does NOT open the hooks database or talk to the daemon directly — v1's
+// direct SQLite writes duplicated Go schema knowledge and wrote to a store
+// the Go pipeline no longer reads. The only filesystem writes left
+// here are (a) the flow-preseeded session rename dance, (b) metadata
+// enrichment with the opencode transcript pointer (native_session_id +
+// opencode_storage_root), and (c) a thin registration fallback when the
+// `grove` binary is unavailable, so sessions stay discoverable.
+//
+// Event wiring (event names/payloads per @opencode-ai/sdk Event types;
+// verified against packages/schema/src/v1/session.ts and
+// session-status-event.ts in the opencode source):
+//   - session.created      -> flow rename dance (if GROVE_FLOW_JOB_ID) +
+//                             `grove hooks session-start` + pointer enrichment
+//   - session.status(busy/retry) -> `grove hooks session-status` (running)
+//   - session.idle         -> `grove hooks stop` with empty exit_reason
+//                             (end of turn -> idle; opencode never
+//                             auto-completes — deliberate)
+//   - session.deleted      -> `grove hooks session-end` (terminal + cleanup)
+//   - tool.execute.before  -> `grove hooks session-status` (running),
+//                             throttled
+//
+// The Go pipeline resolves the provider from GROVE_AGENT_PROVIDER (exported
+// on every shell-out below, and by flow for flow-launched sessions) and maps
+// the native opencode session id to the flow job id via the session
+// directory's metadata.json.
+
+export const GROVE_PLUGIN_VERSION = "2.0.0";
+
 import type { Plugin } from "@opencode-ai/plugin";
-import { Database } from "bun:sqlite";
 import { join } from "path";
 import {
   mkdirSync,
-  rmSync,
   writeFileSync,
   existsSync,
   appendFileSync,
   renameSync,
   readFileSync,
 } from "fs";
-
-// This plugin is embedded into the hooks binary and installed via `hooks opencode install`.
-// It connects to the hooks SQLite database and creates a file-based
-// session registry to make opencode sessions discoverable by the hooks system.
 
 // --- XDG Path Resolution ---
 // Call `core paths` to get XDG-compliant paths for Grove directories
@@ -43,6 +73,17 @@ function getGrovePaths(): GrovePaths | null {
   }
 }
 
+// opencodeStorageRoot mirrors opencode's Global.Path.data ("xdg-basedir"
+// data dir + "/opencode") + "/storage" — the fragment store that holds
+// session/<projectID>/<ses_*>.json, message/<sessionID>/msg_*.json and
+// part/<messageID>/prt_*.json. Recorded into session metadata so agentlogs
+// can assemble the transcript without scanning.
+function opencodeStorageRoot(homeDir: string): string {
+  const xdgData = process.env.XDG_DATA_HOME;
+  const base = xdgData && xdgData !== "" ? xdgData : join(homeDir, ".local", "share");
+  return join(base, "opencode", "storage");
+}
+
 // --- Structured Logging ---
 // Writes JSON logs to XDG state directory for compatibility with `core logs`.
 // Prefers GROVE_LOG_DIR env var (set by grove-flow when launching agents),
@@ -58,7 +99,7 @@ interface LogEntry {
   [key: string]: unknown;
 }
 
-function getLogFilePath(homeDir: string, workingDir: string): string {
+function getLogFilePath(homeDir: string): string {
   const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
   let logsDir = process.env.GROVE_LOG_DIR;
   if (!logsDir) {
@@ -73,7 +114,7 @@ function getLogFilePath(homeDir: string, workingDir: string): string {
   return join(logsDir, `workspace-${today}.log`);
 }
 
-function createLogger(homeDir: string, workingDir: string) {
+function createLogger(homeDir: string) {
   const component = "opencode.grove-plugin";
 
   const log = (
@@ -90,7 +131,7 @@ function createLogger(homeDir: string, workingDir: string) {
     };
 
     try {
-      const logPath = getLogFilePath(homeDir, workingDir);
+      const logPath = getLogFilePath(homeDir);
       appendFileSync(logPath, JSON.stringify(entry) + "\n");
     } catch (e) {
       // Fallback to console if file logging fails
@@ -125,9 +166,10 @@ export const GroveIntegrationPlugin: Plugin = async ({
   }
 
   const workingDir = worktree || directory || process.cwd();
-  const log = createLogger(homeDir, workingDir);
+  const log = createLogger(homeDir);
 
   log.info("Plugin initializing", {
+    plugin_version: GROVE_PLUGIN_VERSION,
     home_dir: homeDir,
     working_dir: workingDir,
     worktree: worktree || null,
@@ -137,131 +179,86 @@ export const GroveIntegrationPlugin: Plugin = async ({
   // Get XDG-compliant paths from core
   const grovePaths = getGrovePaths();
 
-  // Paths for grove-hooks integration
-  // Use XDG paths if available, fall back to legacy paths
-  // Database is stored in state_dir (mutable runtime state)
-  const hooksDbPath = grovePaths
-    ? join(grovePaths.state_dir, "hooks", "sessions.db")
-    : join(homeDir, ".local", "state", "grove", "hooks", "sessions.db");
+  // The grove-hooks filesystem session registry. The Go pipeline owns this
+  // layout; the plugin only touches it for the flow rename dance, pointer
+  // enrichment, and the no-grove-binary fallback.
   const sessionsDir = grovePaths
     ? join(grovePaths.state_dir, "hooks", "sessions")
     : join(homeDir, ".local", "state", "grove", "hooks", "sessions");
+  const storageRoot = opencodeStorageRoot(homeDir);
 
   log.debug("Configured paths", {
-    db_path: hooksDbPath,
     sessions_dir: sessionsDir,
+    opencode_storage_root: storageRoot,
     xdg_paths_available: grovePaths !== null,
   });
 
-  // --- Database Setup ---
-  let db: Database | null = null;
-  try {
-    // Ensure the database directory exists (in state_dir for mutable data)
-    const dbDir = grovePaths
-      ? join(grovePaths.state_dir, "hooks")
-      : join(homeDir, ".local", "state", "grove", "hooks");
-    if (!existsSync(dbDir)) {
-      log.info("Creating database directory", { path: dbDir });
-      mkdirSync(dbDir, { recursive: true });
-    }
-
-    db = new Database(hooksDbPath);
-    log.info("Database opened successfully", { path: hooksDbPath });
-    // Note: sessions table is created by grove-hooks, we just use it
-  } catch (e) {
-    log.error("Failed to open grove-hooks database", {
-      error: String(e),
-      path: hooksDbPath,
-    });
-    return {}; // Disable plugin if DB can't be opened
-  }
-
-  // --- Helper Functions ---
-  const getOpencodePID = () => process.pid;
-
-  const getGitInfo = async (): Promise<{ repo: string; branch: string }> => {
+  // --- grove hooks shell-out ---
+  // All session state transitions go through `grove hooks <event>` so the Go
+  // pipeline (daemon registration, status resolution, flow job mapping)
+  // stays the single owner of session semantics. Synchronous so ordering is
+  // deterministic w.r.t. the filesystem dance in session.created.
+  const runGroveHook = (
+    subcommand: string,
+    payload: Record<string, unknown>
+  ): boolean => {
     try {
-      const { $ } = await import("bun");
-      const repoResult =
-        await $`git rev-parse --show-toplevel 2>/dev/null`.text();
-      const branchResult =
-        await $`git rev-parse --abbrev-ref HEAD 2>/dev/null`.text();
-
-      const repoPath = repoResult.trim();
-      const repo =
-        repoPath ? repoPath.split("/").pop() || "unknown" : "unknown";
-      const branch = branchResult.trim() || "unknown";
-
-      return { repo, branch };
-    } catch {
-      return { repo: "unknown", branch: "unknown" };
-    }
-  };
-
-  // Update the status field in a grove-flow job file's YAML frontmatter
-  const updateJobFileStatus = (jobFilePath: string, newStatus: string): boolean => {
-    if (!jobFilePath) return false;
-
-    try {
-      const content = readFileSync(jobFilePath, "utf8");
-      const lines = content.split("\n");
-
-      // Find the frontmatter boundaries and the status line
-      let inFrontmatter = false;
-      let frontmatterStart = -1;
-      let frontmatterEnd = -1;
-      let statusLineIdx = -1;
-
-      for (let i = 0; i < lines.length; i++) {
-        const trimmed = lines[i].trim();
-        if (trimmed === "---") {
-          if (!inFrontmatter) {
-            inFrontmatter = true;
-            frontmatterStart = i;
-          } else {
-            frontmatterEnd = i;
-            break;
-          }
-        } else if (inFrontmatter && trimmed.startsWith("status:")) {
-          statusLineIdx = i;
-        }
-      }
-
-      if (frontmatterStart === -1 || frontmatterEnd === -1 || statusLineIdx === -1) {
-        log.warn("Could not find frontmatter or status field in job file", {
-          job_file_path: jobFilePath,
-          frontmatter_start: frontmatterStart,
-          frontmatter_end: frontmatterEnd,
-          status_line_idx: statusLineIdx,
+      const result = Bun.spawnSync(["grove", "hooks", subcommand], {
+        stdin: new TextEncoder().encode(JSON.stringify(payload)),
+        cwd: workingDir,
+        env: {
+          ...process.env,
+          // The Go pipeline derives the provider from this env var (default
+          // "claude"); flow exports it for flow-launched sessions and this
+          // fallback covers manually launched ones.
+          GROVE_AGENT_PROVIDER: process.env.GROVE_AGENT_PROVIDER || "opencode",
+          // getClaudePID prefers CLAUDE_PID over the (short-lived) hook
+          // process's parent PID; hand it the live opencode PID.
+          CLAUDE_PID: String(process.pid),
+          // EnsureSessionExists reads PWD as the session working directory.
+          PWD: workingDir,
+        },
+        stdout: "ignore",
+        stderr: "pipe",
+      });
+      if (result.exitCode !== 0) {
+        log.warn(`grove hooks ${subcommand} exited non-zero`, {
+          exit_code: result.exitCode,
+          stderr: result.stderr?.toString().slice(0, 500),
         });
         return false;
       }
-
-      // Get the indentation from the original line
-      const originalLine = lines[statusLineIdx];
-      let indent = "";
-      for (const ch of originalLine) {
-        if (ch === " " || ch === "\t") {
-          indent += ch;
-        } else {
-          break;
-        }
-      }
-
-      // Update the status line
-      lines[statusLineIdx] = `${indent}status: ${newStatus}`;
-
-      // Write the file back
-      writeFileSync(jobFilePath, lines.join("\n"));
-      log.info("Updated job file status", {
-        job_file_path: jobFilePath,
-        new_status: newStatus,
-      });
       return true;
     } catch (e) {
-      log.error("Failed to update job file status", {
-        job_file_path: jobFilePath,
-        new_status: newStatus,
+      // Never break the agent because bookkeeping failed.
+      log.error(`grove hooks ${subcommand} failed to spawn`, {
+        error: String(e),
+      });
+      return false;
+    }
+  };
+
+  // Merge extra fields into a session's metadata.json (read-modify-write).
+  // Used to record the opencode transcript pointer alongside the standard
+  // fields the Go pipeline writes.
+  const enrichSessionMetadata = (
+    sessionDir: string,
+    fields: Record<string, unknown>
+  ): boolean => {
+    const metadataPath = join(sessionDir, "metadata.json");
+    try {
+      let metadata: Record<string, unknown> = {};
+      if (existsSync(metadataPath)) {
+        metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+      }
+      writeFileSync(
+        metadataPath,
+        JSON.stringify({ ...metadata, ...fields }, null, 2)
+      );
+      return true;
+    } catch (e) {
+      log.error("Failed to enrich session metadata", {
+        metadata_path: metadataPath,
         error: String(e),
       });
       return false;
@@ -272,8 +269,26 @@ export const GroveIntegrationPlugin: Plugin = async ({
   let activeSessionId: string | null = null;
   // Store flow job ID if this is a grove-flow managed session
   let flowJobId: string | null = process.env.GROVE_FLOW_JOB_ID || null;
-  // Store flow job path for updating status in YAML frontmatter
+  // Store flow job path (recorded in fallback metadata for job association)
   let flowJobPath: string | null = process.env.GROVE_FLOW_JOB_PATH || null;
+  // Throttle for tool.execute.before activity updates
+  let lastActivityUpdate = 0;
+  const activityThrottleMs = 15_000;
+
+  // Extract a session id from event properties across payload shapes
+  // (session.created/deleted carry {info: Session}; status/idle carry
+  // {sessionID}).
+  const sessionIdFromProps = (props: Record<string, unknown>): string | null => {
+    const info = props?.info as Record<string, unknown> | undefined;
+    const id =
+      info?.id ||
+      props?.sessionID ||
+      props?.id ||
+      props?.session_id ||
+      props?.sessionId ||
+      (props?.session as Record<string, unknown>)?.id;
+    return id ? String(id) : null;
+  };
 
   log.info("Plugin initialized, returning hooks");
 
@@ -290,41 +305,30 @@ export const GroveIntegrationPlugin: Plugin = async ({
         active_session: activeSessionId,
       });
 
-      if (!db) {
-        log.warn("Event received but database not available", {
-          event_type: event.type,
-        });
-        return;
-      }
-
       if (event.type === "session.created") {
-        // Extract native opencode session ID from event
+        // Extract native opencode session ID (ses_...) from the event
         const props = event.properties as Record<string, unknown>;
-        const info = props?.info as Record<string, unknown> | undefined;
         const opencodeSessionId =
-          info?.id ||
-          props?.id ||
-          props?.session_id ||
-          props?.sessionId ||
-          (props?.session as Record<string, unknown>)?.id ||
-          `opencode-${Date.now()}`;
+          sessionIdFromProps(props) || `opencode-${Date.now()}`;
 
         activeSessionId = String(opencodeSessionId);
-        const opencodePID = getOpencodePID();
-        const { repo, branch } = await getGitInfo();
+        const opencodePID = process.pid;
 
-        // Check if this is a grove-flow managed session
-        // flowJobId and flowJobPath are already set at module level from env vars
-        const flowPlanName = process.env.GROVE_FLOW_PLAN_NAME;
-        const flowJobTitle = process.env.GROVE_FLOW_JOB_TITLE;
+        // The opencode transcript pointer: agentlogs resolves the fragment
+        // store from these fields instead of scanning storage.
+        const transcriptPointer = {
+          native_session_id: activeSessionId,
+          opencode_storage_root: storageRoot,
+        };
 
         if (flowJobId) {
-          // This is a grove-flow managed session.
-          // grove-flow already created a session directory at ~/.grove/hooks/sessions/{flowJobId}
-          // We need to:
-          // 1. Rename that directory to use the native opencode session ID
-          // 2. Update the metadata with the opencode session ID and PID
-          // 3. Update the database entry
+          // This is a grove-flow managed session (flow-preseeded rename
+          // dance — load-bearing, keep in sync with flow's
+          // OpencodeAgentProvider.Launch which registers the session dir
+          // under the flow job ID before opencode starts):
+          // 1. Rename sessions/{flowJobId} to sessions/{nativeSessionId}
+          // 2. Update metadata with the native session ID, PID and pointer
+          // 3. Report to the Go pipeline via `grove hooks session-start`
 
           const flowSessionDir = join(sessionsDir, flowJobId);
           const opencodeSessionDir = join(sessionsDir, activeSessionId);
@@ -359,11 +363,12 @@ export const GroveIntegrationPlugin: Plugin = async ({
                 to: opencodeSessionDir,
               });
 
-              // Update metadata with opencode session ID and PID
+              // Update metadata with opencode session ID, PID and pointer
               const updatedMetadata = {
                 ...existingMetadata,
-                claude_session_id: activeSessionId, // Store the native opencode session ID
+                claude_session_id: activeSessionId, // native agent id slot (registry keys on this)
                 pid: opencodePID,
+                ...transcriptPointer,
               };
               writeFileSync(
                 join(opencodeSessionDir, "metadata.json"),
@@ -375,8 +380,9 @@ export const GroveIntegrationPlugin: Plugin = async ({
               writeFileSync(join(opencodeSessionDir, "pid.lock"), String(opencodePID));
               log.debug("Updated pid.lock", { pid: opencodePID });
             } else {
-              // Flow session directory doesn't exist (race condition or grove-flow failed)
-              // Fall back to creating a new session directory
+              // Flow session directory doesn't exist (race condition or
+              // grove-flow failed). Fall back to creating a new session
+              // directory so the session is still discoverable.
               log.warn("Flow session directory not found, creating new session", {
                 expected_dir: flowSessionDir,
               });
@@ -386,15 +392,14 @@ export const GroveIntegrationPlugin: Plugin = async ({
                 claude_session_id: activeSessionId,
                 provider: "opencode",
                 pid: opencodePID,
-                repo,
-                branch,
                 working_directory: workingDir,
                 user: process.env.USER || "unknown",
                 started_at: new Date().toISOString(),
-                job_title: flowJobTitle,
-                plan_name: flowPlanName,
+                job_title: process.env.GROVE_FLOW_JOB_TITLE,
+                plan_name: process.env.GROVE_FLOW_PLAN_NAME,
                 job_file_path: flowJobPath,
                 type: "interactive_agent",
+                ...transcriptPointer,
               };
               writeFileSync(
                 join(opencodeSessionDir, "metadata.json"),
@@ -403,14 +408,14 @@ export const GroveIntegrationPlugin: Plugin = async ({
               writeFileSync(join(opencodeSessionDir, "pid.lock"), String(opencodePID));
             }
 
-            // Update the database - use flow job ID as the primary session ID
-            db.prepare(
-              `UPDATE sessions SET claude_session_id = ?, pid = ?, status = 'running', last_activity = ? WHERE id = ?`
-            ).run(activeSessionId, opencodePID, new Date().toISOString(), flowJobId);
-            log.info("Updated database with opencode session details", {
-              flow_job_id: flowJobId,
-              opencode_session_id: activeSessionId,
-              pid: opencodePID,
+            // Let the Go pipeline register/refresh daemon state. It resolves
+            // the flow job id from the (just-renamed) session directory's
+            // metadata and flips idle/pending sessions back to running.
+            runGroveHook("session-start", {
+              session_id: activeSessionId,
+              transcript_path: "",
+              hook_event_name: "SessionStart",
+              cwd: workingDir,
             });
           } catch (e) {
             log.error("Failed to enrich flow session", {
@@ -420,271 +425,172 @@ export const GroveIntegrationPlugin: Plugin = async ({
             });
           }
         } else {
-          // Standalone opencode session (not managed by grove-flow)
-          // Create a new session directory
+          // Standalone opencode session (not managed by grove-flow).
+          // Register through the Go pipeline, then record the transcript
+          // pointer next to the standard metadata it wrote.
           const sessionDir = join(sessionsDir, activeSessionId);
 
           log.info("Standalone session created", {
             session_id: activeSessionId,
             pid: opencodePID,
-            repo,
-            branch,
             working_dir: workingDir,
             session_dir: sessionDir,
           });
 
-          // 1. Create session directory for file-based discovery
-          mkdirSync(sessionDir, { recursive: true });
-          log.debug("Session directory created", { path: sessionDir });
-
-          // 2. Write pid.lock file
-          writeFileSync(join(sessionDir, "pid.lock"), String(opencodePID));
-          log.debug("pid.lock written", { pid: opencodePID });
-
-          // 3. Write metadata.json
-          const metadata = {
+          const registered = runGroveHook("session-start", {
             session_id: activeSessionId,
-            claude_session_id: activeSessionId,
-            provider: "opencode",
-            type: "opencode_session", // Mark as opencode session so stop hook knows not to auto-complete
-            pid: opencodePID,
-            repo,
-            branch,
-            working_directory: workingDir,
-            user: process.env.USER || "unknown",
-            started_at: new Date().toISOString(),
-          };
-          writeFileSync(
-            join(sessionDir, "metadata.json"),
-            JSON.stringify(metadata, null, 2)
-          );
-          log.debug("metadata.json written", metadata);
+            transcript_path: "",
+            hook_event_name: "SessionStart",
+            cwd: workingDir,
+          });
 
-          // 4. Insert into SQLite database (match actual schema with tmux_key column)
-          try {
-            db.prepare(
-              `INSERT OR REPLACE INTO sessions (id, type, pid, repo, branch, tmux_key, working_directory, user, status, started_at, last_activity, provider, claude_session_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            ).run(
-              activeSessionId,
-              "opencode_session",
-              opencodePID,
-              repo,
-              branch,
-              null, // tmux_key - not used for opencode
-              workingDir,
-              metadata.user,
-              "running",
-              metadata.started_at,
-              metadata.started_at,
-              "opencode",
-              activeSessionId // claude_session_id
-            );
-            log.info("Session inserted into database", {
-              session_id: activeSessionId,
-              status: "running",
+          if (registered) {
+            enrichSessionMetadata(sessionDir, {
+              ...transcriptPointer,
+              // Mark as opencode session so downstream consumers know this
+              // session never auto-completes.
+              type: "opencode_session",
             });
-          } catch (e) {
-            log.error("Failed to insert session into database", {
+            try {
+              writeFileSync(join(sessionDir, "pid.lock"), String(opencodePID));
+            } catch (e) {
+              log.warn("Failed to write pid.lock", { error: String(e) });
+            }
+          } else {
+            // Thin documented fallback: `grove` unavailable or failed.
+            // Write the filesystem registry entry directly (metadata.json +
+            // pid.lock only — never the database) so the session remains
+            // discoverable by the TUI and agentlogs.
+            log.warn("session-start shell-out failed; writing filesystem registry fallback", {
               session_id: activeSessionId,
-              error: String(e),
             });
+            try {
+              mkdirSync(sessionDir, { recursive: true });
+              const metadata = {
+                session_id: activeSessionId,
+                claude_session_id: activeSessionId,
+                provider: "opencode",
+                type: "opencode_session",
+                pid: opencodePID,
+                working_directory: workingDir,
+                user: process.env.USER || "unknown",
+                started_at: new Date().toISOString(),
+                ...transcriptPointer,
+              };
+              writeFileSync(
+                join(sessionDir, "metadata.json"),
+                JSON.stringify(metadata, null, 2)
+              );
+              writeFileSync(join(sessionDir, "pid.lock"), String(opencodePID));
+            } catch (e) {
+              log.error("Fallback registration failed", {
+                session_id: activeSessionId,
+                error: String(e),
+              });
+            }
           }
         }
       }
 
       if (event.type === "session.status") {
-        const props = event.properties as { status?: { type?: string } | string };
-        const statusObj = props.status;
-        const status = typeof statusObj === "object" ? (statusObj?.type === "busy" ? "running" : statusObj?.type || "running") : (statusObj || "running");
+        const props = event.properties as Record<string, unknown>;
+        const statusObj = props.status as { type?: string } | string | undefined;
+        const rawStatus =
+          typeof statusObj === "object" ? statusObj?.type || "" : statusObj || "";
+        const sessionId = sessionIdFromProps(props) || activeSessionId;
+
         log.debug("Session status event", {
-          status,
-          active_session: activeSessionId,
+          status: rawStatus,
+          session_id: sessionId,
           flow_job_id: flowJobId,
-          working_dir: workingDir,
         });
 
-        // Update the session status in the database
-        try {
-          // If this is a flow-managed session, update by flow job ID
-          if (flowJobId) {
-            db.prepare(
-              "UPDATE sessions SET status = ?, last_activity = ? WHERE id = ?"
-            ).run(status, new Date().toISOString(), flowJobId);
-            log.info("Flow session status updated", {
-              flow_job_id: flowJobId,
-              status,
-            });
-          }
-          // Also update by opencode session ID if available
-          if (activeSessionId && activeSessionId !== flowJobId) {
-            db.prepare(
-              "UPDATE sessions SET status = ?, last_activity = ? WHERE id = ?"
-            ).run(status, new Date().toISOString(), activeSessionId);
-          }
-          // Also update any running/idle sessions in the same working directory (grove-flow job sessions)
-          // Include both 'opencode' and 'claude' providers since grove-flow may use either
-          const result = db.prepare(
-            "UPDATE sessions SET status = ?, last_activity = ? WHERE working_directory = ? AND status IN ('running', 'idle', 'pending_user') AND provider IN ('opencode', 'claude')"
-          ).run(status, new Date().toISOString(), workingDir);
-          log.info("Session status updated", {
-            session_id: activeSessionId,
-            flow_job_id: flowJobId,
-            status,
-            working_dir: workingDir,
-            rows_updated: result.changes,
+        // busy/retry mean the agent is working -> running. idle is handled
+        // by the session.idle event through the full stop pipeline, so it
+        // is deliberately skipped here to avoid double handling.
+        if (sessionId && (rawStatus === "busy" || rawStatus === "retry")) {
+          runGroveHook("session-status", {
+            session_id: sessionId,
+            hook_event_name: "SessionStatus",
+            status: rawStatus,
+            cwd: workingDir,
           });
-
-          // Also update the job YAML file if this is a flow-managed session transitioning to running
-          // TODO: Re-enable once testing confirms stability
-          // if (flowJobPath && status === "running") {
-          //   updateJobFileStatus(flowJobPath, "running");
-          // }
-        } catch (e) {
-          log.error("Failed to update session status", {
-            session_id: activeSessionId,
-            flow_job_id: flowJobId,
-            error: String(e),
-          });
+          lastActivityUpdate = Date.now();
         }
       }
 
       if (event.type === "session.idle") {
+        const props = event.properties as Record<string, unknown>;
+        const sessionId = sessionIdFromProps(props) || activeSessionId;
+
         log.info("Session idle event - calling stop hook", {
-          active_session: activeSessionId,
+          session_id: sessionId,
           flow_job_id: flowJobId,
           working_dir: workingDir,
         });
 
-        try {
-          // Call grove-hooks stop to update filesystem session state and trigger proper status flow
-          // This is the equivalent of what Claude's hook system does automatically
-          const stopInput = JSON.stringify({
-            session_id: activeSessionId,
+        // End of turn: the stop pipeline resolves opencode's empty
+        // exit_reason to idle (never auto-complete) and handles flow job
+        // file status.
+        if (sessionId) {
+          runGroveHook("stop", {
+            session_id: sessionId,
             hook_event_name: "stop",
             exit_reason: "", // Empty = normal end-of-turn, not a completion
             duration_ms: 0,
-          });
-
-          const { $ } = await import("bun");
-          const result = await $`echo ${stopInput} | grove hooks stop`.quiet();
-
-          log.info("Stop hook called successfully", {
-            session_id: activeSessionId,
-            flow_job_id: flowJobId,
-            exit_code: result.exitCode,
-          });
-
-          // Also update database directly as backup
-          if (flowJobId) {
-            db.prepare(
-              "UPDATE sessions SET status = 'idle', last_activity = ? WHERE id = ?"
-            ).run(new Date().toISOString(), flowJobId);
-          }
-          if (activeSessionId && activeSessionId !== flowJobId) {
-            db.prepare(
-              "UPDATE sessions SET status = 'idle', last_activity = ? WHERE id = ?"
-            ).run(new Date().toISOString(), activeSessionId);
-          }
-        } catch (e) {
-          log.error("Failed to call stop hook or update session", {
-            session_id: activeSessionId,
-            flow_job_id: flowJobId,
-            error: String(e),
+            cwd: workingDir,
           });
         }
       }
 
       if (event.type === "session.deleted") {
-        // Use activeSessionId if available, otherwise try to extract from event
-        const sessionIdToDelete = activeSessionId || (() => {
-          const props = event.properties as Record<string, unknown>;
-          return String(
-            props?.id ||
-            props?.session_id ||
-            props?.sessionId ||
-            (props?.session as Record<string, unknown>)?.id ||
-            "unknown"
-          );
-        })();
+        const props = event.properties as Record<string, unknown>;
+        const sessionIdToDelete =
+          sessionIdFromProps(props) || activeSessionId || "unknown";
 
         log.info("Session deleted event", {
           session_id: sessionIdToDelete,
           flow_job_id: flowJobId,
         });
 
-        try {
-          // If this is a flow-managed session, update by flow job ID
-          if (flowJobId) {
-            db.prepare(
-              "UPDATE sessions SET status = 'completed', ended_at = ?, last_activity = ? WHERE id = ?"
-            ).run(new Date().toISOString(), new Date().toISOString(), flowJobId);
-            log.info("Flow session marked completed", { flow_job_id: flowJobId });
-          }
-          // Also update by opencode session ID
-          db.prepare(
-            "UPDATE sessions SET status = 'completed', ended_at = ?, last_activity = ? WHERE id = ?"
-          ).run(new Date().toISOString(), new Date().toISOString(), sessionIdToDelete);
+        // The Go pipeline marks the session terminal and cleans up the
+        // registry directory.
+        runGroveHook("session-end", {
+          session_id: sessionIdToDelete,
+          hook_event_name: "SessionEnd",
+          reason: "deleted",
+          cwd: workingDir,
+        });
 
-          // Clean up session directory
-          const sessionDir = join(sessionsDir, sessionIdToDelete);
-          rmSync(sessionDir, { recursive: true, force: true });
-          log.info("Session completed and cleaned up", {
-            session_id: sessionIdToDelete,
-            flow_job_id: flowJobId,
-          });
-        } catch (e) {
-          log.error("Failed to complete session", {
-            session_id: sessionIdToDelete,
-            flow_job_id: flowJobId,
-            error: String(e),
-          });
+        if (sessionIdToDelete === activeSessionId) {
+          activeSessionId = null;
         }
-        activeSessionId = null;
-        flowJobId = null;
-        flowJobPath = null;
       }
     },
 
-    "tool.execute.before": async () => {
-      log.debug("Tool execute before", {
-        has_db: db !== null,
-        active_session: activeSessionId,
+    "tool.execute.before": async (input) => {
+      // Any tool execution means the session is active. Throttled so a
+      // burst of tool calls doesn't spawn a subprocess per call — the Go
+      // pipeline only needs to flip idle/pending back to running.
+      const now = Date.now();
+      if (now - lastActivityUpdate < activityThrottleMs) {
+        return;
+      }
+      const sessionId =
+        (input as { sessionID?: string })?.sessionID || activeSessionId;
+      if (!sessionId) return;
+
+      lastActivityUpdate = now;
+      log.debug("Tool execute before - activity update", {
+        session_id: sessionId,
         flow_job_id: flowJobId,
       });
-
-      if (!db) return;
-      // Any tool execution means the session is active
-      try {
-        // Update by flow job ID if this is a flow-managed session
-        if (flowJobId) {
-          db.prepare(
-            "UPDATE sessions SET status = 'running', last_activity = ? WHERE id = ?"
-          ).run(new Date().toISOString(), flowJobId);
-        }
-        // Also update by opencode session ID if available
-        if (activeSessionId && activeSessionId !== flowJobId) {
-          db.prepare(
-            "UPDATE sessions SET status = 'running', last_activity = ? WHERE id = ?"
-          ).run(new Date().toISOString(), activeSessionId);
-        }
-        log.debug("Session activity updated", {
-          session_id: activeSessionId,
-          flow_job_id: flowJobId,
-        });
-
-        // Also update the job YAML file if this is a flow-managed session
-        // TODO: Re-enable once testing confirms stability
-        // if (flowJobPath) {
-        //   updateJobFileStatus(flowJobPath, "running");
-        // }
-      } catch (e) {
-        log.error("Failed to update activity", {
-          session_id: activeSessionId,
-          flow_job_id: flowJobId,
-          error: String(e),
-        });
-      }
+      runGroveHook("session-status", {
+        session_id: sessionId,
+        hook_event_name: "SessionStatus",
+        status: "busy",
+        cwd: workingDir,
+      });
     },
   };
 };

@@ -117,6 +117,27 @@ type SubagentStopInput struct {
 	ParentUUID  string `json:"parent_uuid,omitempty"`
 }
 
+// SessionStatusInput is the payload for the session-status hook, sent by
+// provider integrations (opencode plugin) reporting a non-terminal status
+// transition. Status carries the provider's raw status word; the handler
+// normalizes it via NormalizeProviderSessionStatus.
+type SessionStatusInput struct {
+	SessionID     string `json:"session_id"`
+	HookEventName string `json:"hook_event_name"`
+	Status        string `json:"status"`
+	Cwd           string `json:"cwd,omitempty"`
+}
+
+// SessionEndInput is the payload for the session-end hook, sent by provider
+// integrations when the provider destroyed the session (e.g. opencode's
+// session.deleted event).
+type SessionEndInput struct {
+	SessionID     string `json:"session_id"`
+	HookEventName string `json:"hook_event_name"`
+	Reason        string `json:"reason,omitempty"`
+	Cwd           string `json:"cwd,omitempty"`
+}
+
 type PreToolUseResponse struct {
 	Approved bool   `json:"approved"`
 	Message  string `json:"message,omitempty"`

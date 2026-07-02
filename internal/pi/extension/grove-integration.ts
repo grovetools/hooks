@@ -31,6 +31,10 @@
 
 import { spawnSync } from "node:child_process";
 
+// Version stamp compared by `hooks pi status` / `hooks pi install` to detect
+// installed-vs-embedded drift. Bump when this file's behavior changes.
+export const GROVE_PLUGIN_VERSION = "1.1.0";
+
 interface GroveHookPayload {
 	session_id: string;
 	transcript_path: string;

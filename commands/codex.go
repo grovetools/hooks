@@ -61,8 +61,20 @@ variable that codex inherits; other sessions fall back to the codex thread id.`,
 		RunE: runCodexNotify,
 	}
 
+	statusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Report whether the codex notify hook is configured",
+		Long: `Report the codex integration's configuration status.
+
+Unlike opencode/pi, the codex integration is a single notify line in
+~/.codex/config.toml (no versioned artifact), so status reports whether the
+top-level notify key currently invokes grove.`,
+		RunE: runCodexStatus,
+	}
+
 	codexCmd.AddCommand(installCmd)
 	codexCmd.AddCommand(notifyCmd)
+	codexCmd.AddCommand(statusCmd)
 	return codexCmd
 }
 
@@ -124,6 +136,47 @@ func runCodexInstall(cmd *cobra.Command, args []string) error {
 		Pretty("Restart codex for the notify hook to take effect.").
 		Emit()
 
+	return nil
+}
+
+func runCodexStatus(cmd *cobra.Command, args []string) error {
+	ulog := grovelogging.NewUnifiedLogger("grove-hooks.codex")
+
+	configPath, err := codexConfigPath()
+	if err != nil {
+		return err
+	}
+
+	var content string
+	if raw, err := os.ReadFile(configPath); err == nil {
+		content = string(raw)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read codex config: %w", err)
+	}
+
+	// upsertCodexNotify reports changed=false exactly when the grove notify
+	// line is already configured at top level; previous carries any other
+	// notify value currently set.
+	_, changed, previous := upsertCodexNotify(content)
+
+	base := ulog.Info("Integration status").
+		Field("config_path", configPath).
+		Field("configured", fmt.Sprintf("%t", !changed))
+	switch {
+	case !changed:
+		base.Field("verdict", "current").
+			Pretty(fmt.Sprintf("* codex notify hook is configured in %s", configPath)).
+			Emit()
+	case previous != "":
+		base.Field("verdict", "other-notify").
+			Field("current_notify", previous).
+			Pretty(fmt.Sprintf("! codex notify is set to something else: %s\n  %s\n  Configure with: grove hooks codex install", previous, configPath)).
+			Emit()
+	default:
+		base.Field("verdict", "not-installed").
+			Pretty(fmt.Sprintf("! codex notify hook is not configured (%s)\n  Configure with: grove hooks codex install", configPath)).
+			Emit()
+	}
 	return nil
 }
 

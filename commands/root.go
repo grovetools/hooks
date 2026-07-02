@@ -21,6 +21,8 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newStopCmd())
 	rootCmd.AddCommand(NewStopAsyncCmd())
 	rootCmd.AddCommand(newSessionStartCmd())
+	rootCmd.AddCommand(newSessionStatusCmd())
+	rootCmd.AddCommand(newSessionEndCmd())
 	rootCmd.AddCommand(newSubagentStartCmd())
 	rootCmd.AddCommand(newSubagentStopCmd())
 	rootCmd.AddCommand(NewSessionsCmd())
@@ -88,6 +90,36 @@ func newSessionStartCmd() *cobra.Command {
 		Short: "Run the session start hook",
 		Run: func(cmd *cobra.Command, args []string) {
 			hooks.RunSessionStartHook()
+		},
+	}
+}
+
+func newSessionStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "session-status",
+		Short: "Run the session status hook (provider integrations)",
+		Long: `Run the session-status hook.
+
+Provider integrations (the opencode plugin) pipe a JSON payload
+({"session_id": ..., "status": "busy|retry|running|idle|pending_user"}) to
+report non-terminal status transitions into the grove session pipeline.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			hooks.RunSessionStatusHook()
+		},
+	}
+}
+
+func newSessionEndCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "session-end",
+		Short: "Run the session end hook (provider integrations)",
+		Long: `Run the session-end hook.
+
+Provider integrations (the opencode plugin) pipe a JSON payload
+({"session_id": ..., "reason": "deleted"}) when the provider destroyed the
+session. The session is marked completed and its registry entry removed.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			hooks.RunSessionEndHook()
 		},
 	}
 }

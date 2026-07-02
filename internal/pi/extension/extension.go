@@ -5,7 +5,18 @@
 // its ExtensionAPI.
 package extension
 
-import _ "embed"
+import (
+	_ "embed"
+
+	"github.com/grovetools/hooks/internal/pluginversion"
+)
 
 //go:embed grove-integration.ts
 var GroveIntegrationExtension []byte
+
+// EmbeddedVersion returns the GROVE_PLUGIN_VERSION stamped in the embedded
+// extension source. The TS file is the single source of truth for the
+// version.
+func EmbeddedVersion() string {
+	return pluginversion.Extract(GroveIntegrationExtension)
+}
