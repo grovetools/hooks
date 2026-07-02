@@ -500,6 +500,30 @@ func RunStopHook() {
 		}).Error("Error initializing hook context")
 		os.Exit(1)
 	}
+	runStopPipeline(ctx, slog)
+}
+
+// RunStopHookWithInput runs the Stop pipeline with an explicit payload instead
+// of reading stdin. Codex's notify hook delivers its event as a process
+// argument (`hooks codex notify <json>`), which the codex command translates
+// into a StopInput and feeds through here.
+func RunStopHookWithInput(rawInput []byte) {
+	slog := logging.NewLogger("hooks.stop")
+	slog.Info("RunStopHookWithInput() called")
+
+	ctx, err := NewHookContextFromInput(rawInput)
+	if err != nil {
+		slog.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("Error initializing hook context")
+		os.Exit(1)
+	}
+	runStopPipeline(ctx, slog)
+}
+
+// runStopPipeline is the shared body of the Stop hook: it resolves the
+// session, determines the outcome, and applies status/completion side effects.
+func runStopPipeline(ctx *HookContext, slog *logrus.Entry) {
 	// Log the raw input to help debug exit_reason issues
 	slog.WithFields(logrus.Fields{
 		"raw_input_length": len(ctx.RawInput),
@@ -600,6 +624,15 @@ func RunStopHook() {
 				"working_dir":   workingDir,
 			}).Debug("Session details after daemon lookup")
 		}
+	}
+
+	// Fallback: the stop/notify process runs inside the agent's process tree
+	// and inherits its environment; flow exports GROVE_AGENT_PROVIDER for
+	// non-claude providers (codex/opencode). This keeps provider-specific
+	// outcome handling live even when neither filesystem metadata nor the
+	// daemon knows the session (e.g. a manually launched codex session).
+	if provider == "" {
+		provider = os.Getenv("GROVE_AGENT_PROVIDER")
 	}
 
 	// Fallback to cwd from stop input if we don't have a working directory from metadata

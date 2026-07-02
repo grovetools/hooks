@@ -68,7 +68,13 @@ func NewHookContext() (*HookContext, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewHookContextFromInput(inputData)
+}
 
+// NewHookContextFromInput builds a HookContext from an already-materialized
+// hook payload instead of stdin. Used by integrations that receive the payload
+// as a process argument (e.g. codex's notify hook) rather than piped input.
+func NewHookContextFromInput(inputData []byte) (*HookContext, error) {
 	// Parse base input
 	var baseInput BaseHookInput
 	if err := json.Unmarshal(inputData, &baseInput); err != nil {

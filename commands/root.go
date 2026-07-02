@@ -28,6 +28,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewVersionCmd())
 	rootCmd.AddCommand(NewDebugWorkspacesCmd())
 	rootCmd.AddCommand(NewOpencodeCmd())
+	rootCmd.AddCommand(NewCodexCmd())
 	rootCmd.AddCommand(newDisableHookCmd())
 	rootCmd.AddCommand(newEnableHookCmd())
 	rootCmd.AddCommand(newListHooksCmd())
