@@ -6,21 +6,21 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 )
 
-// KeyMap is the custom keymap for the session browser
+// KeyMap is the custom keymap for the session browser.
+//
+// It embeds keymap.Base and prefers Base bindings for standard behavior
+// (Up/Down/PageUp/PageDown scrolling, Top/Bottom via the gg sequence, Search,
+// Edit, Confirm, Back, CopyPath, Select/SelectAll, Help/Quit). Only the
+// bindings that are genuinely hooks-specific are declared as fields here.
+// Base bindings the browser does not implement are disabled in NewKeyMap so
+// help stays truthful and keymap.AuditCoverage reports no hidden bindings.
 type KeyMap struct {
 	keymap.Base
 	ToggleView      key.Binding
-	Archive         key.Binding
 	OpenDir         key.Binding
 	ExportJSON      key.Binding
-	ScrollDown      key.Binding
-	ScrollUp        key.Binding
 	Kill            key.Binding
 	ToggleFilter    key.Binding
-	SearchFilter    key.Binding
-	GoToTop         key.Binding
-	GoToBottom      key.Binding
-	Edit            key.Binding
 	Open            key.Binding
 	JumpToWorkspace key.Binding
 	MarkComplete    key.Binding
@@ -33,40 +33,26 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.ScrollUp, k.ScrollDown, k.GoToTop, k.GoToBottom, k.JumpToWorkspace},
-		{key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "action"),
-		), k.Back, k.Select, k.SelectAll},
-		{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.ScopeToggle, k.Edit, k.Open, k.CopyPath, k.OpenDir, k.ExportJSON},
+		{k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom, k.JumpToWorkspace},
+		{k.Confirm, k.Back, k.Select, k.SelectAll},
+		{k.ToggleView, k.ToggleFilter, k.Search, k.ScopeToggle, k.Edit, k.Open, k.CopyPath, k.OpenDir, k.ExportJSON},
 		{k.MarkComplete, k.Kill, k.Help, k.Quit},
 	}
 }
 
 // Sections returns grouped sections of key bindings for the full help view.
-// Only includes sections that the hooks browser actually implements.
+// Only includes sections (and bindings) that the hooks browser actually
+// implements. Base bindings not represented here are disabled in NewKeyMap.
 func (k KeyMap) Sections() []keymap.Section {
 	return []keymap.Section{
-		{
-			Name:     "Navigation",
-			Bindings: []key.Binding{k.Up, k.Down, k.ScrollUp, k.ScrollDown, k.GoToTop, k.GoToBottom, k.JumpToWorkspace},
-		},
-		{
-			Name:     "Selection",
-			Bindings: []key.Binding{k.Select, k.SelectAll},
-		},
-		{
-			Name:     "View",
-			Bindings: []key.Binding{k.ToggleView, k.ToggleFilter, k.SearchFilter, k.ScopeToggle},
-		},
-		{
-			Name:     "Actions",
-			Bindings: []key.Binding{k.Edit, k.Open, k.CopyPath, k.OpenDir, k.ExportJSON, k.Archive},
-		},
-		{
-			Name:     "Session",
-			Bindings: []key.Binding{k.MarkComplete, k.Kill},
-		},
+		keymap.NavigationSection(
+			k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom, k.JumpToWorkspace,
+		),
+		keymap.SelectionSection(k.Select, k.SelectAll),
+		keymap.SearchSection(k.Search),
+		keymap.NewSection(keymap.SectionView, k.ToggleView, k.ToggleFilter, k.ScopeToggle),
+		keymap.ActionsSection(k.Confirm, k.Back, k.Edit, k.Open, k.CopyPath, k.OpenDir, k.ExportJSON),
+		keymap.NewSection("Session", k.MarkComplete, k.Kill),
 		k.Base.SystemSection(),
 	}
 }
@@ -85,14 +71,6 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("f"),
 			key.WithHelp("f", "toggle filter view"),
 		),
-		SearchFilter: key.NewBinding(
-			key.WithKeys("/"),
-			key.WithHelp("/", "search"),
-		),
-		Archive: key.NewBinding(
-			key.WithKeys("X"),
-			key.WithHelp("X", "archive selected"),
-		),
 		OpenDir: key.NewBinding(
 			key.WithKeys("ctrl+o"),
 			key.WithHelp("ctrl+o", "open dir"),
@@ -101,29 +79,9 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("ctrl+j"),
 			key.WithHelp("ctrl+j", "export json"),
 		),
-		ScrollDown: key.NewBinding(
-			key.WithKeys("ctrl+d", "pagedown"),
-			key.WithHelp("ctrl+d/pgdn", "scroll down"),
-		),
-		ScrollUp: key.NewBinding(
-			key.WithKeys("ctrl+u", "pageup"),
-			key.WithHelp("ctrl+u/pgup", "scroll up"),
-		),
 		Kill: key.NewBinding(
 			key.WithKeys("ctrl+k"),
 			key.WithHelp("ctrl+k", "kill session"),
-		),
-		GoToTop: key.NewBinding(
-			key.WithKeys("g"),
-			key.WithHelp("gg", "go to top"),
-		),
-		GoToBottom: key.NewBinding(
-			key.WithKeys("G"),
-			key.WithHelp("G", "go to bottom"),
-		),
-		Edit: key.NewBinding(
-			key.WithKeys("e"),
-			key.WithHelp("e", "edit prompt"),
 		),
 		Open: key.NewBinding(
 			key.WithKeys("o"),
@@ -131,7 +89,9 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 		JumpToWorkspace: key.NewBinding(
 			key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),
-			key.WithHelp("1-9", "jump"),
+			// Space in the label marks it as a synthetic range so AuditCoverage
+			// treats it as an alternate list rather than a single-key label.
+			key.WithHelp("1 - 9", "jump to session"),
 		),
 		MarkComplete: key.NewBinding(
 			key.WithKeys("c"),
@@ -141,6 +101,22 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("alt+s"),
 			key.WithHelp("alt+s", "local/global scope"),
 		),
+	}
+
+	// The hooks browser reuses Base for scrolling/search/edit/confirm but does
+	// not implement most Base bindings. Disable the unused ones so they neither
+	// show up in help nor trip AuditCoverage. (gg/G top/bottom, PageUp/PageDown,
+	// Search, Edit, Confirm, Back, CopyPath, Select/SelectAll, Help/Quit stay.)
+	for _, b := range []*key.Binding{
+		&km.Left, &km.Right, &km.Home, &km.End,
+		&km.SearchNext, &km.SearchPrev, &km.ClearSearch, &km.Grep,
+		&km.SelectNone,
+		&km.SwitchView, &km.NextTab, &km.PrevTab, &km.FocusNext, &km.FocusPrev, &km.TogglePreview,
+		&km.Tab1, &km.Tab2, &km.Tab3, &km.Tab4, &km.Tab5, &km.Tab6, &km.Tab7, &km.Tab8, &km.Tab9,
+		&km.FoldOpen, &km.FoldClose, &km.FoldToggle, &km.FoldOpenAll, &km.FoldCloseAll,
+		&km.Cancel, &km.Delete, &km.Yank, &km.Rename, &km.Refresh,
+	} {
+		b.SetEnabled(false)
 	}
 
 	// Apply TUI-specific overrides from config

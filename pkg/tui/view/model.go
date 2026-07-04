@@ -23,6 +23,7 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -111,8 +112,8 @@ type Model struct {
 	typeFilters     map[string]bool
 	searchActive    bool // Whether search input is active
 	viewMode        viewMode
-	gPressed        bool         // Track first 'g' press for 'gg' chord
-	jumpMap         map[rune]int // Maps keyboard shortcuts (1-9) to displayNode indices
+	sequence        *keymap.SequenceState // Detects multi-key sequences (gg go-to-top)
+	jumpMap         map[rune]int          // Maps keyboard shortcuts (1-9) to displayNode indices
 
 	// For "new" indicator
 	accessHistory map[string]time.Time
@@ -182,6 +183,7 @@ func NewModel(
 		statusFilters:         filterPrefs.StatusFilters,
 		typeFilters:           filterPrefs.TypeFilters,
 		viewMode:              tableView,
+		sequence:              keymap.NewSequenceState(),
 		jumpMap:               make(map[rune]int),
 		accessHistory:         make(map[string]time.Time),
 		getAllSessions:        getAllSessions,
@@ -217,13 +219,9 @@ func NewModel(
 
 type tickMsg time.Time
 
-type gChordTimeoutMsg struct{}
-
 type editFileAndQuitMsg struct{ filePath string }
 
 type accessHistoryMsg map[string]time.Time
-
-const gChordTimeout = 400 * time.Millisecond
 
 func loadAccessHistoryCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -299,10 +297,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case gChordTimeoutMsg:
-		m.gPressed = false
-		return m, nil
-
 	case accessHistoryMsg:
 		m.accessHistory = msg
 		return m, nil
@@ -381,46 +375,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Handle numeric jump keys (1-9) when search is not active
-		if !m.searchActive && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		// Handle numeric jump keys (1-9) when search is not active. Gate on the
+		// declared JumpToWorkspace binding (respecting config overrides) and use
+		// the matched rune to index the jump map.
+		if !m.searchActive && !m.showDetails && key.Matches(msg, m.keys.JumpToWorkspace) &&
+			msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
 			keyRune := msg.Runes[0]
-			if keyRune >= '1' && keyRune <= '9' {
-				if targetIndex, ok := m.jumpMap[keyRune]; ok {
-					if targetIndex < len(m.displayNodes) {
-						m.cursor = targetIndex
-						// Ensure the new cursor position is visible
-						viewportHeight := m.getViewportHeight()
-						if m.cursor < m.scrollOffset {
-							m.scrollOffset = m.cursor
-						} else if m.cursor >= m.scrollOffset+viewportHeight {
-							m.scrollOffset = m.cursor - viewportHeight + 1
-						}
-						return m, nil // Key press handled
+			if targetIndex, ok := m.jumpMap[keyRune]; ok {
+				if targetIndex < len(m.displayNodes) {
+					m.cursor = targetIndex
+					// Ensure the new cursor position is visible
+					viewportHeight := m.getViewportHeight()
+					if m.cursor < m.scrollOffset {
+						m.scrollOffset = m.cursor
+					} else if m.cursor >= m.scrollOffset+viewportHeight {
+						m.scrollOffset = m.cursor - viewportHeight + 1
 					}
+					return m, nil // Key press handled
 				}
 			}
 		}
 
-		// Handle 'gg' chord for go to top
-		if m.gPressed {
-			m.gPressed = false
-			if key.Matches(msg, m.keys.GoToTop) {
-				// Second 'g' pressed - go to top
+		// Handle the 'gg' go-to-top sequence via the shared SequenceState. The
+		// buffer clears automatically on timeout or a non-matching key.
+		if !m.showDetails && !m.searchActive {
+			result, _ := m.sequence.Process(msg, m.keys.Top)
+			if result == keymap.SequenceMatch {
+				m.sequence.Clear()
 				m.cursor = 0
 				m.scrollOffset = 0
 				return m, nil
 			}
-			// Any other key resets the chord state
-		} else if key.Matches(msg, m.keys.GoToTop) && !m.showDetails {
-			// First 'g' pressed - start chord timer
-			m.gPressed = true
-			return m, tea.Tick(gChordTimeout, func(t time.Time) tea.Msg {
-				return gChordTimeoutMsg{}
-			})
+			if result == keymap.SequencePending {
+				// First 'g' — wait for the second key.
+				return m, nil
+			}
+			m.sequence.Clear()
 		}
 
 		// Handle 'G' for go to bottom
-		if key.Matches(msg, m.keys.GoToBottom) && !m.showDetails {
+		if key.Matches(msg, m.keys.Bottom) && !m.showDetails {
 			listLen := len(m.displayNodes)
 			if listLen > 0 {
 				m.cursor = listLen - 1
@@ -492,7 +486,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateFilterView(msg)
 		}
 
-		if key.Matches(msg, m.keys.SearchFilter) && !m.showDetails && !m.searchActive {
+		if key.Matches(msg, m.keys.Search) && !m.showDetails && !m.searchActive {
 			m.searchActive = true
 			m.filterInput.Focus()
 			return m, textinput.Blink
@@ -542,7 +536,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scrollOffset = m.cursor - viewportHeight + 1
 				}
 			}
-		} else if key.Matches(msg, m.keys.ScrollDown) {
+		} else if key.Matches(msg, m.keys.PageDown) {
 			if !m.showDetails {
 				viewportHeight := m.getViewportHeight()
 				halfPage := viewportHeight / 2
@@ -556,7 +550,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scrollOffset = m.cursor - viewportHeight + 1
 				}
 			}
-		} else if key.Matches(msg, m.keys.ScrollUp) {
+		} else if key.Matches(msg, m.keys.PageUp) {
 			if !m.showDetails {
 				viewportHeight := m.getViewportHeight()
 				halfPage := viewportHeight / 2
