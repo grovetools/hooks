@@ -21,6 +21,21 @@ func DetermineOutcome(ctx StopContext) SessionOutcome {
 		return SessionOutcome{Status: "completed", IsComplete: true}
 	}
 
+	if ctx.SessionType == "headless_agent" {
+		// Headless agents are one-shot: the agent process runs the task and
+		// exits, so an end-of-turn Stop means the process is terminating — this
+		// is genuine completion, never idle. (Interactive claude, by contrast,
+		// stays alive between turns and rests at idle.) The frontmatter itself
+		// is owned by flow's finalizer; this outcome only drives session
+		// bookkeeping. Real errors surface as failed.
+		switch ctx.ExitReason {
+		case "error", "killed", "interrupted":
+			return SessionOutcome{Status: "failed", IsComplete: true}
+		default:
+			return SessionOutcome{Status: "completed", IsComplete: true}
+		}
+	}
+
 	if ctx.Provider == "opencode" {
 		// OpenCode sessions stay running after each turn. The stop hook fires at the
 		// end of each assistant response, but the process is still alive waiting for

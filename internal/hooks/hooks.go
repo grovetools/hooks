@@ -687,6 +687,18 @@ func runStopPipeline(ctx *HookContext, slog *logrus.Entry) {
 		log.Printf("Failed to update session status: %v", err)
 	}
 
+	// Headless agents own their frontmatter exclusively through flow's
+	// finalizer, so the Stop hook must NEVER park them at idle. This dedicated
+	// branch (A2/A7) handles everything for headless: it writes a fallback
+	// .status when the launcher's is absent (covering `flow plan run --local`,
+	// where the launcher goroutine dies with the CLI), and for clean exits execs
+	// `flow plan complete` for timely completion. It fully supersedes the
+	// generic isComplete/idle logic below.
+	if sessionType == "headless_agent" {
+		runHeadlessStopActions(ctx, slog, data, groveSessionsDir, jobFilePath, actualSessionID, finalStatus)
+		return
+	}
+
 	// Handle session completion
 	// Note: session directory is always named with the original Claude UUID (data.SessionID)
 	// Session directory path would be: filepath.Join(groveSessionsDir, data.SessionID)
@@ -777,6 +789,111 @@ func runStopPipeline(ctx *HookContext, slog *logrus.Entry) {
 		// is scoped to (a) genuine completion (above) and (b) waiting-on-you,
 		// which the Notification hook handles.
 	}
+}
+
+// runHeadlessStopActions handles the Stop hook for headless_agent sessions
+// (A2/A7). Frontmatter status for headless jobs is owned exclusively by flow's
+// FinalizeHeadlessJob, so this NEVER writes the job file's status — in
+// particular it never parks it at idle. Instead it:
+//   - writes a fallback .status file when the launcher's is absent (the launcher
+//     goroutine dies with the CLI under `flow plan run --local`), so adoption's
+//     next boot sweep can reconcile the job to a terminal state;
+//   - execs `flow plan complete` for clean exits so the job completes promptly
+//     without waiting for a daemon boot (failure cases are left to adoption);
+//   - persists the terminal session status to metadata.json for RecoverSessions
+//     and pushes the completion ntfy — the same session bookkeeping the generic
+//     complete branch performs.
+func runHeadlessStopActions(ctx *HookContext, slog *logrus.Entry, data StopInput, groveSessionsDir, jobFilePath, actualSessionID, finalStatus string) {
+	// Map the outcome to a .status exit code: clean end → 0, failure → 1.
+	exitCode := 0
+	if finalStatus != "completed" {
+		exitCode = 1
+	}
+
+	// A7: fallback .status writer. Never overwrite an existing file — the
+	// launcher's cmd.Wait() exit code is higher-fidelity truth.
+	writeHeadlessFallbackStatus(slog, jobFilePath, actualSessionID, exitCode)
+
+	slog.WithFields(logrus.Fields{
+		"session_id":    actualSessionID,
+		"final_status":  finalStatus,
+		"job_file_path": jobFilePath,
+	}).Debug("Headless stop: frontmatter owned by flow finalizer; not writing job status")
+
+	// For clean exits, complete the flow job now (finalizer owns the frontmatter
+	// write; `flow plan complete` routes through CompleteJob and tolerates an
+	// already-terminal job). Failure cases leave frontmatter to adoption's sweep.
+	if jobFilePath != "" && finalStatus == "completed" {
+		cmd := delegation.Command("flow", "plan", "complete", jobFilePath)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			slog.WithFields(logrus.Fields{
+				"job_file_path": jobFilePath,
+				"error":         err.Error(),
+				"output":        string(output),
+			}).Warn("Headless stop: failed to auto-complete flow job (may be expected)")
+		} else {
+			slog.WithFields(logrus.Fields{
+				"job_file_path": jobFilePath,
+			}).Debug("Headless stop: auto-completed flow job")
+		}
+	}
+
+	// Persist the terminal session status into metadata.json so RecoverSessions
+	// reports it instead of defaulting to running off the still-alive parent PID.
+	metadataPath := filepath.Join(groveSessionsDir, data.SessionID, "metadata.json")
+	if metadataContent, err := os.ReadFile(metadataPath); err == nil {
+		var metadata map[string]any
+		if json.Unmarshal(metadataContent, &metadata) == nil {
+			metadata["status"] = finalStatus
+			if updated, err := json.MarshalIndent(metadata, "", "  "); err == nil {
+				_ = os.WriteFile(metadataPath, updated, 0o644)
+			}
+		}
+	}
+
+	// Push the completion ntfy (same as the generic complete branch).
+	sendNtfyNotification(ctx, data, finalStatus)
+}
+
+// writeHeadlessFallbackStatus writes the .artifacts/<jobID>/.status file a
+// headless agent's launcher normally writes, for the case where the launcher
+// process died before it could (e.g. `flow plan run --local`). The schema and
+// path match flow's headlessStatusPath / waitAndWriteStatus writer and the
+// daemon adoption reader exactly. It NEVER overwrites an existing file.
+func writeHeadlessFallbackStatus(slog *logrus.Entry, jobFilePath, jobID string, exitCode int) {
+	if jobFilePath == "" || jobID == "" {
+		return
+	}
+	planDir := filepath.Dir(jobFilePath)
+	statusPath := filepath.Join(planDir, ".artifacts", jobID, ".status")
+
+	if _, err := os.Stat(statusPath); err == nil {
+		// Launcher already wrote it (higher-fidelity); leave it.
+		return
+	}
+
+	if err := os.MkdirAll(filepath.Dir(statusPath), 0o755); err != nil {
+		slog.WithFields(logrus.Fields{"path": statusPath, "error": err.Error()}).
+			Warn("Headless stop: failed to create .status dir")
+		return
+	}
+
+	payload := map[string]any{
+		"exit_code": exitCode,
+		"timestamp": time.Now().Format(time.RFC3339),
+		"job_id":    jobID,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(statusPath, data, 0o644); err != nil {
+		slog.WithFields(logrus.Fields{"path": statusPath, "error": err.Error()}).
+			Warn("Headless stop: failed to write fallback .status")
+		return
+	}
+	slog.WithFields(logrus.Fields{"path": statusPath, "exit_code": exitCode}).
+		Debug("Headless stop: wrote fallback .status")
 }
 
 // RunSessionStartHook handles the SessionStart hook. It registers the

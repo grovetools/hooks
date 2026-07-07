@@ -126,6 +126,39 @@ func TestDetermineOutcome(t *testing.T) {
 			wantDone:   true,
 		},
 
+		// Headless agents: one-shot, so end-of-turn is genuine completion
+		// (never idle); real errors fail.
+		{
+			name:       "headless_agent empty exit reason completes (one-shot, not idle)",
+			ctx:        StopContext{SessionType: "headless_agent", Provider: "claude", ExitReason: ""},
+			wantStatus: "completed",
+			wantDone:   true,
+		},
+		{
+			name:       "headless_agent completed marks complete",
+			ctx:        StopContext{SessionType: "headless_agent", Provider: "claude", ExitReason: "completed"},
+			wantStatus: "completed",
+			wantDone:   true,
+		},
+		{
+			name:       "headless_agent error marks failed",
+			ctx:        StopContext{SessionType: "headless_agent", Provider: "claude", ExitReason: "error"},
+			wantStatus: "failed",
+			wantDone:   true,
+		},
+		{
+			name:       "headless_agent killed marks failed",
+			ctx:        StopContext{SessionType: "headless_agent", Provider: "claude", ExitReason: "killed"},
+			wantStatus: "failed",
+			wantDone:   true,
+		},
+		{
+			name:       "headless_agent interrupted marks failed",
+			ctx:        StopContext{SessionType: "headless_agent", Provider: "claude", ExitReason: "interrupted"},
+			wantStatus: "failed",
+			wantDone:   true,
+		},
+
 		// Interactive agent (non-opencode)
 		{
 			name:       "interactive_agent claude completed marks complete",

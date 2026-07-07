@@ -284,6 +284,19 @@ func (hc *HookContext) EnsureSessionExists(sessionID, transcriptPath string) err
 		coreMetadata.JobTitle = os.Getenv("GROVE_FLOW_JOB_TITLE")
 		coreMetadata.PlanName = os.Getenv("GROVE_FLOW_PLAN_NAME")
 		coreMetadata.JobFilePath = os.Getenv("GROVE_FLOW_JOB_PATH")
+		// Record the flow session type in the registry metadata the Stop hook
+		// reads (runStopPipeline reads metadata.Type into sessionType). Headless
+		// agents must be discriminable so the Stop hook never parks their
+		// frontmatter at `idle` (the flow finalizer owns headless frontmatter).
+		// Mirror the session.Type resolution below: isolated first, then
+		// headless, else the interactive default.
+		if os.Getenv("GROVE_FLOW_ISOLATED") == "true" {
+			coreMetadata.Type = "isolated_agent"
+		} else if os.Getenv("GROVE_FLOW_HEADLESS") == "true" {
+			coreMetadata.Type = "headless_agent"
+		} else {
+			coreMetadata.Type = "interactive_agent"
+		}
 
 		// Note: Session confirmation is handled by flow's discoverAndRegisterSessionAsync.
 		// Hooks should NOT call ConfirmSession because each hook runs in a new process
@@ -310,9 +323,13 @@ func (hc *HookContext) EnsureSessionExists(sessionID, transcriptPath string) err
 	if flowJobID := os.Getenv("GROVE_FLOW_JOB_ID"); flowJobID != "" {
 		session.ClaudeSessionID = sessionID // Preserve the original claude_code UUID
 		session.ID = flowJobID              // Use the job ID as the session ID for unification
-		// Check if this is an isolated agent
+		// Check if this is an isolated or headless agent. Headless follows the
+		// same env precedent as GROVE_FLOW_ISOLATED so the Stop hook can
+		// discriminate it (see coreMetadata.Type above and runStopPipeline).
 		if os.Getenv("GROVE_FLOW_ISOLATED") == "true" {
 			session.Type = "isolated_agent"
+		} else if os.Getenv("GROVE_FLOW_HEADLESS") == "true" {
+			session.Type = "headless_agent"
 		} else {
 			session.Type = "interactive_agent"
 		}
