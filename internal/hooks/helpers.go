@@ -68,6 +68,36 @@ func isWaitingNotification(msg string) bool {
 	return false
 }
 
+// idleNudgeNotificationPatterns are case-insensitive substrings of the generic
+// idle nudge Claude Code fires ~60s after a turn ends (see the note on
+// waitingNotificationPatterns above). It is deliberately NOT a
+// blocked-on-user signal, but it IS an authoritative "the agent has returned
+// to the input prompt and is idle" signal — it only fires once the turn has
+// actually ended, never while a permission/survey prompt is still on screen
+// (that turn is suspended, not stopped). We use it to un-stick a session that
+// is stranded at pending_user: on a permission DENY that ends the turn without
+// firing a Stop hook (observed for hard rejects/interrupts — see
+// events.jsonl session baf2c3d0, where every deny that ended a turn was
+// followed by a Stop, but the harness gives no such guarantee for an
+// interrupt-style deny), nothing supersedes the pending_user set by the
+// Notification hook, so the drawer stays loud until the user's next turn. This
+// nudge is the one reliable "now idle" signal that still arrives in that case.
+var idleNudgeNotificationPatterns = []string{
+	"waiting for your input",
+}
+
+// isIdleNudgeNotification reports whether a Notification message is the generic
+// post-turn idle nudge (see idleNudgeNotificationPatterns).
+func isIdleNudgeNotification(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, pattern := range idleNudgeNotificationPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func shouldSendSystemNotification(ctx *HookContext, data NotificationInput) bool {
 	// Never pop a blank banner.
 	if strings.TrimSpace(data.Message) == "" {

@@ -3,6 +3,7 @@ package hooks
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -202,6 +203,178 @@ func TestExtractWorkflowName(t *testing.T) {
 	}
 }
 
+func TestCountLiveChildren(t *testing.T) {
+	tests := []struct {
+		name  string
+		tasks []map[string]any
+		crons []map[string]any
+		want  int
+	}{
+		{
+			name:  "nil lists",
+			tasks: nil,
+			crons: nil,
+			want:  0,
+		},
+		{
+			name:  "status absent counted",
+			tasks: []map[string]any{{"id": "a", "type": "workflow"}},
+			want:  1,
+		},
+		{
+			name:  "running counted",
+			tasks: []map[string]any{{"id": "a", "type": "workflow", "status": "running"}},
+			want:  1,
+		},
+		{
+			name: "terminal statuses excluded",
+			tasks: []map[string]any{
+				{"id": "a", "status": "completed"},
+				{"id": "b", "status": "failed"},
+				{"id": "c", "status": "errored"},
+			},
+			want: 0,
+		},
+		{
+			name:  "non-string status counted",
+			tasks: []map[string]any{{"id": "a", "status": 42}},
+			want:  1,
+		},
+		{
+			name: "mixed live and terminal",
+			tasks: []map[string]any{
+				{"id": "a", "status": "running"},
+				{"id": "b", "status": "completed"},
+				{"id": "c"},
+			},
+			want: 2,
+		},
+		{
+			name:  "cron deduped by shared id",
+			tasks: []map[string]any{{"id": "shared", "type": "workflow", "status": "running"}},
+			crons: []map[string]any{{"id": "shared", "type": "cron", "status": "running"}},
+			want:  1,
+		},
+		{
+			name:  "cron with distinct live id counted",
+			tasks: []map[string]any{{"id": "task", "type": "workflow", "status": "running"}},
+			crons: []map[string]any{{"id": "cronjob", "type": "cron", "status": "running"}},
+			want:  2,
+		},
+		{
+			name:  "terminal cron excluded",
+			crons: []map[string]any{{"id": "cronjob", "type": "cron", "status": "completed"}},
+			want:  0,
+		},
+		{
+			name:  "live cron with no id counted",
+			crons: []map[string]any{{"type": "cron", "status": "running"}},
+			want:  1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := countLiveChildren(tt.tasks, tt.crons); got != tt.want {
+				t.Errorf("countLiveChildren(%v, %v) = %d, want %d", tt.tasks, tt.crons, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkflowChildrenSnapshotEvent(t *testing.T) {
+	now := time.Date(2026, 7, 8, 11, 0, 0, 0, time.UTC)
+	tasks := []map[string]any{
+		{"id": "a", "type": "workflow", "status": "running"},
+		{"id": "b", "type": "workflow", "status": "completed"},
+	}
+	crons := []map[string]any{
+		{"id": "c", "type": "cron", "status": "running"},
+	}
+
+	t.Run("with job id", func(t *testing.T) {
+		t.Setenv("GROVE_FLOW_JOB_ID", "job-42")
+		ev := workflowChildrenSnapshotEvent(SubagentStopInput{
+			SessionID:       "sess-1",
+			BackgroundTasks: tasks,
+			SessionCrons:    crons,
+		}, now)
+
+		want := models.WorkflowEvent{
+			Kind:            models.WorkflowChildrenSnapshot,
+			JobID:           "job-42",
+			ClaudeSessionID: "sess-1",
+			LiveChildren:    2, // one live task + one live cron; terminal task excluded
+			Timestamp:       now,
+			Source:          models.WorkflowSourceHooks,
+		}
+		if !reflect.DeepEqual(ev, want) {
+			t.Errorf("got %+v, want %+v", ev, want)
+		}
+		if ev.AgentID != "" {
+			t.Errorf("AgentID = %q, want empty (snapshot is session-level)", ev.AgentID)
+		}
+	})
+
+	t.Run("without job id env, empty lists yield zero snapshot", func(t *testing.T) {
+		t.Setenv("GROVE_FLOW_JOB_ID", "")
+		ev := workflowChildrenSnapshotEvent(SubagentStopInput{
+			SessionID: "sess-2",
+		}, now)
+
+		if ev.JobID != "" {
+			t.Errorf("JobID = %q, want empty", ev.JobID)
+		}
+		if ev.LiveChildren != 0 {
+			t.Errorf("LiveChildren = %d, want 0", ev.LiveChildren)
+		}
+		if ev.Kind != models.WorkflowChildrenSnapshot || ev.ClaudeSessionID != "sess-2" ||
+			ev.Source != models.WorkflowSourceHooks {
+			t.Errorf("unexpected event: %+v", ev)
+		}
+	})
+}
+
+func TestWorkflowEventForwardable(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   models.WorkflowEvent
+		want bool
+	}{
+		{
+			name: "snapshot with empty agent id but session id → forwardable",
+			ev:   models.WorkflowEvent{Kind: models.WorkflowChildrenSnapshot, ClaudeSessionID: "sess-1"},
+			want: true,
+		},
+		{
+			name: "snapshot with only job id → forwardable",
+			ev:   models.WorkflowEvent{Kind: models.WorkflowChildrenSnapshot, JobID: "job-1"},
+			want: true,
+		},
+		{
+			name: "snapshot with neither job nor session id → not forwardable",
+			ev:   models.WorkflowEvent{Kind: models.WorkflowChildrenSnapshot},
+			want: false,
+		},
+		{
+			name: "non-snapshot with empty agent id → not forwardable (today's behavior)",
+			ev:   models.WorkflowEvent{Kind: models.WorkflowAgentCompleted, ClaudeSessionID: "sess-1"},
+			want: false,
+		},
+		{
+			name: "non-snapshot with agent id → forwardable",
+			ev:   models.WorkflowEvent{Kind: models.WorkflowAgentStarted, AgentID: "a62124203bfeb94f0"},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workflowEventForwardable(tt.ev); got != tt.want {
+				t.Errorf("workflowEventForwardable(%+v) = %v, want %v", tt.ev, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWorkflowEventFromSubagentStart(t *testing.T) {
 	now := time.Date(2026, 6, 10, 17, 7, 10, 0, time.UTC)
 
@@ -222,7 +395,7 @@ func TestWorkflowEventFromSubagentStart(t *testing.T) {
 			Timestamp:       now,
 			Source:          models.WorkflowSourceHooks,
 		}
-		if ev != want {
+		if !reflect.DeepEqual(ev, want) {
 			t.Errorf("got %+v, want %+v", ev, want)
 		}
 	})
@@ -273,7 +446,7 @@ func TestWorkflowEventFromSubagentStop(t *testing.T) {
 			Timestamp:       now,
 			Source:          models.WorkflowSourceHooks,
 		}
-		if ev != want {
+		if !reflect.DeepEqual(ev, want) {
 			t.Errorf("got %+v, want %+v", ev, want)
 		}
 	})

@@ -251,14 +251,161 @@ func workflowEventFromSubagentStop(data SubagentStopInput, now time.Time) models
 	return ev
 }
 
+// terminalChildStatuses are the background-task/cron status values that mark a
+// child as done. Any other status — or an absent/non-string status — counts as
+// live. This is the contract's set (job 45 addendum (a)); values like
+// "cancelled"/"killed" are unverified, but the count is live-biased so a miss
+// only briefly over-counts. The harness's background_tasks[] list is itself
+// already live-biased (one entry per still-live child), so this filter is
+// belt-and-braces against entries that do carry a terminal status.
+var terminalChildStatuses = map[string]bool{
+	"completed": true,
+	"failed":    true,
+	"errored":   true,
+}
+
+// childEntryLive reports whether a background_tasks/session_crons entry
+// represents a still-running child: live iff its "status" key is absent,
+// non-string, or not in terminalChildStatuses.
+func childEntryLive(entry map[string]any) bool {
+	status, ok := entry["status"].(string)
+	if !ok {
+		return true // absent or non-string → live
+	}
+	return !terminalChildStatuses[status]
+}
+
+// countLiveChildren counts the live background children a session still owns at
+// a turn boundary: live BackgroundTasks entries plus live SessionCrons entries
+// whose "id" is not already represented in BackgroundTasks (dedupe by id). The
+// rule is deliberately type-agnostic — it does not matter whether bash /
+// subagent / workflow / cron children carry type:"workflow", type:"cron", or
+// anything else. R5 note: real payloads observed so far only carry
+// type:"workflow" and type:"cron" entries (see wfBackgroundTasks in
+// workflow_forward_test.go); whether spawned subagents/bash appear as their own
+// entries is unverified, but the count stays contract-compliant either way
+// (transient within-turn subagents would simply not be present).
+func countLiveChildren(tasks, crons []map[string]any) int {
+	count := 0
+	ids := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		if !childEntryLive(t) {
+			continue
+		}
+		count++
+		if id, ok := t["id"].(string); ok && id != "" {
+			ids[id] = true
+		}
+	}
+	for _, c := range crons {
+		if !childEntryLive(c) {
+			continue
+		}
+		if id, ok := c["id"].(string); ok && id != "" && ids[id] {
+			continue // already counted as a background task
+		}
+		count++
+	}
+	return count
+}
+
+// workflowChildrenSnapshotEvent builds the children_snapshot wire event for a
+// SubagentStop payload: a point-in-time live-background-child count for the
+// session, carried on a dedicated kind that mints no agent/run rows on the
+// daemon. AgentID stays empty by design (this is a session-level snapshot, not
+// an agent lifecycle delta); JobID rides GROVE_FLOW_JOB_ID like the other
+// builders so the daemon can key the owning session, falling back to
+// ClaudeSessionID. LiveBashChildren carries the still-live background bash jobs
+// (type=="shell" entries) so the daemon can reconcile bash liveness (start new,
+// clear absent) against this authoritative turn-boundary view (F6).
+func workflowChildrenSnapshotEvent(data SubagentStopInput, now time.Time) models.WorkflowEvent {
+	return models.WorkflowEvent{
+		Kind:             models.WorkflowChildrenSnapshot,
+		JobID:            os.Getenv("GROVE_FLOW_JOB_ID"),
+		ClaudeSessionID:  data.SessionID,
+		LiveChildren:     countLiveChildren(data.BackgroundTasks, data.SessionCrons),
+		LiveBashChildren: liveBashChildren(data.BackgroundTasks),
+		Timestamp:        now,
+		Source:           models.WorkflowSourceHooks,
+	}
+}
+
+// liveBashChildren extracts the live background *bash* jobs from a SubagentStop
+// background_tasks[] list: the entries whose type is "shell" (probe-confirmed
+// value for a `run_in_background: true` Bash) and whose status is not terminal.
+// Each yields a BashChildRef{ID, Command}. Returns nil when none — the daemon
+// treats a nil/empty list on a hook-sourced snapshot as "no live bash", which
+// clears any it was tracking for the session.
+func liveBashChildren(tasks []map[string]any) []models.BashChildRef {
+	var out []models.BashChildRef
+	for _, t := range tasks {
+		if typ, _ := t["type"].(string); typ != "shell" {
+			continue
+		}
+		if !childEntryLive(t) {
+			continue
+		}
+		id, _ := t["id"].(string)
+		if id == "" {
+			continue
+		}
+		cmd, _ := t["command"].(string)
+		out = append(out, models.BashChildRef{ID: id, Command: cmd})
+	}
+	return out
+}
+
+// workflowEventFromBashStart builds the bash_started wire event for a
+// backgrounded Bash tool-use. The background task id (from PostToolUse
+// tool_response.backgroundTaskId) is the AgentID; the command is the Name (the
+// render title). JobID rides GROVE_FLOW_JOB_ID, falling back to the claude
+// session id, like the other builders.
+func workflowEventFromBashStart(sessionID, backgroundTaskID, command string, now time.Time) models.WorkflowEvent {
+	return models.WorkflowEvent{
+		Kind:            models.WorkflowBashStarted,
+		JobID:           os.Getenv("GROVE_FLOW_JOB_ID"),
+		ClaudeSessionID: sessionID,
+		AgentID:         backgroundTaskID,
+		Name:            command,
+		Timestamp:       now,
+		Source:          models.WorkflowSourceHooks,
+	}
+}
+
+// extractBackgroundTaskID returns the backgroundTaskId a PostToolUse Bash
+// tool_response carries when the command was launched with run_in_background
+// (probe-confirmed field on the Bash result object). Returns "" for a
+// foreground command or any other shape. tool_response decodes from JSON as
+// map[string]any.
+func extractBackgroundTaskID(resp any) string {
+	m, ok := resp.(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := m["backgroundTaskId"].(string)
+	return id
+}
+
+// workflowEventForwardable reports whether a workflow event carries enough
+// keying to be worth forwarding. For WorkflowChildrenSnapshot the count keys
+// on the owning session, so a job id OR claude session id suffices (AgentID is
+// empty by design). Every other kind requires a non-empty AgentID — byte-
+// equivalent to the historical `ev.AgentID == ""` early-return.
+func workflowEventForwardable(ev models.WorkflowEvent) bool {
+	if ev.Kind == models.WorkflowChildrenSnapshot {
+		return ev.JobID != "" || ev.ClaudeSessionID != ""
+	}
+	return ev.AgentID != ""
+}
+
 // forwardWorkflowEvent publishes a workflow event to the daemon,
 // best-effort: it never fails the hook, never writes to stdout (hook
 // response contracts must stay pristine — errors go to stderr via log), and
 // waits at most workflowForwardTimeout. Forwarding is skipped when the
 // repo-scoped marker file disables the "workflow-forwarding" hook or when
-// the event has no agent id to key on.
+// the event lacks the keying workflowEventForwardable requires.
 func forwardWorkflowEvent(client daemon.Client, workingDir string, ev models.WorkflowEvent) {
-	if client == nil || ev.AgentID == "" {
+	if client == nil || !workflowEventForwardable(ev) {
 		return
 	}
 	if IsHookDisabledByMarker(workingDir, WorkflowForwardingHookName) {

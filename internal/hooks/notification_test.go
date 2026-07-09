@@ -34,3 +34,37 @@ func TestIsWaitingNotification(t *testing.T) {
 		}
 	}
 }
+
+// TestIsIdleNudgeNotification pins the F1 un-stick signal: the generic
+// post-turn idle nudge ("Claude is waiting for your input") is the one
+// notification RunNotificationHook uses to clear a session stranded at
+// pending_user by a Stop-less deny. It must match ONLY that nudge — never a
+// blocked-on-user prompt (those legitimately set pending_user and must stay
+// loud) and never an unrelated notification.
+func TestIsIdleNudgeNotification(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want bool
+	}{
+		// The idle nudge — must match (case-insensitive).
+		{"Claude is waiting for your input", true},
+		{"CLAUDE IS WAITING FOR YOUR INPUT", true},
+		// Blocked-on-user prompts — must NOT match (they set pending_user).
+		{"Claude needs your permission", false},
+		{"Claude Code needs your approval for the plan", false},
+		{"Claude Code needs your attention", false},
+		// Unrelated — must NOT match.
+		{"Test notification", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := isIdleNudgeNotification(c.msg); got != c.want {
+			t.Errorf("isIdleNudgeNotification(%q) = %v, want %v", c.msg, got, c.want)
+		}
+		// The two classifiers must be mutually exclusive: a message that sets
+		// pending_user must never also be treated as the clear signal.
+		if isWaitingNotification(c.msg) && isIdleNudgeNotification(c.msg) {
+			t.Errorf("message %q matched BOTH classifiers — they must be disjoint", c.msg)
+		}
+	}
+}

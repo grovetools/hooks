@@ -75,16 +75,7 @@ func RunNotificationHook() {
 		// For interactive_agent sessions the directory is named with the Claude
 		// UUID, but the real session_id is the flow job ID. Mirror the Stop
 		// hook: read metadata.json to resolve the actual session id.
-		actualSessionID := data.SessionID
-		metadataFile := filepath.Join(paths.StateDir(), "hooks", "sessions", data.SessionID, "metadata.json")
-		if metadataContent, err := os.ReadFile(metadataFile); err == nil {
-			var metadata struct {
-				SessionID string `json:"session_id"`
-			}
-			if err := json.Unmarshal(metadataContent, &metadata); err == nil && metadata.SessionID != "" {
-				actualSessionID = metadata.SessionID
-			}
-		}
+		actualSessionID := resolveActualSessionID(data.SessionID)
 
 		slog := logging.NewLogger("hooks.notification")
 		if err := ctx.Storage.UpdateSessionStatus(actualSessionID, "pending_user"); err != nil {
@@ -103,7 +94,54 @@ func RunNotificationHook() {
 		// Push an ntfy notification so the user knows an agent is blocked
 		// waiting on them (the "waiting-on-you" half of the notify scope).
 		sendWaitingNtfyNotification(ctx, actualSessionID, data.Message)
+	} else if isIdleNudgeNotification(data.Message) {
+		// The generic post-turn idle nudge ("Claude is waiting for your
+		// input"). It is NOT a block signal, but it IS an authoritative "the
+		// agent has returned to the idle input prompt" signal — it fires only
+		// after a turn ends, never while a prompt is on screen. Use it to clear
+		// a session stranded at pending_user: a permission DENY that ends the
+		// turn without a Stop hook (hard reject / interrupt) leaves nothing to
+		// supersede the pending_user set above, so the drawer stays loud
+		// indefinitely (F1). Revert to idle ONLY when the session is currently
+		// pending_user, so this never disturbs a running or genuinely-blocked
+		// agent. If a Stop already cleared it, GetSession returns idle and this
+		// is a no-op.
+		actualSessionID := resolveActualSessionID(data.SessionID)
+		slog := logging.NewLogger("hooks.notification")
+		if sessionData, err := ctx.Storage.GetSession(actualSessionID); err == nil && sessionData != nil {
+			if session, ok := sessionData.(*models.Session); ok && session != nil && session.Status == "pending_user" {
+				if err := ctx.Storage.UpdateSessionStatus(actualSessionID, "idle"); err != nil {
+					slog.WithFields(logrus.Fields{
+						"session_id": actualSessionID,
+						"error":      err.Error(),
+					}).Warn("Failed to clear stale pending_user to idle")
+				} else {
+					slog.WithFields(logrus.Fields{
+						"session_id": actualSessionID,
+					}).Debug("Cleared stale pending_user to idle on idle nudge (F1)")
+				}
+			}
+		}
 	}
+}
+
+// resolveActualSessionID maps a Claude session directory UUID to the real
+// session id used by the daemon/flow. For interactive_agent sessions the
+// directory is named with the Claude UUID while the real id is the flow job
+// id, recorded in the session's metadata.json. Falls back to the input id when
+// no metadata override is present (raw claude sessions).
+func resolveActualSessionID(sessionID string) string {
+	actualSessionID := sessionID
+	metadataFile := filepath.Join(paths.StateDir(), "hooks", "sessions", sessionID, "metadata.json")
+	if metadataContent, err := os.ReadFile(metadataFile); err == nil {
+		var metadata struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.Unmarshal(metadataContent, &metadata); err == nil && metadata.SessionID != "" {
+			actualSessionID = metadata.SessionID
+		}
+	}
+	return actualSessionID
 }
 
 func RunPreToolUseHook() {
@@ -160,6 +198,17 @@ func RunPreToolUseHook() {
 		storeCommandLinkID(data.SessionID, linkID)
 		if entry, ok := buildPreCommandEntry(data.ToolName, data.ToolInput, linkID, preCwd, time.Now()); ok {
 			appendCommandEntries(data.SessionID, []commandEntry{entry})
+		}
+	}
+
+	// Stash a spawn description for the child's SubagentStart to pick up as its
+	// live title (F5). The parent's PreToolUse for an Agent/Task tool-use carries
+	// the 3–5 word `description`; SubagentStart carries none and the child's
+	// meta.json is often not written yet, so without this a running child shows
+	// no title. See pending_titles.go for the correlation caveats.
+	if isAgentSpawnTool(data.ToolName) {
+		if desc := stringField(data.ToolInput, "description"); desc != "" {
+			pushPendingTitle(data.SessionID, desc, time.Now())
 		}
 	}
 
@@ -233,6 +282,17 @@ func RunPostToolUseHook() {
 			appendCommandEntries(data.SessionID, []commandEntry{entry})
 		}
 		clearCommandLinkID(data.SessionID)
+
+		// Forward a bash-child-started event when this was a backgrounded Bash
+		// (tool_response.backgroundTaskId present). This is the daemon's only
+		// spawn signal for a session with no subagent — such a session never
+		// fires SubagentStop, so its background bash would otherwise be invisible
+		// (F6). Best-effort, same bounded-timeout path as the other forwards.
+		if taskID := extractBackgroundTaskID(data.ToolResponse); taskID != "" {
+			cmd, _ := extractBashCommand(data.ToolInput)
+			ev := workflowEventFromBashStart(data.SessionID, taskID, cmd, time.Now())
+			forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), ev)
+		}
 	}
 
 	// Handle ExitPlanMode - save Claude plans to grove-flow
@@ -955,6 +1015,14 @@ func RunSubagentStartHook() {
 	}
 
 	ev := workflowEventFromSubagentStart(data, time.Now())
+	// Consume one queued spawn description (pushed by the parent's PreToolUse).
+	// Always pop for a genuine spawn — even when meta.json already supplied a
+	// Name — so the FIFO stays aligned 1:1 with spawns; use it only as the title
+	// when nothing better was found. AgentType (set on ev above) is the floor if
+	// both are empty.
+	if desc := popPendingTitle(data.SessionID, time.Now()); desc != "" && ev.Name == "" {
+		ev.Name = desc
+	}
 	forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), ev)
 }
 
@@ -1033,6 +1101,19 @@ func RunSubagentStopHook() {
 		ev := workflowEventFromSubagentStop(data, time.Now())
 		forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), ev)
 	}
+
+	// Unconditionally forward a live-background-child count snapshot. While a
+	// backgrounded Workflow/bash job runs, the main session fires a SubagentStop
+	// at each turn boundary carrying background_tasks[]/session_crons[]; this is
+	// the count-bearing signal that lands on models.Session.LiveChildren (used
+	// by treemux's "N bg" / idle-busy render). It rides the same best-effort
+	// timeout path as the block above — no new synchronous daemon call — and its
+	// dedicated children_snapshot kind mints no agent rows, so the phantom-
+	// suppression guard shouldForwardSubagentStop stays byte-identical. Phantom
+	// session-init stops carry empty task lists → a harmless zero snapshot that
+	// clears any stale idle-busy.
+	snap := workflowChildrenSnapshotEvent(data, time.Now())
+	forwardWorkflowEvent(ctx.DaemonClient, forwardingWorkingDir(data.Cwd), snap)
 }
 
 // ExecuteRepoHookCommands executes on_stop commands from grove.yml
