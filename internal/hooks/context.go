@@ -262,6 +262,18 @@ func (hc *HookContext) EnsureSessionExists(sessionID, transcriptPath string) err
 		provider = "claude"
 	}
 
+	// Resolve the owning daemon scope so the crash-recovery registry record
+	// carries it. Without this the record's Scope is empty, and a scoped daemon
+	// (a) recovers zero sessions on restart via RecoverSessionsForScope and
+	// (b) never adopts the PID for a dead unmanaged agent in the reaper
+	// (both gate on metadata.Scope == daemon scope). Prefer the explicit
+	// GROVE_SCOPE the session was launched under; otherwise resolve from the
+	// session's working directory exactly as core's daemon factory does.
+	scope := os.Getenv("GROVE_SCOPE")
+	if scope == "" {
+		scope = workspace.ResolveScope(workingDir)
+	}
+
 	// Build core session metadata for the registry
 	coreMetadata := sessions.SessionMetadata{
 		SessionID:        sessionID,
@@ -274,6 +286,7 @@ func (hc *HookContext) EnsureSessionExists(sessionID, transcriptPath string) err
 		User:             username,
 		StartedAt:        now,
 		TranscriptPath:   transcriptPath,
+		Scope:            scope,
 	}
 
 	// Check for grove-flow integration environment variables
